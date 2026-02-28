@@ -1,6 +1,7 @@
 const { Router } = require("express");
 const db = require("../db/pool");
 const { requirePartyToken } = require("../middleware/auth");
+const { isValidLength, validateUUIDParam, isValidUUID } = require("../middleware/validation");
 
 const router = Router();
 
@@ -23,7 +24,7 @@ router.get("/", async (req, res, next) => {
 });
 
 // GET /api/candidates/:id — single candidate with all answers
-router.get("/:id", async (req, res, next) => {
+router.get("/:id", validateUUIDParam("id"), async (req, res, next) => {
   try {
     const { rows: cRows } = await db.query(
       `SELECT c.id, c.name, c.photo_url, c.bio, c.created_at,
@@ -97,6 +98,17 @@ router.post(
         return res.status(400).json({ error: "Ehdokkaan nimi vaaditaan" });
       }
 
+      // Validate field lengths
+      if (!isValidLength(name, 255)) {
+        return res.status(400).json({ error: "Ehdokkaan nimi on liian pitkä (maksimi: 255 merkkiä)" });
+      }
+      if (photoUrl && !isValidLength(photoUrl, 500)) {
+        return res.status(400).json({ error: "Kuvan URL on liian pitkä (maksimi: 500 merkkiä)" });
+      }
+      if (bio && !isValidLength(bio, 1000)) {
+        return res.status(400).json({ error: "Biografia on liian pitkä (maksimi: 1000 merkkiä)" });
+      }
+
       const { rows } = await db.query(
         `INSERT INTO candidates (party_id, name, photo_url, bio)
          VALUES ($1, $2, $3, $4)
@@ -114,9 +126,21 @@ router.post(
 router.put(
   "/party/:partyToken/candidates/:id",
   requirePartyToken,
+  validateUUIDParam("id"),
   async (req, res, next) => {
     try {
       const { name, photoUrl, bio } = req.body;
+
+      // Validate field lengths
+      if (name && !isValidLength(name, 255)) {
+        return res.status(400).json({ error: "Ehdokkaan nimi on liian pitkä (maksimi: 255 merkkiä)" });
+      }
+      if (photoUrl && !isValidLength(photoUrl, 500)) {
+        return res.status(400).json({ error: "Kuvan URL on liian pitkä (maksimi: 500 merkkiä)" });
+      }
+      if (bio && !isValidLength(bio, 1000)) {
+        return res.status(400).json({ error: "Biografia on liian pitkä (maksimi: 1000 merkkiä)" });
+      }
 
       // Verify candidate belongs to this party
       const { rows: existing } = await db.query(
@@ -148,6 +172,7 @@ router.put(
 router.put(
   "/party/:partyToken/candidates/:id/answers",
   requirePartyToken,
+  validateUUIDParam("id"),
   async (req, res, next) => {
     const client = await db.getClient();
     try {
@@ -171,8 +196,18 @@ router.put(
 
       let count = 0;
       for (const [questionId, answer] of Object.entries(answers)) {
+        // Validate question ID is a valid UUID
+        if (!isValidUUID(questionId)) {
+          continue;
+        }
+        
         const value = parseInt(answer.value, 10);
         if (isNaN(value) || value < 0 || value > 4) continue;
+
+        // Validate explanation length if provided
+        if (answer.explanation && !isValidLength(answer.explanation, 500)) {
+          continue;
+        }
 
         await client.query(
           `INSERT INTO candidate_answers (candidate_id, question_id, value, explanation)

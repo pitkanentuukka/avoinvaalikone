@@ -1,7 +1,8 @@
+const crypto = require("crypto");
 const db = require("../db/pool");
 
 /**
- * Admin auth via Bearer token.
+ * Admin auth via Bearer token (timing-safe comparison).
  * Header: Authorization: Bearer <ADMIN_SECRET>
  */
 function requireAdmin(req, res, next) {
@@ -10,9 +11,21 @@ function requireAdmin(req, res, next) {
     return res.status(401).json({ error: "Tunnistautuminen vaaditaan" });
   }
   const token = auth.slice(7);
-  if (token !== process.env.ADMIN_SECRET) {
+  const adminSecret = process.env.ADMIN_SECRET;
+  
+  // Use timing-safe comparison to prevent timing attacks
+  try {
+    const tokenBuffer = Buffer.from(token);
+    const secretBuffer = Buffer.from(adminSecret);
+    
+    if (tokenBuffer.length !== secretBuffer.length || !crypto.timingSafeEqual(tokenBuffer, secretBuffer)) {
+      return res.status(403).json({ error: "Virheellinen ylläpitotunniste" });
+    }
+  } catch (err) {
+    // timingSafeEqual throws if lengths don't match
     return res.status(403).json({ error: "Virheellinen ylläpitotunniste" });
   }
+  
   next();
 }
 

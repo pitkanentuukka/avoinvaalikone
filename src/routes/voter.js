@@ -1,5 +1,6 @@
 const { Router } = require("express");
 const db = require("../db/pool");
+const { isValidUUID, validateUUIDArray, isValidRange } = require("../middleware/validation");
 
 const router = Router();
 
@@ -24,6 +25,25 @@ router.post("/match", async (req, res, next) => {
     }
 
     const voterQuestionIds = Object.keys(answers);
+    
+    // Validate all question IDs are valid UUIDs
+    if (!voterQuestionIds.every(id => isValidUUID(id))) {
+      return res.status(400).json({ error: "Virheelliset kysymyksen tunnisteet" });
+    }
+    
+    // Validate all answer values are in range
+    for (const value of Object.values(answers)) {
+      if (!isValidRange(value, 0, 4)) {
+        return res.status(400).json({ error: "Vastaus-arvot tulee olla 0-4" });
+      }
+    }
+    
+    // Validate question set IDs if provided
+    if (Array.isArray(questionSetIds) && questionSetIds.length > 0) {
+      if (!validateUUIDArray(questionSetIds)) {
+        return res.status(400).json({ error: "Virheelliset kysymyssarjan tunnisteet" });
+      }
+    }
 
     // Optionally filter to only questions within certain sets
     let questionFilter = "";

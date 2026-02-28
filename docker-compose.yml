@@ -12,7 +12,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./migrations:/docker-entrypoint-initdb.d:ro
     ports:
-      - "5432:5432"
+      - "5433:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U vaalikone"]
       interval: 10s
@@ -31,6 +31,7 @@ services:
       PORT: 3000
       DATABASE_URL: postgresql://vaalikone:vaalikone_password@db:5432/vaalikone
       CORS_ORIGIN: http://localhost:8080
+      ADMIN_SECRET: password
     ports:
       - "3000:3000"
     depends_on:

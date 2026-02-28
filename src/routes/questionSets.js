@@ -1,6 +1,7 @@
 const { Router } = require("express");
 const db = require("../db/pool");
 const { requireAdmin } = require("../middleware/auth");
+const { isValidLength, validateUUIDParam } = require("../middleware/validation");
 
 const router = Router();
 
@@ -73,6 +74,21 @@ router.post("/", async (req, res, next) => {
         .status(400)
         .json({ error: "Järjestön nimi ja otsikko vaaditaan" });
     }
+    
+    // Validate field lengths
+    if (!isValidLength(ngoName, 255)) {
+      return res.status(400).json({ error: "Järjestön nimi on liian pitkä (maksimi: 255 merkkiä)" });
+    }
+    if (!isValidLength(title, 255)) {
+      return res.status(400).json({ error: "Otsikko on liian pitkä (maksimi: 255 merkkiä)" });
+    }
+    if (ngoEmail && !isValidLength(ngoEmail, 255)) {
+      return res.status(400).json({ error: "Sähköpostiosoite on liian pitkä (maksimi: 255 merkkiä)" });
+    }
+    if (logoUrl && !isValidLength(logoUrl, 500)) {
+      return res.status(400).json({ error: "Logon URL on liian pitkä (maksimi: 500 merkkiä)" });
+    }
+    
     if (!Array.isArray(questions) || questions.length === 0) {
       return res
         .status(400)
@@ -93,6 +109,11 @@ router.post("/", async (req, res, next) => {
     for (let i = 0; i < questions.length; i++) {
       const stmt = questions[i]?.statement || questions[i]; // accept string or object
       if (typeof stmt !== "string" || !stmt.trim()) continue;
+
+      // Validate statement length
+      if (!isValidLength(stmt, 500)) {
+        continue;
+      }
 
       const { rows } = await client.query(
         `INSERT INTO questions (question_set_id, statement, sort_order)
@@ -152,7 +173,7 @@ router.get("/admin", requireAdmin, async (req, res, next) => {
 });
 
 // PATCH /api/admin/question-sets/:id/approve
-router.patch("/admin/:id/approve", requireAdmin, async (req, res, next) => {
+router.patch("/admin/:id/approve", requireAdmin, validateUUIDParam("id"), async (req, res, next) => {
   try {
     const { rows } = await db.query(
       `UPDATE question_sets SET status = 'approved', reviewed_at = now()
@@ -173,7 +194,7 @@ router.patch("/admin/:id/approve", requireAdmin, async (req, res, next) => {
 });
 
 // PATCH /api/admin/question-sets/:id/reject
-router.patch("/admin/:id/reject", requireAdmin, async (req, res, next) => {
+router.patch("/admin/:id/reject", requireAdmin, validateUUIDParam("id"), async (req, res, next) => {
   try {
     const { rows } = await db.query(
       `UPDATE question_sets SET status = 'rejected', reviewed_at = now()

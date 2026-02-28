@@ -2,6 +2,7 @@ const { Router } = require("express");
 const { v4: uuidv4 } = require("uuid");
 const db = require("../db/pool");
 const { requireAdmin } = require("../middleware/auth");
+const { isValidLength, validateUUIDParam } = require("../middleware/validation");
 
 const router = Router();
 
@@ -23,6 +24,14 @@ router.post("/", requireAdmin, async (req, res, next) => {
     const { name, email } = req.body;
     if (!name?.trim()) {
       return res.status(400).json({ error: "Puolueen nimi vaaditaan" });
+    }
+    
+    // Validate field lengths
+    if (!isValidLength(name, 100)) {
+      return res.status(400).json({ error: "Puolueen nimi on liian pitkä (maksimi: 100 merkkiä)" });
+    }
+    if (email && !isValidLength(email, 255)) {
+      return res.status(400).json({ error: "Sähköpostiosoite on liian pitkä (maksimi: 255 merkkiä)" });
     }
 
     // Generate a URL-safe token
@@ -50,7 +59,7 @@ router.post("/", requireAdmin, async (req, res, next) => {
 });
 
 // DELETE /api/admin/parties/:id — remove a party
-router.delete("/:id", requireAdmin, async (req, res, next) => {
+router.delete("/:id", requireAdmin, validateUUIDParam("id"), async (req, res, next) => {
   try {
     const { rowCount } = await db.query("DELETE FROM parties WHERE id = $1", [
       req.params.id,
