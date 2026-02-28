@@ -1,0 +1,22 @@
+{
+  "name": "vaalikone-backend",
+  "version": "1.0.0",
+  "description": "Voter advisory machine backend — Vaalikone 2026",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "migrate": "node migrations/run.js",
+    "seed": "node migrations/seed.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "pg": "^8.13.0",
+    "cors": "^2.8.5",
+    "helmet": "^8.0.0",
+    "morgan": "^1.10.0",
+    "dotenv": "^16.4.5",
+    "uuid": "^10.0.0",
+    "express-rate-limit": "^7.4.0"
+  }
+}
