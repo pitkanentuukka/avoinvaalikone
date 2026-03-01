@@ -1,32 +1,21 @@
 const { Router } = require("express");
 const db = require("../db/pool");
 const { requireAdmin } = require("../middleware/auth");
-const { isValidLength, validateUUIDParam } = require("../middleware/validation");
+const { isValidLength, isValidUrl, isValidEmail, validateUUIDParam } = require("../middleware/validation");
 
-const router = Router();
+// ─── Public router (/api/question-sets) ──────────────────────────────────────
 
-// ─── Public ───
+const publicRouter = Router();
 
 // GET /api/question-sets — list approved sets with their questions
-router.get("/", async (req, res, next) => {
+publicRouter.get("/", async (req, res, next) => {
   try {
-    const { status } = req.query; // optional filter
-    let where = "WHERE qs.status = 'approved'";
-    const params = [];
-
-    // Admin can filter by any status via query param
-    if (status && ["pending", "approved", "rejected"].includes(status)) {
-      where = "WHERE qs.status = $1";
-      params.push(status);
-    }
-
     const { rows: sets } = await db.query(
       `SELECT qs.id, qs.ngo_name, qs.ngo_email, qs.logo_url, qs.title,
               qs.status, qs.submitted_at, qs.reviewed_at
        FROM question_sets qs
-       ${where}
-       ORDER BY qs.submitted_at`,
-      params
+       WHERE qs.status = 'approved'
+       ORDER BY qs.submitted_at`
     );
 
     // Fetch questions for each set
@@ -50,21 +39,14 @@ router.get("/", async (req, res, next) => {
       });
     }
 
-    const result = sets.map((s) => ({
-      ...s,
-      questions: questionsMap[s.id] || [],
-    }));
-
-    res.json(result);
+    res.json(sets.map((s) => ({ ...s, questions: questionsMap[s.id] || [] })));
   } catch (err) {
     next(err);
   }
 });
 
-// ─── NGO submission ───
-
 // POST /api/question-sets — submit a new question set
-router.post("/", async (req, res, next) => {
+publicRouter.post("/", async (req, res, next) => {
   const client = await db.getClient();
   try {
     const { ngoName, ngoEmail, logoUrl, title, questions } = req.body;
@@ -74,7 +56,7 @@ router.post("/", async (req, res, next) => {
         .status(400)
         .json({ error: "Järjestön nimi ja otsikko vaaditaan" });
     }
-    
+
     // Validate field lengths
     if (!isValidLength(ngoName, 255)) {
       return res.status(400).json({ error: "Järjestön nimi on liian pitkä (maksimi: 255 merkkiä)" });
@@ -85,10 +67,16 @@ router.post("/", async (req, res, next) => {
     if (ngoEmail && !isValidLength(ngoEmail, 255)) {
       return res.status(400).json({ error: "Sähköpostiosoite on liian pitkä (maksimi: 255 merkkiä)" });
     }
+    if (ngoEmail && !isValidEmail(ngoEmail)) {
+      return res.status(400).json({ error: "Virheellinen sähköpostiosoite" });
+    }
     if (logoUrl && !isValidLength(logoUrl, 500)) {
       return res.status(400).json({ error: "Logon URL on liian pitkä (maksimi: 500 merkkiä)" });
     }
-    
+    if (logoUrl && !isValidUrl(logoUrl)) {
+      return res.status(400).json({ error: "Logon URL on virheellinen (vaaditaan http:// tai https://)" });
+    }
+
     if (!Array.isArray(questions) || questions.length === 0) {
       return res
         .status(400)
@@ -133,10 +121,12 @@ router.post("/", async (req, res, next) => {
   }
 });
 
-// ─── Admin ───
+// ─── Admin router (/api/admin/question-sets) ──────────────────────────────────
+
+const adminRouter = Router();
 
 // GET /api/admin/question-sets — list ALL sets (any status)
-router.get("/admin", requireAdmin, async (req, res, next) => {
+adminRouter.get("/", requireAdmin, async (req, res, next) => {
   try {
     const { rows: sets } = await db.query(
       `SELECT qs.id, qs.ngo_name, qs.ngo_email, qs.logo_url, qs.title,
@@ -173,7 +163,7 @@ router.get("/admin", requireAdmin, async (req, res, next) => {
 });
 
 // PATCH /api/admin/question-sets/:id/approve
-router.patch("/admin/:id/approve", requireAdmin, validateUUIDParam("id"), async (req, res, next) => {
+adminRouter.patch("/:id/approve", requireAdmin, validateUUIDParam("id"), async (req, res, next) => {
   try {
     const { rows } = await db.query(
       `UPDATE question_sets SET status = 'approved', reviewed_at = now()
@@ -183,10 +173,6 @@ router.patch("/admin/:id/approve", requireAdmin, validateUUIDParam("id"), async 
     if (rows.length === 0) {
       return res.status(404).json({ error: "Kysymyssarjaa ei löytynyt" });
     }
-
-    // TODO: send email notifications to candidates about new questions
-    // This would integrate with an email service (e.g. Resend, SendGrid)
-
     res.json(rows[0]);
   } catch (err) {
     next(err);
@@ -194,7 +180,7 @@ router.patch("/admin/:id/approve", requireAdmin, validateUUIDParam("id"), async 
 });
 
 // PATCH /api/admin/question-sets/:id/reject
-router.patch("/admin/:id/reject", requireAdmin, validateUUIDParam("id"), async (req, res, next) => {
+adminRouter.patch("/:id/reject", requireAdmin, validateUUIDParam("id"), async (req, res, next) => {
   try {
     const { rows } = await db.query(
       `UPDATE question_sets SET status = 'rejected', reviewed_at = now()
@@ -210,4 +196,4 @@ router.patch("/admin/:id/reject", requireAdmin, validateUUIDParam("id"), async (
   }
 });
 
-module.exports = router;
+module.exports = { publicRouter, adminRouter };

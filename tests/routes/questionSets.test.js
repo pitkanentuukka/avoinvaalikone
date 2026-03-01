@@ -107,9 +107,9 @@ describe("POST /api/question-sets", () => {
   });
 });
 
-// ─── GET /api/admin/question-sets (via /admin route) ─────────────────────────
+// ─── GET /api/admin/question-sets ────────────────────────────────────────────
 
-describe("GET /api/admin/question-sets/admin", () => {
+describe("GET /api/admin/question-sets", () => {
   test("all statuses sorted correctly → 200", async () => {
     const sets = [
       { id: "s1", status: "pending", submitted_at: new Date() },
@@ -119,30 +119,29 @@ describe("GET /api/admin/question-sets/admin", () => {
     db.query.mockResolvedValueOnce({ rows: [] }); // questions
 
     const res = await request(app)
-      .get("/api/admin/question-sets/admin")
+      .get("/api/admin/question-sets")
       .set("Authorization", authHeader);
     expect(res.status).toBe(200);
     expect(res.body).toHaveLength(2);
   });
 
   test("no auth → 401", async () => {
-    const res = await request(app).get("/api/admin/question-sets/admin");
+    const res = await request(app).get("/api/admin/question-sets");
     expect(res.status).toBe(401);
   });
 });
 
-// ─── PATCH /api/admin/question-sets/admin/:id/approve ────────────────────────
-// Note: router is mounted at /api/admin/question-sets; route is /admin/:id/approve
+// ─── PATCH /api/admin/question-sets/:id/approve ───────────────────────────────
 
-describe("PATCH /api/admin/question-sets/admin/:id/approve", () => {
+describe("PATCH /api/admin/question-sets/:id/approve", () => {
   test("not admin → 401", async () => {
-    const res = await request(app).patch(`/api/admin/question-sets/admin/${VALID_UUID}/approve`);
+    const res = await request(app).patch(`/api/admin/question-sets/${VALID_UUID}/approve`);
     expect(res.status).toBe(401);
   });
 
   test("invalid UUID → 400", async () => {
     const res = await request(app)
-      .patch("/api/admin/question-sets/admin/bad-id/approve")
+      .patch("/api/admin/question-sets/bad-id/approve")
       .set("Authorization", authHeader);
     expect(res.status).toBe(400);
   });
@@ -150,7 +149,7 @@ describe("PATCH /api/admin/question-sets/admin/:id/approve", () => {
   test("not found → 404", async () => {
     db.query.mockResolvedValueOnce({ rows: [] });
     const res = await request(app)
-      .patch(`/api/admin/question-sets/admin/${VALID_UUID}/approve`)
+      .patch(`/api/admin/question-sets/${VALID_UUID}/approve`)
       .set("Authorization", authHeader);
     expect(res.status).toBe(404);
   });
@@ -159,24 +158,24 @@ describe("PATCH /api/admin/question-sets/admin/:id/approve", () => {
     const updated = { id: VALID_UUID, status: "approved" };
     db.query.mockResolvedValueOnce({ rows: [updated] });
     const res = await request(app)
-      .patch(`/api/admin/question-sets/admin/${VALID_UUID}/approve`)
+      .patch(`/api/admin/question-sets/${VALID_UUID}/approve`)
       .set("Authorization", authHeader);
     expect(res.status).toBe(200);
     expect(res.body.status).toBe("approved");
   });
 });
 
-// ─── PATCH /api/admin/question-sets/admin/:id/reject ─────────────────────────
+// ─── PATCH /api/admin/question-sets/:id/reject ────────────────────────────────
 
-describe("PATCH /api/admin/question-sets/admin/:id/reject", () => {
+describe("PATCH /api/admin/question-sets/:id/reject", () => {
   test("not admin → 401", async () => {
-    const res = await request(app).patch(`/api/admin/question-sets/admin/${VALID_UUID}/reject`);
+    const res = await request(app).patch(`/api/admin/question-sets/${VALID_UUID}/reject`);
     expect(res.status).toBe(401);
   });
 
   test("invalid UUID → 400", async () => {
     const res = await request(app)
-      .patch("/api/admin/question-sets/admin/bad-id/reject")
+      .patch("/api/admin/question-sets/bad-id/reject")
       .set("Authorization", authHeader);
     expect(res.status).toBe(400);
   });
@@ -184,7 +183,7 @@ describe("PATCH /api/admin/question-sets/admin/:id/reject", () => {
   test("not found → 404", async () => {
     db.query.mockResolvedValueOnce({ rows: [] });
     const res = await request(app)
-      .patch(`/api/admin/question-sets/admin/${VALID_UUID}/reject`)
+      .patch(`/api/admin/question-sets/${VALID_UUID}/reject`)
       .set("Authorization", authHeader);
     expect(res.status).toBe(404);
   });
@@ -193,7 +192,7 @@ describe("PATCH /api/admin/question-sets/admin/:id/reject", () => {
     const updated = { id: VALID_UUID, status: "rejected" };
     db.query.mockResolvedValueOnce({ rows: [updated] });
     const res = await request(app)
-      .patch(`/api/admin/question-sets/admin/${VALID_UUID}/reject`)
+      .patch(`/api/admin/question-sets/${VALID_UUID}/reject`)
       .set("Authorization", authHeader);
     expect(res.status).toBe(200);
     expect(res.body.status).toBe("rejected");

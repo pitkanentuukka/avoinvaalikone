@@ -2,7 +2,7 @@ const { Router } = require("express");
 const { v4: uuidv4 } = require("uuid");
 const db = require("../db/pool");
 const { requireAdmin } = require("../middleware/auth");
-const { isValidLength, validateUUIDParam } = require("../middleware/validation");
+const { isValidLength, isValidEmail, validateUUIDParam } = require("../middleware/validation");
 
 const router = Router();
 
@@ -32,6 +32,9 @@ router.post("/", requireAdmin, async (req, res, next) => {
     }
     if (email && !isValidLength(email, 255)) {
       return res.status(400).json({ error: "Sähköpostiosoite on liian pitkä (maksimi: 255 merkkiä)" });
+    }
+    if (email && !isValidEmail(email)) {
+      return res.status(400).json({ error: "Virheellinen sähköpostiosoite" });
     }
 
     // Generate a URL-safe token

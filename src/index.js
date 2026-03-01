@@ -7,7 +7,7 @@ const morgan = require("morgan");
 const rateLimit = require("express-rate-limit");
 
 const partiesRouter = require("./routes/parties");
-const questionSetsRouter = require("./routes/questionSets");
+const { publicRouter: questionSetsPublicRouter, adminRouter: questionSetsAdminRouter } = require("./routes/questionSets");
 const candidatesRouter = require("./routes/candidates");
 const voterRouter = require("./routes/voter");
 
@@ -21,7 +21,9 @@ app.set('trust proxy', 1);
 // Redirect HTTP to HTTPS in production
 app.use((req, res, next) => {
   if (process.env.NODE_ENV === 'production' && req.header('x-forwarded-proto') !== 'https') {
-    return res.redirect(301, `https://${req.header('host')}${req.url}`);
+    // Use PUBLIC_HOST env var to avoid Host header injection attacks
+    const host = process.env.PUBLIC_HOST || req.header('host');
+    return res.redirect(301, `https://${host}${req.url}`);
   }
   next();
 });
@@ -76,11 +78,11 @@ app.get("/api/health", (req, res) => {
 
 // Admin routes (with rate limiting)
 app.use("/api/admin/parties", adminLimiter, partiesRouter);
-app.use("/api/admin/question-sets", adminLimiter, questionSetsRouter);
-app.use("/api/question-sets", questionSetsRouter);
+app.use("/api/admin/question-sets", adminLimiter, questionSetsAdminRouter);
 
-// NGO submission (rate limited)
+// Public question-set routes (NGO submission rate limited)
 app.post("/api/question-sets", submissionLimiter);
+app.use("/api/question-sets", questionSetsPublicRouter);
 
 // Candidate routes
 //   Public:  GET /api/candidates, GET /api/candidates/:id

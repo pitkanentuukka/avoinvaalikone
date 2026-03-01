@@ -2,6 +2,8 @@ const {
   isValidUUID,
   isValidLength,
   isValidRange,
+  isValidUrl,
+  isValidEmail,
   validateUUIDArray,
   validateUUIDParam,
   validateBodyField,
@@ -95,6 +97,54 @@ describe("isValidRange", () => {
 
   test("non-numeric string returns false", () => {
     expect(isValidRange("abc", 0, 4)).toBe(false);
+  });
+});
+
+// ─── isValidUrl ───────────────────────────────────────────────────────────────
+
+describe("isValidUrl", () => {
+  test("https:// URL returns true", () => {
+    expect(isValidUrl("https://example.com/logo.png")).toBe(true);
+  });
+
+  test("http:// URL returns true", () => {
+    expect(isValidUrl("http://example.com/logo.png")).toBe(true);
+  });
+
+  test("javascript: scheme returns false", () => {
+    expect(isValidUrl("javascript:alert(1)")).toBe(false);
+  });
+
+  test("data: URI returns false", () => {
+    expect(isValidUrl("data:text/html,<h1>xss</h1>")).toBe(false);
+  });
+
+  test("bare domain (no scheme) returns false", () => {
+    expect(isValidUrl("example.com")).toBe(false);
+  });
+
+  test("null returns false", () => {
+    expect(isValidUrl(null)).toBe(false);
+  });
+});
+
+// ─── isValidEmail ─────────────────────────────────────────────────────────────
+
+describe("isValidEmail", () => {
+  test("valid email returns true", () => {
+    expect(isValidEmail("info@example.fi")).toBe(true);
+  });
+
+  test("missing @ returns false", () => {
+    expect(isValidEmail("notanemail.com")).toBe(false);
+  });
+
+  test("missing domain returns false", () => {
+    expect(isValidEmail("user@")).toBe(false);
+  });
+
+  test("null returns false", () => {
+    expect(isValidEmail(null)).toBe(false);
   });
 });
 

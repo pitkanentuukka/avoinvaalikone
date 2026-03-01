@@ -1,7 +1,7 @@
 const { Router } = require("express");
 const db = require("../db/pool");
 const { requirePartyToken } = require("../middleware/auth");
-const { isValidLength, validateUUIDParam, isValidUUID } = require("../middleware/validation");
+const { isValidLength, isValidUrl, validateUUIDParam, isValidUUID } = require("../middleware/validation");
 
 const router = Router();
 
@@ -105,6 +105,9 @@ router.post(
       if (photoUrl && !isValidLength(photoUrl, 500)) {
         return res.status(400).json({ error: "Kuvan URL on liian pitkä (maksimi: 500 merkkiä)" });
       }
+      if (photoUrl && !isValidUrl(photoUrl)) {
+        return res.status(400).json({ error: "Kuvan URL on virheellinen (vaaditaan http:// tai https://)" });
+      }
       if (bio && !isValidLength(bio, 1000)) {
         return res.status(400).json({ error: "Biografia on liian pitkä (maksimi: 1000 merkkiä)" });
       }
@@ -137,6 +140,9 @@ router.put(
       }
       if (photoUrl && !isValidLength(photoUrl, 500)) {
         return res.status(400).json({ error: "Kuvan URL on liian pitkä (maksimi: 500 merkkiä)" });
+      }
+      if (photoUrl && !isValidUrl(photoUrl)) {
+        return res.status(400).json({ error: "Kuvan URL on virheellinen (vaaditaan http:// tai https://)" });
       }
       if (bio && !isValidLength(bio, 1000)) {
         return res.status(400).json({ error: "Biografia on liian pitkä (maksimi: 1000 merkkiä)" });

@@ -13,16 +13,11 @@ function requireAdmin(req, res, next) {
   const token = auth.slice(7);
   const adminSecret = process.env.ADMIN_SECRET;
   
-  // Use timing-safe comparison to prevent timing attacks
-  try {
-    const tokenBuffer = Buffer.from(token);
-    const secretBuffer = Buffer.from(adminSecret);
-    
-    if (tokenBuffer.length !== secretBuffer.length || !crypto.timingSafeEqual(tokenBuffer, secretBuffer)) {
-      return res.status(403).json({ error: "Virheellinen ylläpitotunniste" });
-    }
-  } catch (err) {
-    // timingSafeEqual throws if lengths don't match
+  // Hash both values to a fixed length before comparing so the secret's
+  // length cannot be inferred from timing (timingSafeEqual requires equal lengths).
+  const tokenHash  = crypto.createHash("sha256").update(Buffer.from(token)).digest();
+  const secretHash = crypto.createHash("sha256").update(Buffer.from(adminSecret)).digest();
+  if (!crypto.timingSafeEqual(tokenHash, secretHash)) {
     return res.status(403).json({ error: "Virheellinen ylläpitotunniste" });
   }
   

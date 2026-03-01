@@ -2,7 +2,8 @@
  * Input validation utilities and middleware
  */
 
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID_REGEX  = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
  * Validate if a string is a valid UUID v4
@@ -24,6 +25,20 @@ function isValidLength(value, maxLength = 500) {
 function isValidRange(value, min, max) {
   const num = parseInt(value, 10);
   return !isNaN(num) && num >= min && num <= max;
+}
+
+/**
+ * Validate that a URL uses http:// or https:// (rejects javascript:, data:, etc.)
+ */
+function isValidUrl(value) {
+  return typeof value === 'string' && (value.startsWith('https://') || value.startsWith('http://'));
+}
+
+/**
+ * Validate a basic email address format
+ */
+function isValidEmail(value) {
+  return typeof value === 'string' && EMAIL_REGEX.test(value);
 }
 
 /**
@@ -72,6 +87,8 @@ module.exports = {
   isValidUUID,
   isValidLength,
   isValidRange,
+  isValidUrl,
+  isValidEmail,
   validateUUIDArray,
   validateUUIDParam,
   validateBodyField,
