@@ -106,10 +106,12 @@ app.use((err, req, res, next) => {
 });
 
 // ─── Start ───
-app.listen(PORT, () => {
-  console.log(`\n🗳️  Vaalikone API running on http://localhost:${PORT}`);
-  console.log(`   Environment: ${process.env.NODE_ENV || "development"}`);
-  console.log(`   CORS origin: ${process.env.CORS_ORIGIN || "http://localhost:5173"}\n`);
-});
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`\n🗳️  Vaalikone API running on http://localhost:${PORT}`);
+    console.log(`   Environment: ${process.env.NODE_ENV || "development"}`);
+    console.log(`   CORS origin: ${process.env.CORS_ORIGIN || "http://localhost:5173"}\n`);
+  });
+}
 
 module.exports = app;
