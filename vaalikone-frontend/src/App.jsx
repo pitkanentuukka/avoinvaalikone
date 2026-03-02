@@ -69,11 +69,11 @@ const api = {
     apiFetch("/admin/parties", { method: "POST", body: data, adminSecret: secret }),
   deleteParty: (secret, id) =>
     apiFetch(`/admin/parties/${id}`, { method: "DELETE", adminSecret: secret }),
-  getAllQuestionSets: (secret) => apiFetch("/question-sets/admin", { adminSecret: secret }),
+  getAllQuestionSets: (secret) => apiFetch("/admin/question-sets", { adminSecret: secret }),
   approveQuestionSet: (secret, id) =>
-    apiFetch(`/question-sets/admin/${id}/approve`, { method: "PATCH", adminSecret: secret }),
+    apiFetch(`/admin/question-sets/${id}/approve`, { method: "PATCH", adminSecret: secret }),
   rejectQuestionSet: (secret, id) =>
-    apiFetch(`/question-sets/admin/${id}/reject`, { method: "PATCH", adminSecret: secret }),
+    apiFetch(`/admin/question-sets/${id}/reject`, { method: "PATCH", adminSecret: secret }),
 };
 
 // ─── Constants ───
