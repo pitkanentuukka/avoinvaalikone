@@ -27,7 +27,7 @@ services:
     container_name: vaalikone-backend
     restart: unless-stopped
     environment:
-      NODE_ENV: production
+      NODE_ENV: development
       PORT: 3000
       DATABASE_URL: postgresql://vaalikone:vaalikone_password@db:5432/vaalikone
       CORS_ORIGIN: http://localhost:8080
