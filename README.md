@@ -1,102 +1,153 @@
-# Vaalikone 2026 — Backend API
+# Vaalikone 2026
 
-Node/Express + PostgreSQL backend for the voter advisory machine.
+Finnish voter advisory machine (election compass). Voters answer policy questions and are matched with candidates based on weighted answer similarity.
 
-## Setup
+**Stack:** Node.js + Express + PostgreSQL (backend) · React 19 + Vite (frontend) · Docker Compose (full stack)
+
+---
+
+## Quick Start
+
+### Docker (recommended)
 
 ```bash
-# 1. Install dependencies
-npm install
-
-# 2. Create your .env from the template
-cp .env.example .env
-# Edit .env with your PostgreSQL connection string and admin secret
-
-# 3. Create the database
-createdb vaalikone
-
-# 4. Run migrations
-npm run migrate
-
-# 5. (Optional) Seed with sample data
-npm run seed
-
-# 6. Start the server
-npm run dev
+docker compose up --build
 ```
+
+| Service  | URL                        |
+|----------|----------------------------|
+| Frontend | http://localhost:8080      |
+| Backend  | http://localhost:3000      |
+| Mailpit  | http://localhost:8025      |
+
+### Local Development
+
+**Backend** (repo root):
+
+```bash
+cp .env.example .env       # fill in DATABASE_URL and ADMIN_SECRET
+createdb vaalikone
+npm install
+npm run migrate
+npm run seed               # optional sample data
+npm run dev                # starts on http://localhost:3000
+```
+
+**Frontend** (`vaalikone-frontend/`):
+
+```bash
+cd vaalikone-frontend
+npm install
+npm run dev                # Vite dev server at http://localhost:5173
+```
+
+---
 
 ## Architecture
 
 ```
-src/
-├── index.js              # Express app entry point
-├── db/
-│   └── pool.js           # PostgreSQL connection pool
-├── middleware/
-│   └── auth.js           # Admin + party-token auth
-└── routes/
-    ├── parties.js        # Admin: manage parties
-    ├── questionSets.js   # NGO submission + admin approval
-    ├── candidates.js     # Candidate registration + answers
-    └── voter.js          # Match computation
+vaalikone/
+├── src/
+│   ├── index.js              # Express entry point, rate limiters, route mounting
+│   ├── db/pool.js            # PostgreSQL connection pool
+│   ├── email.js              # Nodemailer SMTP notifications
+│   ├── middleware/
+│   │   ├── auth.js           # requireAdmin (timing-safe Bearer), requirePartyToken
+│   │   └── validation.js     # UUID, field length, range validators
+│   └── routes/
+│       ├── parties.js        # Admin CRUD for political parties
+│       ├── questionSets.js   # NGO submissions + admin approval workflow
+│       ├── candidates.js     # Candidate profiles and answers
+│       └── voter.js          # Weighted similarity match algorithm
+├── migrations/
+│   ├── 001_initial.sql       # Core schema (all tables)
+│   ├── 002_candidate_email.sql
+│   ├── 003_voter_responses.sql
+│   ├── run.js                # Migration runner
+│   └── seed.js               # Sample data
+├── tests/
+│   ├── routes/               # Integration tests (supertest)
+│   └── unit/                 # Unit tests (auth, validation)
+├── vaalikone-frontend/
+│   ├── src/
+│   │   ├── App.jsx           # Entire SPA — views, components, API client
+│   │   └── main.jsx
+│   ├── Dockerfile            # Multi-stage Nginx build
+│   └── nginx.conf
+├── docker-compose.yml
+└── .env.example
 ```
+
+---
+
+## Database Schema
+
+| Table | Key Columns | Notes |
+|-------|-------------|-------|
+| **parties** | id, name, token, email | `token` is shared with party secretaries |
+| **candidates** | id, party_id, name, photo_url, bio, email | Linked to a party |
+| **candidate_answers** | candidate_id, question_id, value (0–4), explanation | Unique per candidate+question |
+| **question_sets** | id, ngo_name, ngo_email, title, status | `status`: `pending \| approved \| rejected` |
+| **questions** | id, question_set_id, statement, sort_order | Belongs to a question set |
+| **voter_responses** | session_id, question_id, value, answered_on | Anonymous analytics (no PII) |
+
+All primary keys are UUIDs (`gen_random_uuid()`). New migrations should follow the versioned pattern and update `schema_migrations`.
+
+---
 
 ## API Reference
 
 ### Authentication
 
-- **Admin endpoints** require `Authorization: Bearer <ADMIN_SECRET>` header.
-- **Candidate write endpoints** are gated by party token in the URL path (`/api/candidates/party/:partyToken/...`).
-- **Public endpoints** (voter, question set listing) require no auth.
+| Type | Mechanism |
+|------|-----------|
+| Admin | `Authorization: Bearer <ADMIN_SECRET>` header |
+| Party writes | Party token in URL: `/api/candidates/party/:partyToken/...` |
+| Public | No auth required |
 
 ---
 
 ### Health
 
-| Method | Path          | Auth  | Description    |
-|--------|---------------|-------|----------------|
-| GET    | /api/health   | None  | Health check   |
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/health` | Health check |
 
 ---
 
 ### Parties (Admin)
 
-| Method | Path                    | Auth  | Description         |
-|--------|-------------------------|-------|---------------------|
-| GET    | /api/admin/parties      | Admin | List all parties    |
-| POST   | /api/admin/parties      | Admin | Create a party      |
-| DELETE | /api/admin/parties/:id  | Admin | Delete a party      |
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/admin/parties` | List all parties |
+| POST | `/api/admin/parties` | Create party — response includes the secret `token` |
+| DELETE | `/api/admin/parties/:id` | Delete party |
 
-**POST body:**
 ```json
+// POST body
 { "name": "Puolueen nimi", "email": "sihteeri@puolue.fi" }
 ```
-
-**Response** includes the auto-generated `token` to share with the party secretary.
 
 ---
 
 ### Question Sets
 
-| Method | Path                                       | Auth  | Description                  |
-|--------|--------------------------------------------|-------|------------------------------|
-| GET    | /api/question-sets                         | None  | List approved sets + questions |
-| POST   | /api/question-sets                         | None  | NGO submits a new set (→ pending) |
-| GET    | /api/question-sets/admin                   | Admin | List ALL sets (any status)   |
-| PATCH  | /api/question-sets/admin/:id/approve       | Admin | Approve a set                |
-| PATCH  | /api/question-sets/admin/:id/reject        | Admin | Reject a set                 |
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/question-sets` | None | Approved sets + questions |
+| POST | `/api/question-sets` | None | NGO submits a set (→ pending) |
+| GET | `/api/admin/question-sets` | Admin | All sets (any status) |
+| PATCH | `/api/admin/question-sets/:id/approve` | Admin | Approve; sends email notifications |
+| PATCH | `/api/admin/question-sets/:id/reject` | Admin | Reject |
 
-**POST body (NGO submission):**
 ```json
+// POST body (NGO submission)
 {
   "ngoName": "Järjestön nimi",
   "ngoEmail": "info@jarjesto.fi",
   "logoUrl": "https://example.com/logo.png",
   "title": "Kysymyssarjan otsikko",
-  "questions": [
-    "Väittämä 1",
-    "Väittämä 2"
-  ]
+  "questions": ["Väittämä 1", "Väittämä 2"]
 }
 ```
 
@@ -106,85 +157,132 @@ src/
 
 **Public:**
 
-| Method | Path                  | Auth  | Description                      |
-|--------|-----------------------|-------|----------------------------------|
-| GET    | /api/candidates       | None  | List all candidates + party info |
-| GET    | /api/candidates/:id   | None  | Single candidate + all answers   |
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/candidates` | All candidates + party info |
+| GET | `/api/candidates/:id` | Single candidate + all answers |
 
 **Party-token gated:**
 
-| Method | Path                                                   | Auth        | Description              |
-|--------|--------------------------------------------------------|-------------|--------------------------|
-| GET    | /api/candidates/party/:partyToken                      | Party token | List party's candidates  |
-| POST   | /api/candidates/party/:partyToken                      | Party token | Register new candidate   |
-| PUT    | /api/candidates/party/:partyToken/candidates/:id       | Party token | Update profile           |
-| PUT    | /api/candidates/party/:partyToken/candidates/:id/answers | Party token | Save answers (upsert)   |
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/candidates/party/:partyToken` | Party's candidates |
+| POST | `/api/candidates/party/:partyToken` | Register new candidate |
+| PUT | `/api/candidates/party/:partyToken/candidates/:id` | Update profile |
+| PUT | `/api/candidates/party/:partyToken/candidates/:id/answers` | Save answers (upsert) |
 
-**POST body (new candidate):**
 ```json
-{
-  "name": "Matti Meikäläinen",
-  "photoUrl": "https://example.com/photo.jpg",
-  "bio": "Esittelyteksti..."
-}
-```
+// POST body (new candidate)
+{ "name": "Matti Meikäläinen", "email": "matti@example.fi", "photoUrl": "...", "bio": "..." }
 
-**PUT body (answers):**
-```json
+// PUT body (answers)
 {
   "answers": {
-    "question-uuid-1": { "value": 3, "explanation": "Perustelut..." },
-    "question-uuid-2": { "value": 1, "explanation": "" }
+    "question-uuid": { "value": 3, "explanation": "Perustelut..." }
   }
 }
 ```
 
 ---
 
-### Voter
+### Voter Match
 
-| Method | Path              | Auth | Description                    |
-|--------|-------------------|------|--------------------------------|
-| POST   | /api/voter/match  | None | Compute candidate match scores |
+| Method | Path | Auth | Rate limit |
+|--------|------|------|------------|
+| POST | `/api/voter/match` | None | 60 / min |
 
-**POST body:**
 ```json
+// Request
 {
-  "answers": {
-    "question-uuid-1": 4,
-    "question-uuid-2": 1,
-    "question-uuid-3": 3
-  },
-  "weights": {
-    "question-uuid-1": 3,
-    "question-uuid-2": 0
-  },
-  "questionSetIds": ["set-uuid-1", "set-uuid-2"]
+  "answers": { "question-uuid": 4 },
+  "weights": { "question-uuid": 3 },
+  "questionSetIds": ["set-uuid"]
 }
 ```
 
-- `answers` — voter's answer values (0–4), keyed by question UUID. **Required.**
-- `weights` — importance weights (0–3), keyed by question UUID. Optional, defaults to 1.
-- `questionSetIds` — restrict matching to specific sets. Optional.
+- `answers` — voter values 0–4 per question UUID (required)
+- `weights` — importance weights 0–3 per question UUID (optional, default 1)
+- `questionSetIds` — restrict to specific sets (optional)
 
-**Response:** Array of candidates sorted by `match` percentage (descending), each including their answers for comparison.
+**Match algorithm:** For each overlapping question:
+```
+similarity = 1 - |voterValue - candidateValue| / 4
+weighted   = similarity × (weight + 1)
+```
+Scores are averaged across all overlapping questions and returned as a percentage.
+
+**Response:** `{ sessionId, results: [...] }` — candidates sorted by `match` descending, each with their answers for comparison. The `sessionId` is also used to anonymously store voter responses for analytics.
 
 ---
 
-## Database Schema
+## Frontend
 
-- **parties** — political parties with unique URL tokens
-- **question_sets** — NGO-submitted question sets with approval workflow
-- **questions** — individual policy statements within a set
-- **candidates** — candidate profiles linked to a party
-- **candidate_answers** — each candidate's answer (0–4) + explanation per question
+The entire React SPA lives in [vaalikone-frontend/src/App.jsx](vaalikone-frontend/src/App.jsx). View routing is URL-param based (`?view=...`).
+
+| View | URL | Purpose |
+|------|-----|---------|
+| Home | `/` | Navigation hub |
+| Voter | `?view=voter` | Answer questions, set weights, view matches |
+| Results | (within voter flow) | Candidate match results with comparison |
+| Admin | `?view=admin` | Manage parties, approve/reject question sets |
+| NGO | `?view=ngo` | Submit a new question set |
+| Candidate | `?view=candidate&partyToken=…` | Register/edit profile and submit answers |
+
+**API client:** All calls go through `apiFetch()` with automatic snake_case ↔ camelCase conversion. The `API_BASE` constant at the top of `App.jsx` points to `http://localhost:3000/api` — update this for non-local deployments.
+
+**Design:** Source Serif 4 font, forest-green accent (`#2D5A3D`), soft neutral backgrounds. Responsive and mobile-friendly.
+
+---
 
 ## Environment Variables
 
-| Variable       | Description                          | Default                          |
-|----------------|--------------------------------------|----------------------------------|
-| PORT           | Server port                          | 3000                             |
-| DATABASE_URL   | PostgreSQL connection string         | —                                |
-| ADMIN_SECRET   | Bearer token for admin endpoints     | —                                |
-| CORS_ORIGIN    | Allowed frontend origin              | http://localhost:5173             |
-| NODE_ENV       | Environment                          | development                      |
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PORT` | `3000` | Backend port |
+| `NODE_ENV` | `development` | Environment |
+| `DATABASE_URL` | — | PostgreSQL connection string |
+| `ADMIN_SECRET` | — | Bearer token for admin endpoints |
+| `CORS_ORIGIN` | `http://localhost:5173` | Allowed frontend origin |
+| `ADMIN_EMAIL` | — | Admin address for notifications |
+| `SMTP_HOST` | — | SMTP server (leave unset to disable email) |
+| `SMTP_PORT` | `1025` | SMTP port |
+| `SMTP_SECURE` | `false` | TLS (`true` for port 465) |
+| `SMTP_FROM` | `noreply@vaalikone.fi` | Sender address |
+| `SMTP_USER` | — | SMTP username (optional) |
+| `SMTP_PASS` | — | SMTP password (optional) |
+
+In Docker Compose, `mailpit` provides a local SMTP server (port 1025) and web UI at http://localhost:8025.
+
+---
+
+## Testing
+
+```bash
+npm test                # Run all tests
+npm run test:watch      # Watch mode
+npm run test:coverage   # Coverage report
+```
+
+Integration tests use `supertest` and a mock database helper. Unit tests cover auth middleware and validation logic.
+
+---
+
+## Rate Limiting
+
+| Scope | Limit | Window |
+|-------|-------|--------|
+| Admin endpoints | 30 req | 15 min |
+| NGO submissions | 20 req | 15 min |
+| Voter match | 60 req | 1 min |
+
+Rate limiting is skipped in development (`NODE_ENV=development`) for admin endpoints.
+
+---
+
+## Key Conventions
+
+- All error messages and UI text are in **Finnish**
+- DB queries use parameterized statements (`$1`, `$2`, …) — no string interpolation
+- Admin endpoints: `/api/admin/*` with Bearer token
+- Party-gated endpoints: `/api/candidates/party/:partyToken/...`
+- Voter responses are stored anonymously (random session UUID, no IP or user data)

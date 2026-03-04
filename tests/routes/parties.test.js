@@ -135,3 +135,48 @@ describe("DELETE /api/admin/parties/:id", () => {
     expect(res.body).toEqual({ deleted: true });
   });
 });
+
+// ─── POST / — email validation ────────────────────────────────────────────────
+
+describe("POST /api/admin/parties — email validation", () => {
+  test("invalid email → 400", async () => {
+    const res = await request(app)
+      .post("/api/admin/parties")
+      .set("Authorization", authHeader)
+      .send({ name: "Vihreät", email: "not-an-email" });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/virheellinen/i);
+  });
+
+  test("email too long (>255 chars) → 400", async () => {
+    // 252 + "@b.fi" = 256 chars, exceeds 255 limit
+    const res = await request(app)
+      .post("/api/admin/parties")
+      .set("Authorization", authHeader)
+      .send({ name: "Vihreät", email: "a".repeat(252) + "@b.fi" });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/liian pitkä/i);
+  });
+
+  test("valid email → included in 201 response", async () => {
+    const party = { id: VALID_UUID, name: "Vihreät", token: "vihre-t-abc12345", email: "vihrea@example.fi", created_at: new Date().toISOString() };
+    db.query.mockResolvedValueOnce({ rows: [party] });
+
+    const res = await request(app)
+      .post("/api/admin/parties")
+      .set("Authorization", authHeader)
+      .send({ name: "Vihreät", email: "vihrea@example.fi" });
+    expect(res.status).toBe(201);
+    expect(res.body.email).toBe("vihrea@example.fi");
+  });
+
+  test("non-conflict DB error → 500", async () => {
+    db.query.mockRejectedValueOnce(new Error("connection lost"));
+
+    const res = await request(app)
+      .post("/api/admin/parties")
+      .set("Authorization", authHeader)
+      .send({ name: "Vihreät" });
+    expect(res.status).toBe(500);
+  });
+});

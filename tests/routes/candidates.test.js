@@ -118,6 +118,67 @@ describe("POST /api/candidates/party/:partyToken", () => {
   });
 });
 
+// ─── POST /api/candidates/party/:partyToken — optional field validation ───────
+
+describe("POST /api/candidates/party/:partyToken — optional field validation", () => {
+  test("photoUrl too long → 400", async () => {
+    db.query.mockResolvedValueOnce({ rows: [PARTY] }); // requirePartyToken
+    const res = await request(app)
+      .post(`/api/candidates/party/${PARTY_TOKEN}`)
+      .send({ name: "Eeva", photoUrl: "https://example.com/" + "a".repeat(490) });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/liian pitkä/i);
+  });
+
+  test("invalid photoUrl (no http/https) → 400", async () => {
+    db.query.mockResolvedValueOnce({ rows: [PARTY] }); // requirePartyToken
+    const res = await request(app)
+      .post(`/api/candidates/party/${PARTY_TOKEN}`)
+      .send({ name: "Eeva", photoUrl: "ftp://example.com/image.jpg" });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/virheellinen/i);
+  });
+
+  test("bio too long → 400", async () => {
+    db.query.mockResolvedValueOnce({ rows: [PARTY] }); // requirePartyToken
+    const res = await request(app)
+      .post(`/api/candidates/party/${PARTY_TOKEN}`)
+      .send({ name: "Eeva", bio: "a".repeat(1001) });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/liian pitkä/i);
+  });
+
+  test("invalid email → 400", async () => {
+    db.query.mockResolvedValueOnce({ rows: [PARTY] }); // requirePartyToken
+    const res = await request(app)
+      .post(`/api/candidates/party/${PARTY_TOKEN}`)
+      .send({ name: "Eeva", email: "not-an-email" });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/virheellinen/i);
+  });
+
+  test("email too long → 400", async () => {
+    db.query.mockResolvedValueOnce({ rows: [PARTY] }); // requirePartyToken
+    // 252 + "@b.fi" = 256 chars, exceeds 255 limit
+    const res = await request(app)
+      .post(`/api/candidates/party/${PARTY_TOKEN}`)
+      .send({ name: "Eeva", email: "a".repeat(252) + "@b.fi" });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/liian pitkä/i);
+  });
+
+  test("valid email → included in 201 response", async () => {
+    db.query.mockResolvedValueOnce({ rows: [PARTY] }); // requirePartyToken
+    const newCandidate = { id: CANDIDATE_ID, name: "Eeva", photo_url: null, bio: null, email: "eeva@example.fi", created_at: new Date() };
+    db.query.mockResolvedValueOnce({ rows: [newCandidate] });
+    const res = await request(app)
+      .post(`/api/candidates/party/${PARTY_TOKEN}`)
+      .send({ name: "Eeva", email: "eeva@example.fi" });
+    expect(res.status).toBe(201);
+    expect(res.body.email).toBe("eeva@example.fi");
+  });
+});
+
 // ─── PUT /api/candidates/party/:partyToken/candidates/:id/answers ─────────────
 
 describe("PUT /api/candidates/party/:token/candidates/:id/answers", () => {
@@ -186,5 +247,92 @@ describe("PUT /api/candidates/party/:token/candidates/:id/answers", () => {
     expect(rollbackCall).toBeDefined();
     expect(client.release).toHaveBeenCalled();
     expect(res.status).toBe(500);
+  });
+});
+
+// ─── PUT /api/candidates/party/:partyToken/candidates/:id ─────────────────────
+
+describe("PUT /api/candidates/party/:token/candidates/:id (profile update)", () => {
+  const url = `/api/candidates/party/${PARTY_TOKEN}/candidates/${CANDIDATE_ID}`;
+
+  test("bad party token → 404", async () => {
+    db.query.mockResolvedValueOnce({ rows: [] }); // requirePartyToken fails
+    const res = await request(app).put(url).send({ name: "Uusi Nimi" });
+    expect(res.status).toBe(404);
+  });
+
+  test("invalid candidate UUID → 400", async () => {
+    db.query.mockResolvedValueOnce({ rows: [PARTY] }); // requirePartyToken
+    const res = await request(app)
+      .put(`/api/candidates/party/${PARTY_TOKEN}/candidates/not-a-uuid`)
+      .send({ name: "Uusi Nimi" });
+    expect(res.status).toBe(400);
+  });
+
+  test("name too long → 400", async () => {
+    db.query.mockResolvedValueOnce({ rows: [PARTY] }); // requirePartyToken
+    const res = await request(app)
+      .put(url)
+      .send({ name: "a".repeat(256) });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/liian pitkä/i);
+  });
+
+  test("photoUrl too long → 400", async () => {
+    db.query.mockResolvedValueOnce({ rows: [PARTY] }); // requirePartyToken
+    const res = await request(app)
+      .put(url)
+      .send({ photoUrl: "https://example.com/" + "a".repeat(490) });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/liian pitkä/i);
+  });
+
+  test("invalid photoUrl → 400", async () => {
+    db.query.mockResolvedValueOnce({ rows: [PARTY] }); // requirePartyToken
+    const res = await request(app)
+      .put(url)
+      .send({ photoUrl: "javascript:alert(1)" });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/virheellinen/i);
+  });
+
+  test("bio too long → 400", async () => {
+    db.query.mockResolvedValueOnce({ rows: [PARTY] }); // requirePartyToken
+    const res = await request(app)
+      .put(url)
+      .send({ bio: "a".repeat(1001) });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/liian pitkä/i);
+  });
+
+  test("candidate not in party → 404", async () => {
+    db.query.mockResolvedValueOnce({ rows: [PARTY] }); // requirePartyToken
+    db.query.mockResolvedValueOnce({ rows: [] }); // ownership check fails
+    const res = await request(app).put(url).send({ name: "Uusi Nimi" });
+    expect(res.status).toBe(404);
+    expect(res.body.error).toMatch(/ei löytynyt/i);
+  });
+
+  test("happy path → 200 with updated candidate", async () => {
+    db.query.mockResolvedValueOnce({ rows: [PARTY] }); // requirePartyToken
+    db.query.mockResolvedValueOnce({ rows: [{ id: CANDIDATE_ID }] }); // ownership check
+    const updated = { id: CANDIDATE_ID, name: "Uusi Nimi", photo_url: null, bio: "Bio teksti", updated_at: new Date() };
+    db.query.mockResolvedValueOnce({ rows: [updated] }); // UPDATE
+
+    const res = await request(app)
+      .put(url)
+      .send({ name: "Uusi Nimi", bio: "Bio teksti" });
+    expect(res.status).toBe(200);
+    expect(res.body.name).toBe("Uusi Nimi");
+  });
+
+  test("empty body (no fields) → still passes validation, updates with COALESCE", async () => {
+    db.query.mockResolvedValueOnce({ rows: [PARTY] }); // requirePartyToken
+    db.query.mockResolvedValueOnce({ rows: [{ id: CANDIDATE_ID }] }); // ownership check
+    const unchanged = { id: CANDIDATE_ID, name: "Alkuperäinen", photo_url: null, bio: null, updated_at: new Date() };
+    db.query.mockResolvedValueOnce({ rows: [unchanged] }); // UPDATE
+
+    const res = await request(app).put(url).send({});
+    expect(res.status).toBe(200);
   });
 });

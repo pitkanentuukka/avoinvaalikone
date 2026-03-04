@@ -88,6 +88,77 @@ describe("POST /api/question-sets", () => {
     expect(client.release).toHaveBeenCalled();
   });
 
+  test("missing title → 400", async () => {
+    buildMockClient(); // route calls db.getClient() before validation
+    const res = await request(app)
+      .post("/api/question-sets")
+      .send({ ngoName: "TestiJärjestö", questions: ["Väittämä 1"] });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/otsikko/i);
+  });
+
+  test("title too long → 400", async () => {
+    buildMockClient();
+    const res = await request(app)
+      .post("/api/question-sets")
+      .send({ ngoName: "TestiJärjestö", title: "a".repeat(256), questions: ["Väittämä 1"] });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/liian pitkä/i);
+  });
+
+  test("invalid ngoEmail → 400", async () => {
+    buildMockClient();
+    const res = await request(app)
+      .post("/api/question-sets")
+      .send({ ngoName: "TestiJärjestö", title: "Sarja", ngoEmail: "not-email", questions: ["Väittämä 1"] });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/virheellinen/i);
+  });
+
+  test("ngoEmail too long → 400", async () => {
+    buildMockClient();
+    // 252 + "@b.fi" = 256 chars, exceeds 255 limit
+    const res = await request(app)
+      .post("/api/question-sets")
+      .send({ ngoName: "TestiJärjestö", title: "Sarja", ngoEmail: "a".repeat(252) + "@b.fi", questions: ["Väittämä 1"] });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/liian pitkä/i);
+  });
+
+  test("invalid logoUrl → 400", async () => {
+    buildMockClient();
+    const res = await request(app)
+      .post("/api/question-sets")
+      .send({ ngoName: "TestiJärjestö", title: "Sarja", logoUrl: "javascript:alert(1)", questions: ["Väittämä 1"] });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/virheellinen/i);
+  });
+
+  test("logoUrl too long → 400", async () => {
+    buildMockClient();
+    const res = await request(app)
+      .post("/api/question-sets")
+      .send({ ngoName: "TestiJärjestö", title: "Sarja", logoUrl: "https://example.com/" + "a".repeat(490), questions: ["Väittämä 1"] });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/liian pitkä/i);
+  });
+
+  test("questions as objects with statement field → 201", async () => {
+    const client = buildMockClient();
+    const qs = { id: VALID_UUID, ngo_name: "TestiJärjestö", title: "Sarja", status: "pending" };
+    client.query
+      .mockResolvedValueOnce({}) // BEGIN
+      .mockResolvedValueOnce({ rows: [qs] }) // INSERT question_set
+      .mockResolvedValueOnce({ rows: [{ id: "q1", statement: "Väittämä 1", sort_order: 1 }] }) // INSERT question
+      .mockResolvedValueOnce({}); // COMMIT
+
+    const res = await request(app)
+      .post("/api/question-sets")
+      .send({ ngoName: "TestiJärjestö", title: "Sarja", questions: [{ statement: "Väittämä 1" }] });
+    expect(res.status).toBe(201);
+    expect(client.release).toHaveBeenCalled();
+  });
+
   test("DB error mid-transaction → ROLLBACK called and client.release() called", async () => {
     const client = buildMockClient();
     const dbErr = new Error("DB failure");
