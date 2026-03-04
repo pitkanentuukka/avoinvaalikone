@@ -937,12 +937,12 @@ function VoterView() {
     setStep("loading-results");
     setError(null);
     try {
-      const res = await api.voterMatch({
+      const { results: matchResults } = await api.voterMatch({
         answers: voterAnswers,
         weights,
         questionSetIds: [...selectedSetIds],
       });
-      setResults(res);
+      setResults(matchResults);
       setStep("results");
     } catch (e) {
       setError(e.message);

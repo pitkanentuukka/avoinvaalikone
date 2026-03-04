@@ -126,7 +126,28 @@ router.post("/match", async (req, res, next) => {
     // Sort by match descending
     results.sort((a, b) => b.match - a.match);
 
-    res.json(results);
+    // Persist anonymous voter responses for aggregate analysis.
+    // session_id is a server-generated random UUID — not linked to any identity.
+    const { rows: [{ session_id: sessionId }] } = await db.query(
+      "SELECT gen_random_uuid() AS session_id"
+    );
+
+    if (voterQuestionIds.length > 0) {
+      const placeholders = voterQuestionIds
+        .map((_, i) => `($1, $${i * 2 + 2}, $${i * 2 + 3})`)
+        .join(", ");
+      const flatValues = [sessionId];
+      for (const qId of voterQuestionIds) {
+        flatValues.push(qId, parseInt(answers[qId], 10));
+      }
+      await db.query(
+        `INSERT INTO voter_responses (session_id, question_id, value) VALUES ${placeholders}
+         ON CONFLICT DO NOTHING`,
+        flatValues
+      );
+    }
+
+    res.json({ sessionId, results });
   } catch (err) {
     next(err);
   }
