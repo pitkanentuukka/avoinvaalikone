@@ -1,7 +1,7 @@
 const { Router } = require("express");
 const db = require("../db/pool");
 const { requirePartyToken } = require("../middleware/auth");
-const { isValidLength, isValidUrl, validateUUIDParam, isValidUUID } = require("../middleware/validation");
+const { isValidLength, isValidUrl, isValidEmail, validateUUIDParam, isValidUUID } = require("../middleware/validation");
 
 const router = Router();
 
@@ -93,7 +93,7 @@ router.post(
   requirePartyToken,
   async (req, res, next) => {
     try {
-      const { name, photoUrl, bio } = req.body;
+      const { name, photoUrl, bio, email } = req.body;
       if (!name?.trim()) {
         return res.status(400).json({ error: "Ehdokkaan nimi vaaditaan" });
       }
@@ -111,12 +111,18 @@ router.post(
       if (bio && !isValidLength(bio, 1000)) {
         return res.status(400).json({ error: "Biografia on liian pitkä (maksimi: 1000 merkkiä)" });
       }
+      if (email && !isValidLength(email, 255)) {
+        return res.status(400).json({ error: "Sähköpostiosoite on liian pitkä (maksimi: 255 merkkiä)" });
+      }
+      if (email && !isValidEmail(email)) {
+        return res.status(400).json({ error: "Sähköpostiosoite on virheellinen" });
+      }
 
       const { rows } = await db.query(
-        `INSERT INTO candidates (party_id, name, photo_url, bio)
-         VALUES ($1, $2, $3, $4)
-         RETURNING id, name, photo_url, bio, created_at`,
-        [req.party.id, name.trim(), photoUrl?.trim() || null, bio?.trim() || null]
+        `INSERT INTO candidates (party_id, name, photo_url, bio, email)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING id, name, photo_url, bio, email, created_at`,
+        [req.party.id, name.trim(), photoUrl?.trim() || null, bio?.trim() || null, email?.trim() || null]
       );
       res.status(201).json(rows[0]);
     } catch (err) {

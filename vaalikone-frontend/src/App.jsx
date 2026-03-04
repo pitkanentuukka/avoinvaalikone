@@ -650,13 +650,14 @@ function NgoView() {
 }
 
 // ─── Candidate ───
-function CandidateView({ partyToken }) {
+function CandidateView({ partyToken, initialCandidateId }) {
   const [partyData, setPartyData] = useState(null);
   const [questionSets, setQuestionSets] = useState([]);
   const [selectedCandidate, setSelectedCandidate] = useState(null);
   const [candidateName, setCandidateName] = useState("");
   const [candidatePhoto, setCandidatePhoto] = useState("");
   const [candidateBio, setCandidateBio] = useState("");
+  const [candidateEmail, setCandidateEmail] = useState("");
   const [answers, setAnswers] = useState({});
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -674,6 +675,22 @@ function CandidateView({ partyToken }) {
         ]);
         setPartyData(pd);
         setQuestionSets(qs);
+        if (initialCandidateId && pd.candidates) {
+          const match = pd.candidates.find((c) => c.id === initialCandidateId);
+          if (match) {
+            const full = await api.getCandidate(match.id);
+            setSelectedCandidate(full);
+            setCandidateName(full.name);
+            setCandidatePhoto(full.photoUrl || "");
+            setCandidateBio(full.bio || "");
+            setCandidateEmail(full.email || "");
+            setAnswers(
+              Object.fromEntries(
+                Object.entries(full.answers || {}).map(([k, v]) => [k, { value: v.value, text: v.explanation || "" }])
+              )
+            );
+          }
+        }
       } catch (e) {
         setError(e.message);
       } finally {
@@ -681,7 +698,7 @@ function CandidateView({ partyToken }) {
       }
     }
     load();
-  }, [partyToken]);
+  }, [partyToken, initialCandidateId]);
 
   const approvedSets = questionSets.filter((s) => s.status === "approved");
   const allQuestions = approvedSets.flatMap((s) => s.questions || []);
@@ -694,6 +711,7 @@ function CandidateView({ partyToken }) {
       setCandidateName(full.name);
       setCandidatePhoto(full.photoUrl || "");
       setCandidateBio(full.bio || "");
+      setCandidateEmail(full.email || "");
       setAnswers(
         Object.fromEntries(
           Object.entries(full.answers || {}).map(([k, v]) => [k, { value: v.value, text: v.explanation || "" }])
@@ -706,6 +724,7 @@ function CandidateView({ partyToken }) {
 
   function startNew() {
     setSelectedCandidate("new");
+    setCandidateEmail("");
     setAnswers({});
   }
 
@@ -723,6 +742,7 @@ function CandidateView({ partyToken }) {
           name: candidateName.trim(),
           photoUrl: candidatePhoto.trim() || null,
           bio: candidateBio.trim() || null,
+          email: candidateEmail.trim() || null,
         });
         candidateId = created.id;
       } else {
@@ -831,6 +851,10 @@ function CandidateView({ partyToken }) {
           <div>
             <label style={{ fontSize: "13px", fontWeight: 600, display: "block", marginBottom: "6px" }}>Esittelyteksti (valinnainen)</label>
             <TextArea value={candidateBio} onChange={setCandidateBio} placeholder="Kerro äänestäjille itsestäsi, taustastasi ja tärkeimmistä tavoitteistasi…" rows={4} />
+          </div>
+          <div>
+            <label style={{ fontSize: "13px", fontWeight: 600, display: "block", marginBottom: "6px" }}>Sähköpostiosoite (valinnainen) — saat ilmoituksen uusista kysymyksistä</label>
+            <Input value={candidateEmail} onChange={setCandidateEmail} placeholder="etunimi.sukunimi@esimerkki.fi" type="email" />
           </div>
         </div>
       </Card>
@@ -1116,8 +1140,13 @@ function VoterView() {
 
 // ─── App ───
 export default function App() {
-  const [view, setView] = useState("home");
-  const [partyToken, setPartyToken] = useState(null);
+  const _urlParams = new URLSearchParams(window.location.search);
+  const _urlPartyToken = _urlParams.get("partyToken") || null;
+  const _urlCandidateId = _urlParams.get("candidateId") || null;
+
+  const [view, setView] = useState(_urlPartyToken ? "candidate" : "home");
+  const [partyToken, setPartyToken] = useState(_urlPartyToken);
+  const [initialCandidateId] = useState(_urlCandidateId);
 
   return (
     <div style={{ minHeight: "100vh", background: palette.bg, fontFamily: "'Source Serif 4', Georgia, serif", color: palette.text }}>
@@ -1127,7 +1156,7 @@ export default function App() {
       {view === "home" && <HomeView setView={setView} setPartyToken={setPartyToken} />}
       {view === "admin" && <AdminView />}
       {view === "ngo" && <NgoView />}
-      {view === "candidate" && <CandidateView partyToken={partyToken} />}
+      {view === "candidate" && <CandidateView partyToken={partyToken} initialCandidateId={initialCandidateId} />}
       {view === "voter" && <VoterView />}
     </div>
   );

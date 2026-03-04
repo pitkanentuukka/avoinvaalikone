@@ -2,7 +2,12 @@ const { Router } = require("express");
 const db = require("../db/pool");
 const { requireAdmin } = require("../middleware/auth");
 const { isValidLength, isValidUrl, isValidEmail, validateUUIDParam } = require("../middleware/validation");
-const { sendNewQuestionSetNotification } = require("../email");
+const {
+  sendNewQuestionSetNotification,
+  sendQuestionSetReviewedNotification,
+  sendApprovedQuestionSetNotificationToCandidate,
+  sendApprovedQuestionSetNotificationToParty,
+} = require("../email");
 
 // ─── Public router (/api/question-sets) ──────────────────────────────────────
 
@@ -180,7 +185,51 @@ adminRouter.patch("/:id/approve", requireAdmin, validateUUIDParam("id"), async (
     if (rows.length === 0) {
       return res.status(404).json({ error: "Kysymyssarjaa ei löytynyt" });
     }
-    res.json(rows[0]);
+    const approvedSet = rows[0];
+    res.json(approvedSet);
+
+    sendQuestionSetReviewedNotification(approvedSet, true).catch((err) =>
+      console.error("NGO-sähköpostin lähetys epäonnistui:", err)
+    );
+
+    // Fire-and-forget notifications to candidates and parties
+    (async () => {
+      try {
+        const { rows: [{ count }] } = await db.query(
+          "SELECT COUNT(*) FROM questions WHERE question_set_id = $1",
+          [approvedSet.id]
+        );
+        const questionCount = Number(count);
+        const frontendBaseUrl = process.env.CORS_ORIGIN || "http://localhost:5173";
+
+        const { rows: candidates } = await db.query(
+          `SELECT DISTINCT c.id, c.name, c.email, p.token AS party_token
+           FROM candidates c
+           JOIN parties p ON c.party_id = p.id
+           WHERE c.email IS NOT NULL
+             AND EXISTS (SELECT 1 FROM candidate_answers ca WHERE ca.candidate_id = c.id)`
+        );
+
+        const { rows: parties } = await db.query(
+          `SELECT DISTINCT p.id, p.name, p.email, p.token
+           FROM parties p
+           JOIN candidates c ON c.party_id = p.id
+           WHERE p.email IS NOT NULL
+             AND EXISTS (SELECT 1 FROM candidate_answers ca WHERE ca.candidate_id = c.id)`
+        );
+
+        for (const c of candidates) {
+          sendApprovedQuestionSetNotificationToCandidate(approvedSet, questionCount, c, frontendBaseUrl)
+            .catch((err) => console.error("Ehdokkaan sähköpostin lähetys epäonnistui:", err));
+        }
+        for (const p of parties) {
+          sendApprovedQuestionSetNotificationToParty(approvedSet, questionCount, p, frontendBaseUrl)
+            .catch((err) => console.error("Puolueen sähköpostin lähetys epäonnistui:", err));
+        }
+      } catch (err) {
+        console.error("Hyväksyntäilmoitusten lähetys epäonnistui:", err);
+      }
+    })();
   } catch (err) {
     next(err);
   }
@@ -198,6 +247,9 @@ adminRouter.patch("/:id/reject", requireAdmin, validateUUIDParam("id"), async (r
       return res.status(404).json({ error: "Kysymyssarjaa ei löytynyt" });
     }
     res.json(rows[0]);
+    sendQuestionSetReviewedNotification(rows[0], false).catch((err) =>
+      console.error("NGO-sähköpostin lähetys epäonnistui:", err)
+    );
   } catch (err) {
     next(err);
   }
