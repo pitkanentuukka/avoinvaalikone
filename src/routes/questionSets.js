@@ -2,6 +2,7 @@ const { Router } = require("express");
 const db = require("../db/pool");
 const { requireAdmin } = require("../middleware/auth");
 const { isValidLength, isValidUrl, isValidEmail, validateUUIDParam } = require("../middleware/validation");
+const { sendNewQuestionSetNotification } = require("../email");
 
 // ─── Public router (/api/question-sets) ──────────────────────────────────────
 
@@ -112,6 +113,12 @@ publicRouter.post("/", async (req, res, next) => {
     }
 
     await client.query("COMMIT");
+
+    // Fire-and-forget: don't block the response if email fails
+    sendNewQuestionSetNotification(qs).catch((err) =>
+      console.error("Sähköpostin lähetys epäonnistui:", err)
+    );
+
     res.status(201).json({ ...qs, questions: insertedQuestions });
   } catch (err) {
     await client.query("ROLLBACK");

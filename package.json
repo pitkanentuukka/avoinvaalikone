@@ -14,7 +14,9 @@
   },
   "jest": {
     "testEnvironment": "node",
-    "testMatch": ["**/tests/**/*.test.js"]
+    "testMatch": [
+      "**/tests/**/*.test.js"
+    ]
   },
   "dependencies": {
     "cors": "^2.8.5",
@@ -23,6 +25,7 @@
     "express-rate-limit": "^7.4.0",
     "helmet": "^8.0.0",
     "morgan": "^1.10.0",
+    "nodemailer": "^8.0.1",
     "pg": "^8.13.0",
     "uuid": "^10.0.0"
   },
