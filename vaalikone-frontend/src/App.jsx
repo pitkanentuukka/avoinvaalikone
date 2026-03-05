@@ -889,6 +889,52 @@ function CandidateView({ partyToken, initialCandidateId }) {
   );
 }
 
+// ─── Voter storage (localStorage, GDPR-gated) ───
+const STORAGE_KEYS = {
+  consent: "vaalikone_consent",
+  answers: "vaalikone_answers",
+  weights: "vaalikone_weights",
+  sets: "vaalikone_selected_sets",
+};
+
+function loadConsent() {
+  try { return localStorage.getItem(STORAGE_KEYS.consent) === "true"; } catch { return false; }
+}
+
+function saveConsent(value) {
+  try { localStorage.setItem(STORAGE_KEYS.consent, value ? "true" : "false"); } catch {}
+}
+
+function loadSavedAnswers() {
+  try {
+    return {
+      answers: JSON.parse(localStorage.getItem(STORAGE_KEYS.answers) || "{}"),
+      weights: JSON.parse(localStorage.getItem(STORAGE_KEYS.weights) || "{}"),
+      sets: JSON.parse(localStorage.getItem(STORAGE_KEYS.sets) || "null"),
+    };
+  } catch { return { answers: {}, weights: {}, sets: null }; }
+}
+
+function persistAnswers(answers, weights, sets) {
+  try {
+    localStorage.setItem(STORAGE_KEYS.answers, JSON.stringify(answers));
+    localStorage.setItem(STORAGE_KEYS.weights, JSON.stringify(weights));
+    localStorage.setItem(STORAGE_KEYS.sets, JSON.stringify([...sets]));
+  } catch {}
+}
+
+function clearSavedAnswers() {
+  try {
+    [STORAGE_KEYS.answers, STORAGE_KEYS.weights, STORAGE_KEYS.sets].forEach((k) => localStorage.removeItem(k));
+  } catch {}
+}
+
+function revokeConsent() {
+  try {
+    Object.values(STORAGE_KEYS).forEach((k) => localStorage.removeItem(k));
+  } catch {}
+}
+
 // ─── Voter ───
 function VoterView() {
   const [questionSets, setQuestionSets] = useState([]);
@@ -901,17 +947,32 @@ function VoterView() {
   const [expandedCandidate, setExpandedCandidate] = useState(null);
   const [profileCandidate, setProfileCandidate] = useState(null);
   const [error, setError] = useState(null);
+  const [consentGiven, setConsentGiven] = useState(() => loadConsent());
 
   useEffect(() => {
     async function load() {
       try {
         const qs = await api.getQuestionSets();
         setQuestionSets(qs);
-        setSelectedSetIds(new Set(qs.map((s) => s.id)));
-        setStep("select");
+        const allIds = new Set(qs.map((s) => s.id));
+        if (loadConsent()) {
+          const saved = loadSavedAnswers();
+          setVoterAnswers(saved.answers);
+          setWeights(saved.weights);
+          if (saved.sets) {
+            const validIds = new Set(saved.sets.filter((id) => allIds.has(id)));
+            setSelectedSetIds(validIds.size > 0 ? validIds : allIds);
+          } else {
+            setSelectedSetIds(allIds);
+          }
+          setStep("select");
+        } else {
+          setSelectedSetIds(allIds);
+          setStep("consent");
+        }
       } catch (e) {
         setError(e.message);
-        setStep("select");
+        setStep("consent");
       }
     }
     load();
@@ -921,14 +982,27 @@ function VoterView() {
   const activeQuestions = approvedSets.filter((s) => selectedSetIds.has(s.id)).flatMap((s) => s.questions || []);
 
   function toggleSet(id) {
-    setSelectedSetIds((s) => { const next = new Set(s); next.has(id) ? next.delete(id) : next.add(id); return next; });
+    setSelectedSetIds((s) => {
+      const next = new Set(s);
+      next.has(id) ? next.delete(id) : next.add(id);
+      if (consentGiven) persistAnswers(voterAnswers, weights, next);
+      return next;
+    });
   }
 
-  function startAnswering() { setCurrentQ(0); setStep("answer"); }
+  function startAnswering() {
+    const firstUnanswered = activeQuestions.findIndex((q) => voterAnswers[q.id] === undefined);
+    setCurrentQ(firstUnanswered === -1 ? 0 : firstUnanswered);
+    setStep("answer");
+  }
 
   function answerQuestion(value) {
     const qId = activeQuestions[currentQ].id;
-    setVoterAnswers((a) => ({ ...a, [qId]: value }));
+    setVoterAnswers((a) => {
+      const next = { ...a, [qId]: value };
+      if (consentGiven) persistAnswers(next, weights, selectedSetIds);
+      return next;
+    });
     if (currentQ < activeQuestions.length - 1) setCurrentQ((c) => c + 1);
     else setStep("weight");
   }
@@ -952,12 +1026,70 @@ function VoterView() {
 
   if (step === "loading" || step === "loading-results") return <LoadingState text={step === "loading-results" ? "Lasketaan tuloksia..." : "Ladataan..."} />;
 
+  // GDPR consent
+  if (step === "consent") {
+    return (
+      <div style={{ maxWidth: 560, margin: "0 auto", padding: "40px 24px" }}>
+        <h2 style={{ fontSize: "26px", fontWeight: 800, letterSpacing: "-0.02em", marginBottom: "12px" }}>Tallennetaanko vastauksesi?</h2>
+        <p style={{ color: palette.textMuted, lineHeight: 1.7, marginBottom: "16px" }}>
+          Voimme tallentaa vastauksesi tämän selaimen muistiin, jotta ne täyttyvät automaattisesti, kun palaat myöhemmin.
+        </p>
+        <div style={{ background: palette.surfaceAlt, border: `1px solid ${palette.border}`, borderRadius: "10px", padding: "16px 20px", marginBottom: "24px", fontSize: "13px", lineHeight: 1.7, color: palette.textMuted }}>
+          <strong style={{ color: palette.text, display: "block", marginBottom: "6px" }}>Mitä tallennetaan ja miksi?</strong>
+          <ul style={{ margin: 0, paddingLeft: "18px" }}>
+            <li>Vastauksesi kysymyksiin (arvo 0–4 asteikolla)</li>
+            <li>Painotuksesi eri aiheille</li>
+            <li>Valitsemasi kysymyssarjat</li>
+          </ul>
+          <div style={{ marginTop: "10px" }}>
+            <strong style={{ color: palette.text }}>Tarkoitus:</strong> vastausten esitäyttö paluukäynneillä.
+          </div>
+          <div style={{ marginTop: "6px" }}>
+            <strong style={{ color: palette.text }}>Säilytyspaikka:</strong> vain tämä selain — tietoja ei lähetetä palvelimelle eikä jaeta kolmansille osapuolille.
+          </div>
+          <div style={{ marginTop: "6px" }}>
+            Voit peruuttaa suostumuksesi milloin tahansa poistamalla tallennetut vastaukset.
+          </div>
+        </div>
+        {error && <ErrorBanner message={error} />}
+        <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
+          <Button size="lg" onClick={() => {
+            saveConsent(true);
+            setConsentGiven(true);
+            persistAnswers(voterAnswers, weights, selectedSetIds);
+            setStep("select");
+          }}>Salli tallennus</Button>
+          <Button variant="secondary" size="lg" onClick={() => {
+            saveConsent(false);
+            setConsentGiven(false);
+            setStep("select");
+          }}>Älä tallenna</Button>
+        </div>
+      </div>
+    );
+  }
+
   // Set selection
   if (step === "select") {
+    const hasSaved = consentGiven && Object.keys(voterAnswers).length > 0;
     return (
       <div style={{ maxWidth: 640, margin: "0 auto", padding: "40px 24px" }}>
         <h2 style={{ fontSize: "28px", fontWeight: 800, letterSpacing: "-0.02em", marginBottom: "8px" }}>Valitse aiheet</h2>
         <p style={{ color: palette.textMuted, marginBottom: "28px" }}>Valitse kysymyssarjat, joihin haluat vastata. Voit yhdistää eri järjestöjen aiheita.</p>
+        {hasSaved && (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: palette.accentLight, border: `1px solid ${palette.accent}`, borderRadius: "8px", padding: "10px 16px", marginBottom: "20px", fontSize: "13px" }}>
+            <span style={{ color: palette.accent, fontWeight: 600 }}>Aiemmat vastauksesi on esitäytetty.</span>
+            <button onClick={() => {
+              clearSavedAnswers();
+              revokeConsent();
+              setConsentGiven(false);
+              setVoterAnswers({});
+              setWeights({});
+            }} style={{ background: "none", border: "none", color: palette.textLight, cursor: "pointer", fontSize: "12px", fontFamily: "inherit", textDecoration: "underline" }}>
+              Poista tallennetut vastaukset
+            </button>
+          </div>
+        )}
         {error && <ErrorBanner message={error} />}
         {approvedSets.length === 0 && <p style={{ color: palette.textLight }}>Kysymyssarjoja ei ole vielä saatavilla.</p>}
         {approvedSets.map((qs) => (
@@ -1020,12 +1152,23 @@ function VoterView() {
               }}>{label}</button>
             ))}
           </div>
-          {currentQ > 0 && (
-            <button onClick={() => setCurrentQ((c) => c - 1)} style={{
-              marginTop: "20px", background: "none", border: "none", color: palette.textLight,
-              cursor: "pointer", fontSize: "13px", fontFamily: "'Source Serif 4', Georgia, serif",
-            }}>← Edellinen kysymys</button>
-          )}
+          <div style={{ marginTop: "20px", display: "flex", justifyContent: "center", gap: "20px" }}>
+            {currentQ > 0 && (
+              <button onClick={() => setCurrentQ((c) => c - 1)} style={{
+                background: "none", border: "none", color: palette.textLight,
+                cursor: "pointer", fontSize: "13px", fontFamily: "'Source Serif 4', Georgia, serif",
+              }}>← Edellinen</button>
+            )}
+            {voterAnswers[q.id] !== undefined && (
+              <button onClick={() => {
+                if (currentQ < activeQuestions.length - 1) setCurrentQ((c) => c + 1);
+                else setStep("weight");
+              }} style={{
+                background: "none", border: "none", color: palette.textMuted,
+                cursor: "pointer", fontSize: "13px", fontFamily: "'Source Serif 4', Georgia, serif",
+              }}>Ohita → </button>
+            )}
+          </div>
         </Card>
       </div>
     );
@@ -1044,7 +1187,7 @@ function VoterView() {
             </div>
             <div style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}>
               {WEIGHT_LABELS.map((label, wi) => (
-                <button key={wi} onClick={() => setWeights((w) => ({ ...w, [q.id]: wi }))} style={{
+                <button key={wi} onClick={() => setWeights((w) => { const next = { ...w, [q.id]: wi }; if (consentGiven) persistAnswers(voterAnswers, next, selectedSetIds); return next; })} style={{
                   padding: "5px 10px", borderRadius: "4px", fontSize: "12px",
                   border: `1px solid ${(weights[q.id] ?? 1) === wi ? palette.accent : palette.border}`,
                   background: (weights[q.id] ?? 1) === wi ? palette.accentLight : "transparent",
@@ -1129,7 +1272,7 @@ function VoterView() {
         );
       })}
       <div style={{ marginTop: "24px" }}>
-        <Button variant="ghost" onClick={() => { setStep("select"); setVoterAnswers({}); setWeights({}); setExpandedCandidate(null); setResults([]); }}>Aloita alusta</Button>
+        <Button variant="ghost" onClick={() => { clearSavedAnswers(); setStep("select"); setVoterAnswers({}); setWeights({}); setExpandedCandidate(null); setResults([]); }}>Aloita alusta</Button>
       </div>
       {profileCandidate && (
         <CandidateProfile candidate={profileCandidate} onClose={() => setProfileCandidate(null)} activeQuestions={activeQuestions} voterAnswers={voterAnswers} />
