@@ -17,7 +17,7 @@ const publicRouter = Router();
 publicRouter.get("/", async (req, res, next) => {
   try {
     const { rows: sets } = await db.query(
-      `SELECT qs.id, qs.ngo_name, qs.ngo_email, qs.logo_url, qs.title,
+      `SELECT qs.id, qs.ngo_name, qs.logo_url, qs.title,
               qs.status, qs.submitted_at, qs.reviewed_at
        FROM question_sets qs
        WHERE qs.status = 'approved'
@@ -87,6 +87,9 @@ publicRouter.post("/", async (req, res, next) => {
       return res
         .status(400)
         .json({ error: "Vähintään yksi väittämä vaaditaan" });
+    }
+    if (questions.length > 50) {
+      return res.status(400).json({ error: "Liian monta väittämää (maksimi: 50)" });
     }
 
     await client.query("BEGIN");

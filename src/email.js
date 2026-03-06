@@ -1,5 +1,9 @@
 const nodemailer = require("nodemailer");
 
+function sanitizeHeader(value) {
+  return String(value).replace(/[\r\n]/g, ' ');
+}
+
 function createTransport() {
   return nodemailer.createTransport({
     host: process.env.SMTP_HOST,
@@ -21,7 +25,7 @@ async function sendNewQuestionSetNotification(questionSet) {
   await transporter.sendMail({
     from: process.env.SMTP_FROM || "noreply@vaalikone.fi",
     to: adminEmail,
-    subject: `Uusi kysymyssarja odottaa hyväksyntää: ${questionSet.title}`,
+    subject: sanitizeHeader(`Uusi kysymyssarja odottaa hyväksyntää: ${questionSet.title}`),
     text: [
       "Uusi kysymyssarja on lähetetty hyväksyttäväksi.",
       "",
@@ -42,8 +46,8 @@ async function sendQuestionSetReviewedNotification(questionSet, approved) {
     from: process.env.SMTP_FROM || "noreply@vaalikone.fi",
     to: questionSet.ngo_email,
     subject: approved
-      ? `Kysymyssarjanne on hyväksytty: ${questionSet.title}`
-      : `Kysymyssarjanne on hylätty: ${questionSet.title}`,
+      ? sanitizeHeader(`Kysymyssarjanne on hyväksytty: ${questionSet.title}`)
+      : sanitizeHeader(`Kysymyssarjanne on hylätty: ${questionSet.title}`),
     text: approved
       ? [
           `Hei ${questionSet.ngo_name},`,
@@ -71,7 +75,7 @@ async function sendApprovedQuestionSetNotificationToCandidate(questionSet, quest
   await transporter.sendMail({
     from: process.env.SMTP_FROM || "noreply@vaalikone.fi",
     to: candidate.email,
-    subject: `Uusia kysymyksiä vastaustasi odottamassa: ${questionSet.title}`,
+    subject: sanitizeHeader(`Uusia kysymyksiä vastaustasi odottamassa: ${questionSet.title}`),
     text: [
       `Hei ${candidate.name},`,
       "",
@@ -96,7 +100,7 @@ async function sendApprovedQuestionSetNotificationToParty(questionSet, questionC
   await transporter.sendMail({
     from: process.env.SMTP_FROM || "noreply@vaalikone.fi",
     to: party.email,
-    subject: `Uusi kysymyssarja hyväksytty: ${questionSet.title}`,
+    subject: sanitizeHeader(`Uusi kysymyssarja hyväksytty: ${questionSet.title}`),
     text: [
       `Hei ${party.name},`,
       "",

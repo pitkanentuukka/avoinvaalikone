@@ -25,19 +25,35 @@ router.post("/match", async (req, res, next) => {
     }
 
     const voterQuestionIds = Object.keys(answers);
-    
+
+    // Reject if the caller sends more answers than there are questions in the DB.
+    // This prevents unbounded voter_responses inserts without needing an arbitrary magic number.
+    const { rows: [{ count: questionCount }] } = await db.query(
+      "SELECT COUNT(*) FROM questions"
+    );
+    if (voterQuestionIds.length > parseInt(questionCount, 10)) {
+      return res.status(400).json({ error: "Liian monta vastausta" });
+    }
+
     // Validate all question IDs are valid UUIDs
     if (!voterQuestionIds.every(id => isValidUUID(id))) {
       return res.status(400).json({ error: "Virheelliset kysymyksen tunnisteet" });
     }
-    
+
     // Validate all answer values are in range
     for (const value of Object.values(answers)) {
       if (!isValidRange(value, 0, 4)) {
         return res.status(400).json({ error: "Vastaus-arvot tulee olla 0-4" });
       }
     }
-    
+
+    // Validate all weight values are in range (0-3) if provided
+    for (const [qId, w] of Object.entries(weights)) {
+      if (!isValidUUID(qId) || !isValidRange(w, 0, 3)) {
+        return res.status(400).json({ error: "Painoarvojen tulee olla 0-3" });
+      }
+    }
+
     // Validate question set IDs if provided
     if (Array.isArray(questionSetIds) && questionSetIds.length > 0) {
       if (!validateUUIDArray(questionSetIds)) {
@@ -99,7 +115,7 @@ router.post("/match", async (req, res, next) => {
         const voterValue = parseInt(answers[qId], 10);
         if (isNaN(voterValue) || !cAnswers[qId]) continue;
 
-        const w = (parseInt(weights[qId], 10) || 1) + 1; // default weight 1, +1 so minimum is 1
+        const w = (parseInt(weights[qId], 10) || 0) + 1; // default weight 0 → factor 1; weight 3 → factor 4
         const diff = Math.abs(voterValue - cAnswers[qId].value);
         const similarity = 1 - diff / 4;
 

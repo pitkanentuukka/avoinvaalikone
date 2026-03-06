@@ -18,11 +18,16 @@ const PORT = process.env.PORT || 3000;
 // Trust proxy to handle HTTPS correctly in production
 app.set('trust proxy', 1);
 
-// Redirect HTTP to HTTPS in production
+// Redirect HTTP to HTTPS in production.
+// Requires PUBLIC_HOST env var — falls back to skipping the redirect rather
+// than trusting the user-supplied Host header (which would be an open redirect).
 app.use((req, res, next) => {
   if (process.env.NODE_ENV === 'production' && req.header('x-forwarded-proto') !== 'https') {
-    // Use PUBLIC_HOST env var to avoid Host header injection attacks
-    const host = process.env.PUBLIC_HOST || req.header('host');
+    const host = process.env.PUBLIC_HOST;
+    if (!host) {
+      console.error('PUBLIC_HOST is not set — skipping HTTP→HTTPS redirect to avoid open redirect vulnerability');
+      return next();
+    }
     return res.redirect(301, `https://${host}${req.url}`);
   }
   next();
