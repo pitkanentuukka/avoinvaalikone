@@ -65,6 +65,7 @@ const submissionLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 20,
   message: { error: "Liian monta pyyntöä. Yritä myöhemmin uudelleen." },
+  skip: (req) => process.env.NODE_ENV !== 'production',
 });
 
 // Rate limiting for voter match endpoint
@@ -72,6 +73,7 @@ const matchLimiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1 minute
   max: 60,
   message: { error: "Liian monta pyyntöä. Yritä myöhemmin uudelleen." },
+  skip: (req) => process.env.NODE_ENV !== 'production',
 });
 
 // ─── Routes ───
