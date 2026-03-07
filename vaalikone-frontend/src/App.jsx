@@ -1,8 +1,17 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, createContext, useContext } from "react";
+import translations from "./translations";
 
 // ─── API Configuration ───
 // Change this to your backend URL
 const API_BASE = "http://localhost:3000/api";
+
+// ─── Language ───
+const DEFAULT_LANG = import.meta.env.VITE_DEFAULT_LANG || "fi";
+const LanguageContext = createContext({ lang: DEFAULT_LANG, t: translations[DEFAULT_LANG], setLang: () => {} });
+
+function useTranslation() {
+  return useContext(LanguageContext);
+}
 
 // ─── API Client ───
 function snakeToCamel(str) {
@@ -36,7 +45,7 @@ async function apiFetch(path, options = {}) {
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: "Palvelinvirhe" }));
+    const err = await res.json().catch(() => ({ error: "Server error" }));
     throw new Error(err.error || `HTTP ${res.status}`);
   }
   const data = await res.json();
@@ -77,8 +86,15 @@ const api = {
 };
 
 // ─── Constants ───
-const LABELS = ["Täysin eri mieltä", "Eri mieltä", "Neutraali", "Samaa mieltä", "Täysin samaa mieltä"];
-const WEIGHT_LABELS = ["Ei tärkeä", "Jokseenkin", "Tärkeä", "Erittäin tärkeä"];
+function useLabels() {
+  const { t } = useTranslation();
+  return useMemo(() => [t.stronglyDisagree, t.disagree, t.neutral, t.agree, t.stronglyAgree], [t]);
+}
+
+function useWeightLabels() {
+  const { t } = useTranslation();
+  return useMemo(() => [t.notImportant, t.somewhat, t.important, t.veryImportant], [t]);
+}
 
 const palette = {
   bg: "#FAF9F6", surface: "#FFFFFF", surfaceAlt: "#F3F1ED",
@@ -102,17 +118,19 @@ function Spinner({ size = 20 }) {
   );
 }
 
-function LoadingState({ text = "Ladataan..." }) {
+function LoadingState({ text }) {
+  const { t } = useTranslation();
   return (
     <div style={{ padding: "60px 24px", textAlign: "center" }}>
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       <Spinner size={28} />
-      <div style={{ marginTop: "12px", color: palette.textMuted, fontSize: "14px" }}>{text}</div>
+      <div style={{ marginTop: "12px", color: palette.textMuted, fontSize: "14px" }}>{text || t.loading}</div>
     </div>
   );
 }
 
 function ErrorBanner({ message, onRetry }) {
+  const { t } = useTranslation();
   return (
     <div style={{
       padding: "14px 20px", borderRadius: "8px", background: palette.dangerLight,
@@ -126,7 +144,7 @@ function ErrorBanner({ message, onRetry }) {
           background: "none", border: `1px solid ${palette.danger}`, borderRadius: "4px",
           padding: "4px 12px", color: palette.danger, cursor: "pointer", fontSize: "12px",
           fontFamily: "'Source Serif 4', Georgia, serif", fontWeight: 600,
-        }}>Yritä uudelleen</button>
+        }}>{t.retry}</button>
       )}
     </div>
   );
@@ -181,7 +199,8 @@ function Card({ children, style: extra, onClick }) {
   );
 }
 
-function ScaleInput({ value, onChange, labels = LABELS }) {
+function ScaleInput({ value, onChange }) {
+  const labels = useLabels();
   return (
     <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
       {labels.map((label, i) => (
@@ -261,8 +280,29 @@ function NgoLogo({ src, name, size = 40 }) {
   return <img src={src} alt={name} onError={() => setErr(true)} style={{ width: size, height: size, borderRadius: "8px", objectFit: "contain", flexShrink: 0, background: palette.surfaceAlt, padding: "4px", border: `1px solid ${palette.border}` }} />;
 }
 
+// ─── Language Selector ───
+function LanguageSelector() {
+  const { lang, setLang } = useTranslation();
+  return (
+    <select
+      value={lang}
+      onChange={(e) => setLang(e.target.value)}
+      style={{
+        padding: "4px 8px", borderRadius: "4px", border: `1px solid ${palette.border}`,
+        background: palette.surface, color: palette.textMuted, fontSize: "13px",
+        fontFamily: "'Source Serif 4', Georgia, serif", cursor: "pointer", outline: "none",
+      }}
+    >
+      <option value="fi">Suomi</option>
+      <option value="en">English</option>
+    </select>
+  );
+}
+
 // ─── Candidate Profile Modal ───
 function CandidateProfile({ candidate, onClose, activeQuestions, voterAnswers }) {
+  const { t } = useTranslation();
+  const labels = useLabels();
   if (!candidate) return null;
   const hasVoterAnswers = voterAnswers && Object.keys(voterAnswers).length > 0;
   return (
@@ -281,13 +321,13 @@ function CandidateProfile({ candidate, onClose, activeQuestions, voterAnswers })
         <div style={{ padding: "28px 32px" }}>
           {candidate.bio && (
             <div style={{ marginBottom: "24px" }}>
-              <div style={{ fontSize: "12px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: palette.textLight, marginBottom: "8px" }}>Esittely</div>
+              <div style={{ fontSize: "12px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: palette.textLight, marginBottom: "8px" }}>{t.profileIntro}</div>
               <p style={{ fontSize: "15px", lineHeight: 1.7, color: palette.text, margin: 0 }}>{candidate.bio}</p>
             </div>
           )}
           {activeQuestions && activeQuestions.length > 0 && (
             <div>
-              <div style={{ fontSize: "12px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: palette.textLight, marginBottom: "12px" }}>Vastaukset</div>
+              <div style={{ fontSize: "12px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: palette.textLight, marginBottom: "12px" }}>{t.profileAnswers}</div>
               {activeQuestions.map((q) => {
                 const ca = candidate.answers?.[q.id];
                 if (!ca) return null;
@@ -296,8 +336,8 @@ function CandidateProfile({ candidate, onClose, activeQuestions, voterAnswers })
                   <div key={q.id} style={{ marginBottom: "16px", paddingBottom: "16px", borderBottom: `1px solid ${palette.border}` }}>
                     <div style={{ fontSize: "13px", fontWeight: 600, marginBottom: "6px" }}>{q.statement}</div>
                     <div style={{ display: "flex", gap: "12px", fontSize: "13px", flexWrap: "wrap", marginBottom: ca.explanation ? "8px" : 0 }}>
-                      <span style={{ color: palette.accent, fontWeight: 600 }}>{LABELS[ca.value]}</span>
-                      {va !== undefined && <span style={{ color: palette.textMuted }}>Sinä: <strong>{LABELS[va]}</strong></span>}
+                      <span style={{ color: palette.accent, fontWeight: 600 }}>{labels[ca.value]}</span>
+                      {va !== undefined && <span style={{ color: palette.textMuted }}>{t.profileYou}: <strong>{labels[va]}</strong></span>}
                     </div>
                     {ca.explanation && (
                       <div style={{ padding: "8px 12px", background: palette.surfaceAlt, borderRadius: "6px", fontSize: "13px", color: palette.textMuted, fontStyle: "italic", borderLeft: `3px solid ${palette.border}` }}>"{ca.explanation}"</div>
@@ -315,16 +355,17 @@ function CandidateProfile({ candidate, onClose, activeQuestions, voterAnswers })
 
 // ─── Header ───
 function Header({ view, setView, setPartyToken }) {
+  const { t } = useTranslation();
   return (
     <header style={{ background: palette.surface, borderBottom: `1px solid ${palette.border}`, padding: "0 32px", position: "sticky", top: 0, zIndex: 100 }}>
       <div style={{ maxWidth: 1100, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", height: "64px" }}>
         <div onClick={() => { setView("home"); setPartyToken(null); }} style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: "10px" }}>
           <div style={{ width: 32, height: 32, borderRadius: "6px", background: palette.accent, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 800, fontSize: "16px", fontFamily: "'Source Serif 4', Georgia, serif" }}>V</div>
-          <span style={{ fontFamily: "'Source Serif 4', Georgia, serif", fontWeight: 700, fontSize: "18px", color: palette.text, letterSpacing: "-0.02em" }}>Vaalikone</span>
-          <span style={{ fontSize: "11px", color: palette.textLight, fontWeight: 500, marginLeft: "-4px" }}>2026</span>
+          <span style={{ fontFamily: "'Source Serif 4', Georgia, serif", fontWeight: 700, fontSize: "18px", color: palette.text, letterSpacing: "-0.02em" }}>{t.appName}</span>
+          <span style={{ fontSize: "11px", color: palette.textLight, fontWeight: 500, marginLeft: "-4px" }}>{t.appYear}</span>
         </div>
-        <nav style={{ display: "flex", gap: "4px" }}>
-          {[{ key: "home", label: "Etusivu" }, { key: "voter", label: "Äänestäjä" }, { key: "ngo", label: "Järjestö" }, { key: "admin", label: "Ylläpito" }].map((item) => (
+        <nav style={{ display: "flex", gap: "4px", alignItems: "center" }}>
+          {[{ key: "home", label: t.navHome }, { key: "voter", label: t.navVoter }, { key: "ngo", label: t.navNgo }, { key: "admin", label: t.navAdmin }].map((item) => (
             <button key={item.key} onClick={() => { setView(item.key); if (item.key !== "candidate") setPartyToken(null); }}
               style={{
                 padding: "6px 14px", borderRadius: "5px", border: "none", cursor: "pointer",
@@ -334,6 +375,7 @@ function Header({ view, setView, setPartyToken }) {
                 fontFamily: "'Source Serif 4', Georgia, serif", transition: "all 0.15s",
               }}>{item.label}</button>
           ))}
+          <LanguageSelector />
         </nav>
       </div>
     </header>
@@ -342,31 +384,32 @@ function Header({ view, setView, setPartyToken }) {
 
 // ─── Home ───
 function HomeView({ setView, setPartyToken }) {
+  const { t } = useTranslation();
   const [tokenInput, setTokenInput] = useState("");
   return (
     <div style={{ maxWidth: 680, margin: "0 auto", padding: "60px 24px", textAlign: "center" }}>
-      <h1 style={{ fontSize: "42px", fontWeight: 800, letterSpacing: "-0.03em", marginBottom: "16px", lineHeight: 1.1 }}>Löydä ehdokkaasi</h1>
+      <h1 style={{ fontSize: "42px", fontWeight: 800, letterSpacing: "-0.03em", marginBottom: "16px", lineHeight: 1.1 }}>{t.homeTitle}</h1>
       <p style={{ fontSize: "17px", color: palette.textMuted, lineHeight: 1.6, maxWidth: 520, margin: "0 auto 48px" }}>
-        Riippumaton alusta, joka yhdistää äänestäjät ja ehdokkaat kansalaisjärjestöjen laatimien politiikkakysymysten avulla.
+        {t.homeSubtitle}
       </p>
       <div style={{ display: "flex", flexDirection: "column", gap: "16px", maxWidth: 400, margin: "0 auto" }}>
         <Card style={{ cursor: "pointer", textAlign: "left" }} onClick={() => setView("voter")}>
-          <div style={{ fontSize: "11px", fontWeight: 700, color: palette.accent, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "6px" }}>Äänestäjä</div>
-          <div style={{ fontWeight: 700, fontSize: "16px", marginBottom: "4px" }}>Vertaile ehdokkaita</div>
-          <div style={{ fontSize: "13px", color: palette.textMuted }}>Vastaa politiikkakysymyksiin ja löydä lähin ehdokkaasi.</div>
+          <div style={{ fontSize: "11px", fontWeight: 700, color: palette.accent, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "6px" }}>{t.homeVoterLabel}</div>
+          <div style={{ fontWeight: 700, fontSize: "16px", marginBottom: "4px" }}>{t.homeVoterTitle}</div>
+          <div style={{ fontSize: "13px", color: palette.textMuted }}>{t.homeVoterDesc}</div>
         </Card>
         <Card style={{ cursor: "pointer", textAlign: "left" }} onClick={() => setView("ngo")}>
-          <div style={{ fontSize: "11px", fontWeight: 700, color: palette.warn, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "6px" }}>Järjestö</div>
-          <div style={{ fontWeight: 700, fontSize: "16px", marginBottom: "4px" }}>Lähetä kysymyksiä</div>
-          <div style={{ fontSize: "13px", color: palette.textMuted }}>Ehdota politiikkaväittämiä, joihin ehdokkaat vastaavat.</div>
+          <div style={{ fontSize: "11px", fontWeight: 700, color: palette.warn, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "6px" }}>{t.homeNgoLabel}</div>
+          <div style={{ fontWeight: 700, fontSize: "16px", marginBottom: "4px" }}>{t.homeNgoTitle}</div>
+          <div style={{ fontSize: "13px", color: palette.textMuted }}>{t.homeNgoDesc}</div>
         </Card>
         <Card style={{ textAlign: "left" }}>
-          <div style={{ fontSize: "11px", fontWeight: 700, color: palette.info, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "6px" }}>Ehdokas</div>
-          <div style={{ fontWeight: 700, fontSize: "16px", marginBottom: "8px" }}>Vastaa kysymyksiin</div>
-          <div style={{ fontSize: "13px", color: palette.textMuted, marginBottom: "12px" }}>Syötä puoluesihteeriltä saamasi tunniste.</div>
+          <div style={{ fontSize: "11px", fontWeight: 700, color: palette.info, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "6px" }}>{t.homeCandidateLabel}</div>
+          <div style={{ fontWeight: 700, fontSize: "16px", marginBottom: "8px" }}>{t.homeCandidateTitle}</div>
+          <div style={{ fontSize: "13px", color: palette.textMuted, marginBottom: "12px" }}>{t.homeCandidateDesc}</div>
           <div style={{ display: "flex", gap: "8px" }}>
-            <Input value={tokenInput} onChange={setTokenInput} placeholder="esim. sd-2026-x7k9" />
-            <Button onClick={() => { if (tokenInput.trim()) { setPartyToken(tokenInput.trim()); setView("candidate"); } }} disabled={!tokenInput.trim()} style={{ flexShrink: 0 }}>Siirry</Button>
+            <Input value={tokenInput} onChange={setTokenInput} placeholder={t.homeCandidatePlaceholder} />
+            <Button onClick={() => { if (tokenInput.trim()) { setPartyToken(tokenInput.trim()); setView("candidate"); } }} disabled={!tokenInput.trim()} style={{ flexShrink: 0 }}>{t.homeGo}</Button>
           </div>
         </Card>
       </div>
@@ -376,6 +419,7 @@ function HomeView({ setView, setPartyToken }) {
 
 // ─── Admin ───
 function AdminView() {
+  const { t } = useTranslation();
   const [adminSecret, setAdminSecret] = useState("");
   const [authed, setAuthed] = useState(false);
   const [parties, setParties] = useState([]);
@@ -443,12 +487,12 @@ function AdminView() {
   if (!authed) {
     return (
       <div style={{ maxWidth: 400, margin: "0 auto", padding: "80px 24px", textAlign: "center" }}>
-        <h2 style={{ fontSize: "24px", fontWeight: 800, marginBottom: "8px" }}>Ylläpidon kirjautuminen</h2>
-        <p style={{ color: palette.textMuted, marginBottom: "24px", fontSize: "14px" }}>Syötä ylläpidon salasana (.env-tiedoston ADMIN_SECRET).</p>
+        <h2 style={{ fontSize: "24px", fontWeight: 800, marginBottom: "8px" }}>{t.adminLoginTitle}</h2>
+        <p style={{ color: palette.textMuted, marginBottom: "24px", fontSize: "14px" }}>{t.adminLoginDesc}</p>
         {error && <ErrorBanner message={error} />}
-        <Input value={adminSecret} onChange={setAdminSecret} placeholder="Ylläpidon salasana" type="password" />
+        <Input value={adminSecret} onChange={setAdminSecret} placeholder={t.adminPasswordPlaceholder} type="password" />
         <div style={{ marginTop: "12px" }}>
-          <Button onClick={login} loading={loading} disabled={!adminSecret}>Kirjaudu</Button>
+          <Button onClick={login} loading={loading} disabled={!adminSecret}>{t.adminLogin}</Button>
         </div>
       </div>
     );
@@ -460,15 +504,15 @@ function AdminView() {
 
   return (
     <div style={{ maxWidth: 800, margin: "0 auto", padding: "40px 24px" }}>
-      <h2 style={{ fontSize: "28px", fontWeight: 800, letterSpacing: "-0.02em", marginBottom: "8px" }}>Ylläpidon hallintapaneeli</h2>
-      <p style={{ color: palette.textMuted, marginBottom: "36px" }}>Hallitse kysymyssarjoja ja puolueita.</p>
+      <h2 style={{ fontSize: "28px", fontWeight: 800, letterSpacing: "-0.02em", marginBottom: "8px" }}>{t.adminPanelTitle}</h2>
+      <p style={{ color: palette.textMuted, marginBottom: "36px" }}>{t.adminPanelDesc}</p>
       {error && <ErrorBanner message={error} onRetry={refresh} />}
 
       <section style={{ marginBottom: "40px" }}>
         <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px", display: "flex", alignItems: "center", gap: "10px" }}>
-          Odottaa hyväksyntää {pending.length > 0 && <Badge color="orange">{pending.length}</Badge>}
+          {t.adminPending} {pending.length > 0 && <Badge color="orange">{pending.length}</Badge>}
         </h3>
-        {pending.length === 0 && <p style={{ color: palette.textLight, fontSize: "14px" }}>Ei odottavia lähetyksiä.</p>}
+        {pending.length === 0 && <p style={{ color: palette.textLight, fontSize: "14px" }}>{t.adminNoPending}</p>}
         {pending.map((qs) => (
           <Card key={qs.id} style={{ marginBottom: "12px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", flexWrap: "wrap", gap: "12px" }}>
@@ -477,7 +521,7 @@ function AdminView() {
                   <NgoLogo src={qs.logoUrl} name={qs.ngoName} size={28} />
                   <div style={{ fontWeight: 700, fontSize: "16px" }}>{qs.title}</div>
                 </div>
-                <div style={{ fontSize: "13px", color: palette.textMuted }}>{qs.ngoName} · {qs.questions?.length || 0} kysymystä</div>
+                <div style={{ fontSize: "13px", color: palette.textMuted }}>{qs.ngoName} · {qs.questions?.length || 0} {t.adminQuestions}</div>
                 <div style={{ marginTop: "12px" }}>
                   {qs.questions?.map((q, i) => (
                     <div key={q.id} style={{ fontSize: "13px", color: palette.text, marginBottom: "4px" }}>
@@ -487,8 +531,8 @@ function AdminView() {
                 </div>
               </div>
               <div style={{ display: "flex", gap: "8px", flexShrink: 0 }}>
-                <Button variant="primary" size="sm" onClick={() => approveSet(qs.id)} loading={actionLoading === qs.id}>Hyväksy</Button>
-                <Button variant="danger" size="sm" onClick={() => rejectSet(qs.id)} loading={actionLoading === qs.id}>Hylkää</Button>
+                <Button variant="primary" size="sm" onClick={() => approveSet(qs.id)} loading={actionLoading === qs.id}>{t.adminApprove}</Button>
+                <Button variant="danger" size="sm" onClick={() => rejectSet(qs.id)} loading={actionLoading === qs.id}>{t.adminReject}</Button>
               </div>
             </div>
           </Card>
@@ -496,16 +540,16 @@ function AdminView() {
       </section>
 
       <section style={{ marginBottom: "40px" }}>
-        <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px" }}>Hyväksytyt <Badge color="green">{approved.length}</Badge></h3>
+        <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px" }}>{t.adminApproved} <Badge color="green">{approved.length}</Badge></h3>
         {approved.map((qs) => (
           <Card key={qs.id} style={{ marginBottom: "8px", padding: "16px 24px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                 <NgoLogo src={qs.logoUrl} name={qs.ngoName} size={24} />
                 <span style={{ fontWeight: 600 }}>{qs.title}</span>
-                <span style={{ color: palette.textMuted, fontSize: "13px" }}>— {qs.ngoName} · {qs.questions?.length || 0} kysymystä</span>
+                <span style={{ color: palette.textMuted, fontSize: "13px" }}>— {qs.ngoName} · {qs.questions?.length || 0} {t.adminQuestions}</span>
               </div>
-              <Badge color="green">Julkaistu</Badge>
+              <Badge color="green">{t.adminPublished}</Badge>
             </div>
           </Card>
         ))}
@@ -513,7 +557,7 @@ function AdminView() {
 
       {rejected.length > 0 && (
         <section style={{ marginBottom: "40px" }}>
-          <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px" }}>Hylätyt</h3>
+          <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px" }}>{t.adminRejected}</h3>
           {rejected.map((qs) => (
             <Card key={qs.id} style={{ marginBottom: "8px", padding: "16px 24px", opacity: 0.6 }}>
               <span style={{ fontWeight: 600 }}>{qs.title}</span>
@@ -524,7 +568,7 @@ function AdminView() {
       )}
 
       <section>
-        <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px" }}>Puolueet ja tunnisteet</h3>
+        <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px" }}>{t.adminPartiesTitle}</h3>
         {parties.map((p) => (
           <Card key={p.id} style={{ marginBottom: "8px", padding: "16px 24px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
@@ -537,11 +581,11 @@ function AdminView() {
           </Card>
         ))}
         <Card style={{ marginTop: "16px" }}>
-          <div style={{ fontSize: "14px", fontWeight: 600, marginBottom: "12px" }}>Lisää uusi puolue</div>
+          <div style={{ fontSize: "14px", fontWeight: 600, marginBottom: "12px" }}>{t.adminAddParty}</div>
           <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-            <div style={{ flex: 1, minWidth: "180px" }}><Input value={newPartyName} onChange={setNewPartyName} placeholder="Puolueen nimi" /></div>
-            <div style={{ flex: 1, minWidth: "180px" }}><Input value={newPartyEmail} onChange={setNewPartyEmail} placeholder="Sihteerin sähköposti" type="email" /></div>
-            <Button onClick={addParty} disabled={!newPartyName.trim()} loading={actionLoading === "new-party"}>Lisää</Button>
+            <div style={{ flex: 1, minWidth: "180px" }}><Input value={newPartyName} onChange={setNewPartyName} placeholder={t.adminPartyNamePlaceholder} /></div>
+            <div style={{ flex: 1, minWidth: "180px" }}><Input value={newPartyEmail} onChange={setNewPartyEmail} placeholder={t.adminPartyEmailPlaceholder} type="email" /></div>
+            <Button onClick={addParty} disabled={!newPartyName.trim()} loading={actionLoading === "new-party"}>{t.adminAdd}</Button>
           </div>
         </Card>
       </section>
@@ -551,6 +595,7 @@ function AdminView() {
 
 // ─── NGO ───
 function NgoView() {
+  const { t } = useTranslation();
   const [ngoName, setNgoName] = useState("");
   const [ngoEmail, setNgoEmail] = useState("");
   const [logoUrl, setLogoUrl] = useState("");
@@ -606,36 +651,36 @@ function NgoView() {
     return (
       <div style={{ maxWidth: 600, margin: "0 auto", padding: "80px 24px", textAlign: "center" }}>
         <div style={{ width: 64, height: 64, borderRadius: "50%", background: palette.accentLight, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px", fontSize: "28px" }}>✓</div>
-        <h2 style={{ fontSize: "24px", fontWeight: 800, marginBottom: "8px" }}>Lähetetty tarkistettavaksi</h2>
-        <p style={{ color: palette.textMuted, marginBottom: "24px" }}>Kysymyssarjasi on lähetetty ylläpidolle hyväksyttäväksi. Saat ilmoituksen sähköpostiisi, kun se on käsitelty.</p>
-        <Button onClick={() => { setSubmitted(false); setNgoName(""); setNgoEmail(""); setLogoUrl(""); setTitle(""); setQuestions([""]); }}>Lähetä toinen sarja</Button>
+        <h2 style={{ fontSize: "24px", fontWeight: 800, marginBottom: "8px" }}>{t.ngoSubmittedTitle}</h2>
+        <p style={{ color: palette.textMuted, marginBottom: "24px" }}>{t.ngoSubmittedDesc}</p>
+        <Button onClick={() => { setSubmitted(false); setNgoName(""); setNgoEmail(""); setLogoUrl(""); setTitle(""); setQuestions([""]); }}>{t.ngoSubmitAnother}</Button>
       </div>
     );
   }
 
   return (
     <div style={{ maxWidth: 680, margin: "0 auto", padding: "40px 24px" }}>
-      <h2 style={{ fontSize: "28px", fontWeight: 800, letterSpacing: "-0.02em", marginBottom: "8px" }}>Lähetä kysymyksiä</h2>
+      <h2 style={{ fontSize: "28px", fontWeight: 800, letterSpacing: "-0.02em", marginBottom: "8px" }}>{t.ngoTitle}</h2>
       <p style={{ color: palette.textMuted, marginBottom: "16px" }}>
-        Ehdota politiikkaväittämiä, joihin ehdokkaat vastaavat. Jokaisen väittämän tulee olla muotoiltu niin, että siihen voi vastata asteikolla "täysin eri mieltä" – "täysin samaa mieltä".
+        {t.ngoDesc}
       </p>
       <div style={{ background: palette.accentLight, border: `1px solid ${palette.accent}`, borderRadius: "8px", padding: "12px 16px", marginBottom: "24px", fontSize: "14px", color: palette.text }}>
-        Tarkista ennen lähettämistä, ettei vastaavaa kysymyssarjaa ole jo hyväksytty.{" "}
+        {t.ngoCheckBefore}{" "}
         <button onClick={openApproved} style={{ background: "none", border: "none", padding: 0, color: palette.accent, fontWeight: 600, cursor: "pointer", fontSize: "14px", textDecoration: "underline" }}>
-          Katso hyväksytyt kysymyssarjat
+          {t.ngoViewApproved}
         </button>
       </div>
       {showApproved && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: "24px" }} onClick={() => setShowApproved(false)}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: palette.bg, borderRadius: "14px", maxWidth: 620, width: "100%", maxHeight: "80vh", overflow: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
             <div style={{ padding: "24px 28px", borderBottom: `1px solid ${palette.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 700 }}>Hyväksytyt kysymyssarjat</h3>
+              <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 700 }}>{t.ngoApprovedTitle}</h3>
               <button onClick={() => setShowApproved(false)} style={{ background: "none", border: "none", fontSize: "22px", cursor: "pointer", color: palette.textLight, lineHeight: 1 }}>×</button>
             </div>
             <div style={{ padding: "20px 28px" }}>
-              {approvedLoading && <div style={{ color: palette.textMuted, textAlign: "center", padding: "32px 0" }}>Ladataan…</div>}
+              {approvedLoading && <div style={{ color: palette.textMuted, textAlign: "center", padding: "32px 0" }}>{t.ngoApprovedLoading}</div>}
               {!approvedLoading && approvedSets && approvedSets.length === 0 && (
-                <div style={{ color: palette.textMuted, textAlign: "center", padding: "32px 0" }}>Ei vielä hyväksyttyjä kysymyssarjoja.</div>
+                <div style={{ color: palette.textMuted, textAlign: "center", padding: "32px 0" }}>{t.ngoNoApproved}</div>
               )}
               {!approvedLoading && approvedSets && approvedSets.map((qs) => (
                 <div key={qs.id} style={{ marginBottom: "24px" }}>
@@ -643,7 +688,7 @@ function NgoView() {
                     <NgoLogo src={qs.logoUrl} name={qs.ngoName} size={24} />
                     <div style={{ fontWeight: 700, fontSize: "15px" }}>{qs.title}</div>
                   </div>
-                  <div style={{ fontSize: "12px", color: palette.textMuted, marginBottom: "10px" }}>{qs.ngoName} · {(qs.questions || []).length} väittämää</div>
+                  <div style={{ fontSize: "12px", color: palette.textMuted, marginBottom: "10px" }}>{qs.ngoName} · {(qs.questions || []).length} {t.ngoStatements}</div>
                   <ol style={{ margin: 0, paddingLeft: "20px" }}>
                     {(qs.questions || []).map((q) => (
                       <li key={q.id} style={{ fontSize: "14px", color: palette.text, marginBottom: "4px" }}>{q.statement}</li>
@@ -659,42 +704,42 @@ function NgoView() {
       <Card>
         <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
           <div>
-            <label style={{ fontSize: "13px", fontWeight: 600, display: "block", marginBottom: "6px" }}>Järjestön nimi</label>
-            <Input value={ngoName} onChange={setNgoName} placeholder="esim. Ilmastotoimintaverkosto" />
+            <label style={{ fontSize: "13px", fontWeight: 600, display: "block", marginBottom: "6px" }}>{t.ngoOrgName}</label>
+            <Input value={ngoName} onChange={setNgoName} placeholder={t.ngoOrgNamePlaceholder} />
           </div>
           <div>
-            <label style={{ fontSize: "13px", fontWeight: 600, display: "block", marginBottom: "6px" }}>Yhteyssähköposti</label>
-            <Input value={ngoEmail} onChange={setNgoEmail} placeholder="info@jarjesto.fi" type="email" />
+            <label style={{ fontSize: "13px", fontWeight: 600, display: "block", marginBottom: "6px" }}>{t.ngoContactEmail}</label>
+            <Input value={ngoEmail} onChange={setNgoEmail} placeholder={t.ngoContactEmailPlaceholder} type="email" />
           </div>
           <div>
-            <label style={{ fontSize: "13px", fontWeight: 600, display: "block", marginBottom: "6px" }}>Logon URL-osoite (valinnainen)</label>
-            <Input value={logoUrl} onChange={setLogoUrl} placeholder="https://esimerkki.fi/logo.png" />
+            <label style={{ fontSize: "13px", fontWeight: 600, display: "block", marginBottom: "6px" }}>{t.ngoLogoUrl}</label>
+            <Input value={logoUrl} onChange={setLogoUrl} placeholder={t.ngoLogoUrlPlaceholder} />
             {logoUrl && (
               <div style={{ marginTop: "8px", display: "flex", alignItems: "center", gap: "8px" }}>
                 <NgoLogo src={logoUrl} name={ngoName} size={36} />
-                <span style={{ fontSize: "12px", color: palette.textLight }}>Esikatselu</span>
+                <span style={{ fontSize: "12px", color: palette.textLight }}>{t.preview}</span>
               </div>
             )}
           </div>
           <div>
-            <label style={{ fontSize: "13px", fontWeight: 600, display: "block", marginBottom: "6px" }}>Kysymyssarjan otsikko</label>
-            <Input value={title} onChange={setTitle} placeholder="esim. Ilmasto- ja energiapolitiikka" />
+            <label style={{ fontSize: "13px", fontWeight: 600, display: "block", marginBottom: "6px" }}>{t.ngoSetTitle}</label>
+            <Input value={title} onChange={setTitle} placeholder={t.ngoSetTitlePlaceholder} />
           </div>
           <div>
-            <label style={{ fontSize: "13px", fontWeight: 600, display: "block", marginBottom: "10px" }}>Väittämät ({questions.filter((q) => q.trim()).length})</label>
+            <label style={{ fontSize: "13px", fontWeight: 600, display: "block", marginBottom: "10px" }}>{t.ngoStatementsLabel} ({questions.filter((q) => q.trim()).length})</label>
             {questions.map((q, i) => (
               <div key={i} style={{ display: "flex", gap: "8px", marginBottom: "8px", alignItems: "start" }}>
                 <span style={{ color: palette.textLight, fontSize: "13px", marginTop: "10px", minWidth: "20px" }}>{i + 1}.</span>
-                <div style={{ flex: 1 }}><TextArea value={q} onChange={(v) => updateQuestion(i, v)} placeholder="Suomen tulee..." rows={2} /></div>
+                <div style={{ flex: 1 }}><TextArea value={q} onChange={(v) => updateQuestion(i, v)} placeholder={t.ngoStatementPlaceholder} rows={2} /></div>
                 {questions.length > 1 && (
                   <button onClick={() => removeQuestion(i)} style={{ background: "none", border: "none", color: palette.textLight, cursor: "pointer", fontSize: "18px", marginTop: "8px" }}>×</button>
                 )}
               </div>
             ))}
-            <Button variant="ghost" size="sm" onClick={addQuestion}>+ Lisää väittämä</Button>
+            <Button variant="ghost" size="sm" onClick={addQuestion}>{t.ngoAddStatement}</Button>
           </div>
           <Button size="lg" onClick={submit} loading={loading} disabled={!ngoName.trim() || !title.trim() || questions.filter((q) => q.trim()).length === 0}>
-            Lähetä tarkistettavaksi
+            {t.ngoSubmit}
           </Button>
         </div>
       </Card>
@@ -704,6 +749,7 @@ function NgoView() {
 
 // ─── Candidate ───
 function CandidateView({ partyToken, initialCandidateId }) {
+  const { t } = useTranslation();
   const [partyData, setPartyData] = useState(null);
   const [questionSets, setQuestionSets] = useState([]);
   const [selectedCandidate, setSelectedCandidate] = useState(null);
@@ -827,8 +873,8 @@ function CandidateView({ partyToken, initialCandidateId }) {
   if (error && !partyData) {
     return (
       <div style={{ maxWidth: 500, margin: "0 auto", padding: "80px 24px", textAlign: "center" }}>
-        <h2 style={{ fontSize: "24px", fontWeight: 800, marginBottom: "8px" }}>Virheellinen tunniste</h2>
-        <p style={{ color: palette.textMuted }}>Tunniste "{partyToken}" ei vastaa mitään rekisteröityä puoluetta. Tarkista puoluesihteeriltäsi oikea tunniste.</p>
+        <h2 style={{ fontSize: "24px", fontWeight: 800, marginBottom: "8px" }}>{t.candidateInvalidToken}</h2>
+        <p style={{ color: palette.textMuted }}>{t.candidateInvalidTokenDesc(partyToken)}</p>
       </div>
     );
   }
@@ -837,8 +883,8 @@ function CandidateView({ partyToken, initialCandidateId }) {
     return (
       <div style={{ maxWidth: 500, margin: "0 auto", padding: "80px 24px", textAlign: "center" }}>
         <div style={{ width: 64, height: 64, borderRadius: "50%", background: palette.accentLight, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px", fontSize: "28px" }}>✓</div>
-        <h2 style={{ fontSize: "24px", fontWeight: 800, marginBottom: "8px" }}>Vastaukset tallennettu</h2>
-        <p style={{ color: palette.textMuted }}>Kiitos, {candidateName}. Vastauksesi puolueelle {partyData?.party?.name} on tallennettu.</p>
+        <h2 style={{ fontSize: "24px", fontWeight: 800, marginBottom: "8px" }}>{t.candidateSavedTitle}</h2>
+        <p style={{ color: palette.textMuted }}>{t.candidateSavedDesc(candidateName, partyData?.party?.name)}</p>
       </div>
     );
   }
@@ -847,11 +893,11 @@ function CandidateView({ partyToken, initialCandidateId }) {
     return (
       <div style={{ maxWidth: 600, margin: "0 auto", padding: "40px 24px" }}>
         <Badge color="blue">{partyData?.party?.name}</Badge>
-        <h2 style={{ fontSize: "28px", fontWeight: 800, letterSpacing: "-0.02em", margin: "12px 0 8px" }}>Ehdokasportaali</h2>
-        <p style={{ color: palette.textMuted, marginBottom: "28px" }}>Valitse nimesi, jos olet vastannut aiemmin, tai rekisteröidy uutena ehdokkaana.</p>
+        <h2 style={{ fontSize: "28px", fontWeight: 800, letterSpacing: "-0.02em", margin: "12px 0 8px" }}>{t.candidatePortalTitle}</h2>
+        <p style={{ color: palette.textMuted, marginBottom: "28px" }}>{t.candidatePortalDesc}</p>
         {partyData?.candidates?.length > 0 && (
           <div style={{ marginBottom: "16px" }}>
-            <div style={{ fontSize: "13px", fontWeight: 600, marginBottom: "10px" }}>Nykyiset ehdokkaat</div>
+            <div style={{ fontSize: "13px", fontWeight: 600, marginBottom: "10px" }}>{t.candidateExisting}</div>
             {partyData.candidates.map((c) => (
               <Card key={c.id} onClick={() => selectExisting(c)} style={{ marginBottom: "8px", padding: "14px 20px", cursor: "pointer" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -859,13 +905,13 @@ function CandidateView({ partyToken, initialCandidateId }) {
                     <Avatar src={c.photoUrl} name={c.name} size={36} />
                     <span style={{ fontWeight: 600 }}>{c.name}</span>
                   </div>
-                  <span style={{ fontSize: "13px", color: palette.textMuted }}>{c.answerCount}/{allQuestions.length} vastattu</span>
+                  <span style={{ fontSize: "13px", color: palette.textMuted }}>{c.answerCount}/{allQuestions.length} {t.candidateAnswered}</span>
                 </div>
               </Card>
             ))}
           </div>
         )}
-        <Button variant="secondary" onClick={startNew}>+ Rekisteröidy uutena ehdokkaana</Button>
+        <Button variant="secondary" onClick={startNew}>{t.candidateRegister}</Button>
       </div>
     );
   }
@@ -877,37 +923,37 @@ function CandidateView({ partyToken, initialCandidateId }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", marginBottom: "24px", flexWrap: "wrap", gap: "12px" }}>
         <div>
           <Badge color="blue">{partyData?.party?.name}</Badge>
-          <h2 style={{ fontSize: "24px", fontWeight: 800, margin: "8px 0 4px" }}>Vastaa kysymyksiin</h2>
-          <p style={{ color: palette.textMuted, fontSize: "14px" }}>{answeredCount} / {allQuestions.length} vastattu</p>
+          <h2 style={{ fontSize: "24px", fontWeight: 800, margin: "8px 0 4px" }}>{t.candidateAnswerTitle}</h2>
+          <p style={{ color: palette.textMuted, fontSize: "14px" }}>{answeredCount} / {allQuestions.length} {t.candidateAnsweredCount}</p>
         </div>
-        <Button onClick={save} loading={saving} disabled={!candidateName.trim() || answeredCount === 0}>Tallenna vastaukset</Button>
+        <Button onClick={save} loading={saving} disabled={!candidateName.trim() || answeredCount === 0}>{t.candidateSaveAnswers}</Button>
       </div>
       {error && <ErrorBanner message={error} />}
 
       <Card style={{ marginBottom: "24px" }}>
-        <div style={{ fontSize: "14px", fontWeight: 700, marginBottom: "16px" }}>Profiilisi</div>
+        <div style={{ fontSize: "14px", fontWeight: 700, marginBottom: "16px" }}>{t.candidateProfile}</div>
         <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
           <div>
-            <label style={{ fontSize: "13px", fontWeight: 600, display: "block", marginBottom: "6px" }}>Koko nimi {selectedCandidate === "new" && "*"}</label>
-            <Input value={candidateName} onChange={setCandidateName} placeholder="esim. Matti Meikäläinen" />
+            <label style={{ fontSize: "13px", fontWeight: 600, display: "block", marginBottom: "6px" }}>{t.candidateFullName} {selectedCandidate === "new" && "*"}</label>
+            <Input value={candidateName} onChange={setCandidateName} placeholder={t.candidateFullNamePlaceholder} />
           </div>
           <div>
-            <label style={{ fontSize: "13px", fontWeight: 600, display: "block", marginBottom: "6px" }}>Profiilikuvan URL (valinnainen)</label>
-            <Input value={candidatePhoto} onChange={setCandidatePhoto} placeholder="https://esimerkki.fi/kuva.jpg" />
+            <label style={{ fontSize: "13px", fontWeight: 600, display: "block", marginBottom: "6px" }}>{t.candidatePhotoUrl}</label>
+            <Input value={candidatePhoto} onChange={setCandidatePhoto} placeholder={t.candidatePhotoUrlPlaceholder} />
             {candidatePhoto && (
               <div style={{ marginTop: "8px", display: "flex", alignItems: "center", gap: "10px" }}>
                 <Avatar src={candidatePhoto} name={candidateName} size={48} />
-                <span style={{ fontSize: "12px", color: palette.textLight }}>Esikatselu</span>
+                <span style={{ fontSize: "12px", color: palette.textLight }}>{t.preview}</span>
               </div>
             )}
           </div>
           <div>
-            <label style={{ fontSize: "13px", fontWeight: 600, display: "block", marginBottom: "6px" }}>Esittelyteksti (valinnainen)</label>
-            <TextArea value={candidateBio} onChange={setCandidateBio} placeholder="Kerro äänestäjille itsestäsi, taustastasi ja tärkeimmistä tavoitteistasi…" rows={4} />
+            <label style={{ fontSize: "13px", fontWeight: 600, display: "block", marginBottom: "6px" }}>{t.candidateBio}</label>
+            <TextArea value={candidateBio} onChange={setCandidateBio} placeholder={t.candidateBioPlaceholder} rows={4} />
           </div>
           <div>
-            <label style={{ fontSize: "13px", fontWeight: 600, display: "block", marginBottom: "6px" }}>Sähköpostiosoite (valinnainen) — saat ilmoituksen uusista kysymyksistä</label>
-            <Input value={candidateEmail} onChange={setCandidateEmail} placeholder="etunimi.sukunimi@esimerkki.fi" type="email" />
+            <label style={{ fontSize: "13px", fontWeight: 600, display: "block", marginBottom: "6px" }}>{t.candidateEmailLabel}</label>
+            <Input value={candidateEmail} onChange={setCandidateEmail} placeholder={t.candidateEmailPlaceholder} type="email" />
           </div>
         </div>
       </Card>
@@ -926,7 +972,7 @@ function CandidateView({ partyToken, initialCandidateId }) {
               </div>
               <ScaleInput value={answers[q.id]?.value} onChange={(v) => setAnswer(q.id, "value", v)} />
               <div style={{ marginTop: "12px" }}>
-                <TextArea value={answers[q.id]?.text || ""} onChange={(v) => setAnswer(q.id, "text", v)} placeholder="Perustele kantasi (valinnainen mutta suositeltava)…" rows={2} />
+                <TextArea value={answers[q.id]?.text || ""} onChange={(v) => setAnswer(q.id, "text", v)} placeholder={t.candidateExplainPlaceholder} rows={2} />
               </div>
             </Card>
           ))}
@@ -935,7 +981,7 @@ function CandidateView({ partyToken, initialCandidateId }) {
 
       <div style={{ textAlign: "center", paddingBottom: "40px" }}>
         <Button size="lg" onClick={save} loading={saving} disabled={!candidateName.trim() || answeredCount === 0}>
-          Tallenna vastaukset ({answeredCount}/{allQuestions.length})
+          {t.candidateSaveAnswers} ({answeredCount}/{allQuestions.length})
         </Button>
       </div>
     </div>
@@ -990,6 +1036,9 @@ function revokeConsent() {
 
 // ─── Voter ───
 function VoterView() {
+  const { t } = useTranslation();
+  const labels = useLabels();
+  const weightLabels = useWeightLabels();
   const [questionSets, setQuestionSets] = useState([]);
   const [selectedSetIds, setSelectedSetIds] = useState(new Set());
   const [step, setStep] = useState("loading");
@@ -1077,31 +1126,31 @@ function VoterView() {
     }
   }
 
-  if (step === "loading" || step === "loading-results") return <LoadingState text={step === "loading-results" ? "Lasketaan tuloksia..." : "Ladataan..."} />;
+  if (step === "loading" || step === "loading-results") return <LoadingState text={step === "loading-results" ? t.voterCalculating : t.loading} />;
 
   // GDPR consent
   if (step === "consent") {
     return (
       <div style={{ maxWidth: 560, margin: "0 auto", padding: "40px 24px" }}>
-        <h2 style={{ fontSize: "26px", fontWeight: 800, letterSpacing: "-0.02em", marginBottom: "12px" }}>Tallennetaanko vastauksesi?</h2>
+        <h2 style={{ fontSize: "26px", fontWeight: 800, letterSpacing: "-0.02em", marginBottom: "12px" }}>{t.voterConsentTitle}</h2>
         <p style={{ color: palette.textMuted, lineHeight: 1.7, marginBottom: "16px" }}>
-          Voimme tallentaa vastauksesi tämän selaimen muistiin, jotta ne täyttyvät automaattisesti, kun palaat myöhemmin.
+          {t.voterConsentDesc}
         </p>
         <div style={{ background: palette.surfaceAlt, border: `1px solid ${palette.border}`, borderRadius: "10px", padding: "16px 20px", marginBottom: "24px", fontSize: "13px", lineHeight: 1.7, color: palette.textMuted }}>
-          <strong style={{ color: palette.text, display: "block", marginBottom: "6px" }}>Mitä tallennetaan ja miksi?</strong>
+          <strong style={{ color: palette.text, display: "block", marginBottom: "6px" }}>{t.voterConsentWhat}</strong>
           <ul style={{ margin: 0, paddingLeft: "18px" }}>
-            <li>Vastauksesi kysymyksiin (arvo 0–4 asteikolla)</li>
-            <li>Painotuksesi eri aiheille</li>
-            <li>Valitsemasi kysymyssarjat</li>
+            <li>{t.voterConsentItem1}</li>
+            <li>{t.voterConsentItem2}</li>
+            <li>{t.voterConsentItem3}</li>
           </ul>
           <div style={{ marginTop: "10px" }}>
-            <strong style={{ color: palette.text }}>Tarkoitus:</strong> vastausten esitäyttö paluukäynneillä.
+            <strong style={{ color: palette.text }}>{t.voterConsentPurpose}</strong> {t.voterConsentPurposeDesc}
           </div>
           <div style={{ marginTop: "6px" }}>
-            <strong style={{ color: palette.text }}>Säilytyspaikka:</strong> vain tämä selain — tietoja ei lähetetä palvelimelle eikä jaeta kolmansille osapuolille.
+            <strong style={{ color: palette.text }}>{t.voterConsentStorage}</strong> {t.voterConsentStorageDesc}
           </div>
           <div style={{ marginTop: "6px" }}>
-            Voit peruuttaa suostumuksesi milloin tahansa poistamalla tallennetut vastaukset.
+            {t.voterConsentRevoke}
           </div>
         </div>
         {error && <ErrorBanner message={error} />}
@@ -1111,12 +1160,12 @@ function VoterView() {
             setConsentGiven(true);
             persistAnswers(voterAnswers, weights, selectedSetIds);
             setStep("select");
-          }}>Salli tallennus</Button>
+          }}>{t.voterConsentAllow}</Button>
           <Button variant="secondary" size="lg" onClick={() => {
             saveConsent(false);
             setConsentGiven(false);
             setStep("select");
-          }}>Älä tallenna</Button>
+          }}>{t.voterConsentDeny}</Button>
         </div>
       </div>
     );
@@ -1127,11 +1176,11 @@ function VoterView() {
     const hasSaved = consentGiven && Object.keys(voterAnswers).length > 0;
     return (
       <div style={{ maxWidth: 640, margin: "0 auto", padding: "40px 24px" }}>
-        <h2 style={{ fontSize: "28px", fontWeight: 800, letterSpacing: "-0.02em", marginBottom: "8px" }}>Valitse aiheet</h2>
-        <p style={{ color: palette.textMuted, marginBottom: "28px" }}>Valitse kysymyssarjat, joihin haluat vastata. Voit yhdistää eri järjestöjen aiheita.</p>
+        <h2 style={{ fontSize: "28px", fontWeight: 800, letterSpacing: "-0.02em", marginBottom: "8px" }}>{t.voterSelectTitle}</h2>
+        <p style={{ color: palette.textMuted, marginBottom: "28px" }}>{t.voterSelectDesc}</p>
         {hasSaved && (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: palette.accentLight, border: `1px solid ${palette.accent}`, borderRadius: "8px", padding: "10px 16px", marginBottom: "20px", fontSize: "13px" }}>
-            <span style={{ color: palette.accent, fontWeight: 600 }}>Aiemmat vastauksesi on esitäytetty.</span>
+            <span style={{ color: palette.accent, fontWeight: 600 }}>{t.voterPrefilled}</span>
             <button onClick={() => {
               clearSavedAnswers();
               revokeConsent();
@@ -1139,12 +1188,12 @@ function VoterView() {
               setVoterAnswers({});
               setWeights({});
             }} style={{ background: "none", border: "none", color: palette.textLight, cursor: "pointer", fontSize: "12px", fontFamily: "inherit", textDecoration: "underline" }}>
-              Poista tallennetut vastaukset
+              {t.voterDeleteSaved}
             </button>
           </div>
         )}
         {error && <ErrorBanner message={error} />}
-        {approvedSets.length === 0 && <p style={{ color: palette.textLight }}>Kysymyssarjoja ei ole vielä saatavilla.</p>}
+        {approvedSets.length === 0 && <p style={{ color: palette.textLight }}>{t.voterNoSets}</p>}
         {approvedSets.map((qs) => (
           <Card key={qs.id} onClick={() => toggleSet(qs.id)} style={{
             marginBottom: "10px", cursor: "pointer",
@@ -1156,7 +1205,7 @@ function VoterView() {
                 <NgoLogo src={qs.logoUrl} name={qs.ngoName} size={44} />
                 <div>
                   <div style={{ fontWeight: 700, fontSize: "15px" }}>{qs.title}</div>
-                  <div style={{ fontSize: "13px", color: palette.textMuted, marginTop: "2px" }}>{qs.ngoName} · {(qs.questions || []).length} kysymystä</div>
+                  <div style={{ fontSize: "13px", color: palette.textMuted, marginTop: "2px" }}>{qs.ngoName} · {(qs.questions || []).length} {t.voterQuestions}</div>
                 </div>
               </div>
               <div style={{
@@ -1171,7 +1220,7 @@ function VoterView() {
         ))}
         <div style={{ marginTop: "20px" }}>
           <Button size="lg" onClick={startAnswering} disabled={selectedSetIds.size === 0 || activeQuestions.length === 0}>
-            Aloita ({activeQuestions.length} kysymystä)
+            {t.voterStart} ({activeQuestions.length} {t.voterQuestions})
           </Button>
         </div>
       </div>
@@ -1194,7 +1243,7 @@ function VoterView() {
         <Card style={{ textAlign: "center", padding: "40px 32px" }}>
           <div style={{ fontSize: "19px", fontWeight: 700, lineHeight: 1.5, marginBottom: "32px", maxWidth: 480, margin: "0 auto 32px" }}>"{q.statement}"</div>
           <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxWidth: 320, margin: "0 auto" }}>
-            {LABELS.map((label, i) => (
+            {labels.map((label, i) => (
               <button key={i} onClick={() => answerQuestion(i)} style={{
                 padding: "12px 20px", borderRadius: "8px",
                 border: `1.5px solid ${voterAnswers[q.id] === i ? palette.accent : palette.border}`,
@@ -1210,7 +1259,7 @@ function VoterView() {
               <button onClick={() => setCurrentQ((c) => c - 1)} style={{
                 background: "none", border: "none", color: palette.textLight,
                 cursor: "pointer", fontSize: "13px", fontFamily: "'Source Serif 4', Georgia, serif",
-              }}>← Edellinen</button>
+              }}>{t.voterPrevious}</button>
             )}
             {voterAnswers[q.id] !== undefined && (
               <button onClick={() => {
@@ -1219,7 +1268,7 @@ function VoterView() {
               }} style={{
                 background: "none", border: "none", color: palette.textMuted,
                 cursor: "pointer", fontSize: "13px", fontFamily: "'Source Serif 4', Georgia, serif",
-              }}>Ohita → </button>
+              }}>{t.voterSkip}</button>
             )}
           </div>
         </Card>
@@ -1231,15 +1280,15 @@ function VoterView() {
   if (step === "weight") {
     return (
       <div style={{ maxWidth: 640, margin: "0 auto", padding: "40px 24px" }}>
-        <h2 style={{ fontSize: "24px", fontWeight: 800, marginBottom: "8px" }}>Kuinka tärkeä kukin aihe on sinulle?</h2>
-        <p style={{ color: palette.textMuted, marginBottom: "28px", fontSize: "14px" }}>Säädä halutessasi, kuinka paljon kukin kysymys vaikuttaa tuloksiisi.</p>
+        <h2 style={{ fontSize: "24px", fontWeight: 800, marginBottom: "8px" }}>{t.voterWeightTitle}</h2>
+        <p style={{ color: palette.textMuted, marginBottom: "28px", fontSize: "14px" }}>{t.voterWeightDesc}</p>
         {activeQuestions.map((q, i) => (
           <Card key={q.id} style={{ marginBottom: "10px", padding: "16px 20px" }}>
             <div style={{ fontSize: "13px", fontWeight: 600, marginBottom: "8px" }}>
               <span style={{ color: palette.textLight }}>{i + 1}.</span> {q.statement}
             </div>
             <div style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}>
-              {WEIGHT_LABELS.map((label, wi) => (
+              {weightLabels.map((label, wi) => (
                 <button key={wi} onClick={() => setWeights((w) => { const next = { ...w, [q.id]: wi }; if (consentGiven) persistAnswers(voterAnswers, next, selectedSetIds); return next; })} style={{
                   padding: "5px 10px", borderRadius: "4px", fontSize: "12px",
                   border: `1px solid ${(weights[q.id] ?? 1) === wi ? palette.accent : palette.border}`,
@@ -1253,8 +1302,8 @@ function VoterView() {
           </Card>
         ))}
         <div style={{ marginTop: "20px", display: "flex", gap: "12px" }}>
-          <Button size="lg" onClick={finishWeighting}>Näytä tulokset</Button>
-          <Button variant="ghost" size="lg" onClick={finishWeighting}>Ohita painotus</Button>
+          <Button size="lg" onClick={finishWeighting}>{t.voterShowResults}</Button>
+          <Button variant="ghost" size="lg" onClick={finishWeighting}>{t.voterSkipWeighting}</Button>
         </div>
       </div>
     );
@@ -1263,10 +1312,10 @@ function VoterView() {
   // Results
   return (
     <div style={{ maxWidth: 740, margin: "0 auto", padding: "40px 24px" }}>
-      <h2 style={{ fontSize: "28px", fontWeight: 800, letterSpacing: "-0.02em", marginBottom: "8px" }}>Tuloksesi</h2>
-      <p style={{ color: palette.textMuted, marginBottom: "28px" }}>Ehdokkaat järjestettynä sen mukaan, kuinka lähellä heidän vastauksensa ovat omiasi.</p>
+      <h2 style={{ fontSize: "28px", fontWeight: 800, letterSpacing: "-0.02em", marginBottom: "8px" }}>{t.voterResultsTitle}</h2>
+      <p style={{ color: palette.textMuted, marginBottom: "28px" }}>{t.voterResultsDesc}</p>
       {error && <ErrorBanner message={error} />}
-      {results.length === 0 && <p style={{ color: palette.textLight }}>Yksikään ehdokas ei ole vielä vastannut näihin kysymyksiin.</p>}
+      {results.length === 0 && <p style={{ color: palette.textLight }}>{t.voterNoCandidates}</p>}
       {results.map((c) => {
         const isExpanded = expandedCandidate === c.id;
         const matchColor = c.match >= 75 ? palette.accent : c.match >= 50 ? palette.warn : palette.danger;
@@ -1286,7 +1335,7 @@ function VoterView() {
                       background: "none", border: `1px solid ${palette.border}`, borderRadius: "4px",
                       padding: "2px 8px", fontSize: "11px", color: palette.textMuted, cursor: "pointer",
                       fontFamily: "'Source Serif 4', Georgia, serif",
-                    }}>Profiili</button>
+                    }}>{t.profileButton}</button>
                   )}
                 </div>
                 <ProgressBar value={c.match} color={matchColor} />
@@ -1308,9 +1357,9 @@ function VoterView() {
                     <div key={q.id} style={{ marginBottom: "16px" }}>
                       <div style={{ fontSize: "13px", fontWeight: 600, marginBottom: "6px" }}>{q.statement}</div>
                       <div style={{ display: "flex", gap: "16px", fontSize: "13px", flexWrap: "wrap" }}>
-                        <span style={{ color: palette.textMuted }}>Sinä: <strong style={{ color: palette.text }}>{LABELS[va]}</strong></span>
+                        <span style={{ color: palette.textMuted }}>{t.voterYou}: <strong style={{ color: palette.text }}>{labels[va]}</strong></span>
                         <span style={{ color: agree ? palette.accent : close ? palette.warn : palette.danger }}>
-                          Ehdokas: <strong>{LABELS[ca.value]}</strong>{agree && " ✓"}
+                          {t.voterCandidate}: <strong>{labels[ca.value]}</strong>{agree && " ✓"}
                         </span>
                       </div>
                       {ca.explanation && (
@@ -1325,7 +1374,7 @@ function VoterView() {
         );
       })}
       <div style={{ marginTop: "24px" }}>
-        <Button variant="ghost" onClick={() => { clearSavedAnswers(); setStep("select"); setVoterAnswers({}); setWeights({}); setExpandedCandidate(null); setResults([]); }}>Aloita alusta</Button>
+        <Button variant="ghost" onClick={() => { clearSavedAnswers(); setStep("select"); setVoterAnswers({}); setWeights({}); setExpandedCandidate(null); setResults([]); }}>{t.voterStartOver}</Button>
       </div>
       {profileCandidate && (
         <CandidateProfile candidate={profileCandidate} onClose={() => setProfileCandidate(null)} activeQuestions={activeQuestions} voterAnswers={voterAnswers} />
@@ -1343,17 +1392,23 @@ export default function App() {
   const [view, setView] = useState(_urlPartyToken ? "candidate" : "home");
   const [partyToken, setPartyToken] = useState(_urlPartyToken);
   const [initialCandidateId] = useState(_urlCandidateId);
+  const [lang, setLang] = useState(DEFAULT_LANG);
+
+  const t = translations[lang] || translations.fi;
+  const langValue = useMemo(() => ({ lang, t, setLang }), [lang, t]);
 
   return (
-    <div style={{ minHeight: "100vh", background: palette.bg, fontFamily: "'Source Serif 4', Georgia, serif", color: palette.text }}>
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-      <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&display=swap" rel="stylesheet" />
-      <Header view={view} setView={setView} setPartyToken={setPartyToken} />
-      {view === "home" && <HomeView setView={setView} setPartyToken={setPartyToken} />}
-      {view === "admin" && <AdminView />}
-      {view === "ngo" && <NgoView />}
-      {view === "candidate" && <CandidateView partyToken={partyToken} initialCandidateId={initialCandidateId} />}
-      {view === "voter" && <VoterView />}
-    </div>
+    <LanguageContext.Provider value={langValue}>
+      <div style={{ minHeight: "100vh", background: palette.bg, fontFamily: "'Source Serif 4', Georgia, serif", color: palette.text }}>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&display=swap" rel="stylesheet" />
+        <Header view={view} setView={setView} setPartyToken={setPartyToken} />
+        {view === "home" && <HomeView setView={setView} setPartyToken={setPartyToken} />}
+        {view === "admin" && <AdminView />}
+        {view === "ngo" && <NgoView />}
+        {view === "candidate" && <CandidateView partyToken={partyToken} initialCandidateId={initialCandidateId} />}
+        {view === "voter" && <VoterView />}
+      </div>
+    </LanguageContext.Provider>
   );
 }
