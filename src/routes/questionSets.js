@@ -20,7 +20,7 @@ publicRouter.get("/", async (req, res, next) => {
       `SELECT qs.id, qs.ngo_name, qs.logo_url, qs.title,
               qs.status, qs.submitted_at, qs.reviewed_at
        FROM question_sets qs
-       WHERE qs.status = 'approved'
+       WHERE qs.status = 'approved' AND qs.hidden = false
        ORDER BY qs.submitted_at`
     );
 
@@ -253,6 +253,54 @@ adminRouter.patch("/:id/reject", requireAdmin, validateUUIDParam("id"), async (r
     sendQuestionSetReviewedNotification(rows[0], false).catch((err) =>
       console.error("NGO-sähköpostin lähetys epäonnistui:", err)
     );
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PATCH /api/admin/question-sets/:id/hide
+adminRouter.patch("/:id/hide", requireAdmin, validateUUIDParam("id"), async (req, res, next) => {
+  try {
+    const { rows } = await db.query(
+      `UPDATE question_sets SET hidden = true WHERE id = $1 RETURNING *`,
+      [req.params.id]
+    );
+    if (rows.length === 0) {
+      return res.status(404).json({ error: "Kysymyssarjaa ei löytynyt" });
+    }
+    res.json(rows[0]);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PATCH /api/admin/question-sets/:id/unhide
+adminRouter.patch("/:id/unhide", requireAdmin, validateUUIDParam("id"), async (req, res, next) => {
+  try {
+    const { rows } = await db.query(
+      `UPDATE question_sets SET hidden = false WHERE id = $1 RETURNING *`,
+      [req.params.id]
+    );
+    if (rows.length === 0) {
+      return res.status(404).json({ error: "Kysymyssarjaa ei löytynyt" });
+    }
+    res.json(rows[0]);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /api/admin/question-sets/:id
+adminRouter.delete("/:id", requireAdmin, validateUUIDParam("id"), async (req, res, next) => {
+  try {
+    const { rowCount } = await db.query(
+      `DELETE FROM question_sets WHERE id = $1`,
+      [req.params.id]
+    );
+    if (rowCount === 0) {
+      return res.status(404).json({ error: "Kysymyssarjaa ei löytynyt" });
+    }
+    res.status(204).end();
   } catch (err) {
     next(err);
   }

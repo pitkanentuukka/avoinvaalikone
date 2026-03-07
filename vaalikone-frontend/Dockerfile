@@ -12,6 +12,10 @@ RUN npm ci
 # Copy source code
 COPY . .
 
+# Build-time env vars
+ARG VITE_NODE_ENV=production
+ENV VITE_NODE_ENV=${VITE_NODE_ENV}
+
 # Build the application
 RUN npm run build
 

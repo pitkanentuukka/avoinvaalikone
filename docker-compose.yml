@@ -65,14 +65,14 @@ services:
     build:
       context: ./vaalikone-frontend
       dockerfile: Dockerfile
+      args:
+        VITE_NODE_ENV: ${VITE_NODE_ENV:-development}
     container_name: vaalikone-frontend
     restart: unless-stopped
     ports:
       - "8080:80"
     depends_on:
       - backend
-    environment:
-      VITE_API_URL: http://localhost:3000
 
 volumes:
   postgres_data:

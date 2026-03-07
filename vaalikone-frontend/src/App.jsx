@@ -48,6 +48,7 @@ async function apiFetch(path, options = {}) {
     const err = await res.json().catch(() => ({ error: "Server error" }));
     throw new Error(err.error || `HTTP ${res.status}`);
   }
+  if (res.status === 204) return null;
   const data = await res.json();
   return toCamel(data);
 }
@@ -83,6 +84,12 @@ const api = {
     apiFetch(`/admin/question-sets/${id}/approve`, { method: "PATCH", adminSecret: secret }),
   rejectQuestionSet: (secret, id) =>
     apiFetch(`/admin/question-sets/${id}/reject`, { method: "PATCH", adminSecret: secret }),
+  hideQuestionSet: (secret, id) =>
+    apiFetch(`/admin/question-sets/${id}/hide`, { method: "PATCH", adminSecret: secret }),
+  unhideQuestionSet: (secret, id) =>
+    apiFetch(`/admin/question-sets/${id}/unhide`, { method: "PATCH", adminSecret: secret }),
+  deleteQuestionSet: (secret, id) =>
+    apiFetch(`/admin/question-sets/${id}`, { method: "DELETE", adminSecret: secret }),
 };
 
 // ─── Constants ───
@@ -473,6 +480,44 @@ function AdminView() {
     finally { setActionLoading(null); }
   }
 
+  async function hideSet(id) {
+    setActionLoading(id);
+    try {
+      await api.hideQuestionSet(adminSecret, id);
+      await refresh();
+    } catch (e) { setError(e.message); }
+    finally { setActionLoading(null); }
+  }
+
+  async function unhideSet(id) {
+    setActionLoading(id);
+    try {
+      await api.unhideQuestionSet(adminSecret, id);
+      await refresh();
+    } catch (e) { setError(e.message); }
+    finally { setActionLoading(null); }
+  }
+
+  async function deleteSet(id) {
+    if (import.meta.env.VITE_NODE_ENV !== "development" && !window.confirm(t.adminDeleteConfirm)) return;
+    setActionLoading(id);
+    try {
+      await api.deleteQuestionSet(adminSecret, id);
+      await refresh();
+    } catch (e) { setError(e.message); }
+    finally { setActionLoading(null); }
+  }
+
+  async function removeParty(id) {
+    if (import.meta.env.VITE_NODE_ENV !== "development" && !window.confirm(t.adminDeletePartyConfirm)) return;
+    setActionLoading(id);
+    try {
+      await api.deleteParty(adminSecret, id);
+      await refresh();
+    } catch (e) { setError(e.message); }
+    finally { setActionLoading(null); }
+  }
+
   async function addParty() {
     if (!newPartyName.trim()) return;
     setActionLoading("new-party");
@@ -499,8 +544,9 @@ function AdminView() {
   }
 
   const pending = questionSets.filter((s) => s.status === "pending");
-  const approved = questionSets.filter((s) => s.status === "approved");
-  const rejected = questionSets.filter((s) => s.status === "rejected");
+  const approved = questionSets.filter((s) => s.status === "approved" && !s.hidden);
+  const hidden = questionSets.filter((s) => s.hidden);
+  const rejected = questionSets.filter((s) => s.status === "rejected" && !s.hidden);
 
   return (
     <div style={{ maxWidth: 800, margin: "0 auto", padding: "40px 24px" }}>
@@ -533,6 +579,7 @@ function AdminView() {
               <div style={{ display: "flex", gap: "8px", flexShrink: 0 }}>
                 <Button variant="primary" size="sm" onClick={() => approveSet(qs.id)} loading={actionLoading === qs.id}>{t.adminApprove}</Button>
                 <Button variant="danger" size="sm" onClick={() => rejectSet(qs.id)} loading={actionLoading === qs.id}>{t.adminReject}</Button>
+                <Button variant="danger" size="sm" onClick={() => deleteSet(qs.id)} loading={actionLoading === qs.id}>{t.adminDelete}</Button>
               </div>
             </div>
           </Card>
@@ -543,25 +590,55 @@ function AdminView() {
         <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px" }}>{t.adminApproved} <Badge color="green">{approved.length}</Badge></h3>
         {approved.map((qs) => (
           <Card key={qs.id} style={{ marginBottom: "8px", padding: "16px 24px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                 <NgoLogo src={qs.logoUrl} name={qs.ngoName} size={24} />
                 <span style={{ fontWeight: 600 }}>{qs.title}</span>
                 <span style={{ color: palette.textMuted, fontSize: "13px" }}>— {qs.ngoName} · {qs.questions?.length || 0} {t.adminQuestions}</span>
               </div>
-              <Badge color="green">{t.adminPublished}</Badge>
+              <div style={{ display: "flex", gap: "8px", flexShrink: 0, alignItems: "center" }}>
+                <Badge color="green">{t.adminPublished}</Badge>
+                <Button variant="secondary" size="sm" onClick={() => hideSet(qs.id)} loading={actionLoading === qs.id}>{t.adminHide}</Button>
+                <Button variant="danger" size="sm" onClick={() => deleteSet(qs.id)} loading={actionLoading === qs.id}>{t.adminDelete}</Button>
+              </div>
             </div>
           </Card>
         ))}
       </section>
+
+      {hidden.length > 0 && (
+        <section style={{ marginBottom: "40px" }}>
+          <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px" }}>{t.adminHidden} <Badge color="gray">{hidden.length}</Badge></h3>
+          {hidden.map((qs) => (
+            <Card key={qs.id} style={{ marginBottom: "8px", padding: "16px 24px", opacity: 0.7 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  <NgoLogo src={qs.logoUrl} name={qs.ngoName} size={24} />
+                  <span style={{ fontWeight: 600 }}>{qs.title}</span>
+                  <span style={{ color: palette.textMuted, fontSize: "13px" }}>— {qs.ngoName}</span>
+                </div>
+                <div style={{ display: "flex", gap: "8px", flexShrink: 0 }}>
+                  <Button variant="secondary" size="sm" onClick={() => unhideSet(qs.id)} loading={actionLoading === qs.id}>{t.adminUnhide}</Button>
+                  <Button variant="danger" size="sm" onClick={() => deleteSet(qs.id)} loading={actionLoading === qs.id}>{t.adminDelete}</Button>
+                </div>
+              </div>
+            </Card>
+          ))}
+        </section>
+      )}
 
       {rejected.length > 0 && (
         <section style={{ marginBottom: "40px" }}>
           <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px" }}>{t.adminRejected}</h3>
           {rejected.map((qs) => (
             <Card key={qs.id} style={{ marginBottom: "8px", padding: "16px 24px", opacity: 0.6 }}>
-              <span style={{ fontWeight: 600 }}>{qs.title}</span>
-              <span style={{ color: palette.textMuted, fontSize: "13px", marginLeft: "8px" }}>— {qs.ngoName}</span>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px" }}>
+                <div>
+                  <span style={{ fontWeight: 600 }}>{qs.title}</span>
+                  <span style={{ color: palette.textMuted, fontSize: "13px", marginLeft: "8px" }}>— {qs.ngoName}</span>
+                </div>
+                <Button variant="danger" size="sm" onClick={() => deleteSet(qs.id)} loading={actionLoading === qs.id}>{t.adminDelete}</Button>
+              </div>
             </Card>
           ))}
         </section>
@@ -576,7 +653,10 @@ function AdminView() {
                 <span style={{ fontWeight: 700 }}>{p.name}</span>
                 <span style={{ color: palette.textMuted, fontSize: "13px", marginLeft: "8px" }}>{p.email}</span>
               </div>
-              <code style={{ background: palette.surfaceAlt, padding: "4px 10px", borderRadius: "4px", fontSize: "13px", fontFamily: "monospace", color: palette.accent, fontWeight: 600, border: `1px solid ${palette.border}` }}>{p.token}</code>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <code style={{ background: palette.surfaceAlt, padding: "4px 10px", borderRadius: "4px", fontSize: "13px", fontFamily: "monospace", color: palette.accent, fontWeight: 600, border: `1px solid ${palette.border}` }}>{p.token}</code>
+                <Button variant="danger" size="sm" onClick={() => removeParty(p.id)} loading={actionLoading === p.id}>{t.adminDelete}</Button>
+              </div>
             </div>
           </Card>
         ))}
