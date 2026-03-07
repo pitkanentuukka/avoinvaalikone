@@ -559,6 +559,23 @@ function NgoView() {
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [showApproved, setShowApproved] = useState(false);
+  const [approvedSets, setApprovedSets] = useState(null);
+  const [approvedLoading, setApprovedLoading] = useState(false);
+
+  async function openApproved() {
+    setShowApproved(true);
+    if (approvedSets !== null) return;
+    setApprovedLoading(true);
+    try {
+      const sets = await api.getQuestionSets();
+      setApprovedSets(sets);
+    } catch {
+      setApprovedSets([]);
+    } finally {
+      setApprovedLoading(false);
+    }
+  }
 
   function addQuestion() { setQuestions((q) => [...q, ""]); }
   function updateQuestion(i, val) { setQuestions((q) => q.map((x, j) => (j === i ? val : x))); }
@@ -599,9 +616,45 @@ function NgoView() {
   return (
     <div style={{ maxWidth: 680, margin: "0 auto", padding: "40px 24px" }}>
       <h2 style={{ fontSize: "28px", fontWeight: 800, letterSpacing: "-0.02em", marginBottom: "8px" }}>Lähetä kysymyksiä</h2>
-      <p style={{ color: palette.textMuted, marginBottom: "32px" }}>
+      <p style={{ color: palette.textMuted, marginBottom: "16px" }}>
         Ehdota politiikkaväittämiä, joihin ehdokkaat vastaavat. Jokaisen väittämän tulee olla muotoiltu niin, että siihen voi vastata asteikolla "täysin eri mieltä" – "täysin samaa mieltä".
       </p>
+      <div style={{ background: palette.accentLight, border: `1px solid ${palette.accent}`, borderRadius: "8px", padding: "12px 16px", marginBottom: "24px", fontSize: "14px", color: palette.text }}>
+        Tarkista ennen lähettämistä, ettei vastaavaa kysymyssarjaa ole jo hyväksytty.{" "}
+        <button onClick={openApproved} style={{ background: "none", border: "none", padding: 0, color: palette.accent, fontWeight: 600, cursor: "pointer", fontSize: "14px", textDecoration: "underline" }}>
+          Katso hyväksytyt kysymyssarjat
+        </button>
+      </div>
+      {showApproved && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: "24px" }} onClick={() => setShowApproved(false)}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: palette.bg, borderRadius: "14px", maxWidth: 620, width: "100%", maxHeight: "80vh", overflow: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
+            <div style={{ padding: "24px 28px", borderBottom: `1px solid ${palette.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 700 }}>Hyväksytyt kysymyssarjat</h3>
+              <button onClick={() => setShowApproved(false)} style={{ background: "none", border: "none", fontSize: "22px", cursor: "pointer", color: palette.textLight, lineHeight: 1 }}>×</button>
+            </div>
+            <div style={{ padding: "20px 28px" }}>
+              {approvedLoading && <div style={{ color: palette.textMuted, textAlign: "center", padding: "32px 0" }}>Ladataan…</div>}
+              {!approvedLoading && approvedSets && approvedSets.length === 0 && (
+                <div style={{ color: palette.textMuted, textAlign: "center", padding: "32px 0" }}>Ei vielä hyväksyttyjä kysymyssarjoja.</div>
+              )}
+              {!approvedLoading && approvedSets && approvedSets.map((qs) => (
+                <div key={qs.id} style={{ marginBottom: "24px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "6px" }}>
+                    <NgoLogo src={qs.logoUrl} name={qs.ngoName} size={24} />
+                    <div style={{ fontWeight: 700, fontSize: "15px" }}>{qs.title}</div>
+                  </div>
+                  <div style={{ fontSize: "12px", color: palette.textMuted, marginBottom: "10px" }}>{qs.ngoName} · {(qs.questions || []).length} väittämää</div>
+                  <ol style={{ margin: 0, paddingLeft: "20px" }}>
+                    {(qs.questions || []).map((q) => (
+                      <li key={q.id} style={{ fontSize: "14px", color: palette.text, marginBottom: "4px" }}>{q.statement}</li>
+                    ))}
+                  </ol>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
       {error && <ErrorBanner message={error} />}
       <Card>
         <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
