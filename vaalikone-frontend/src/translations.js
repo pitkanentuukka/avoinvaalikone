@@ -26,6 +26,7 @@ const translations = {
     navVoter: "Äänestäjä",
     navNgo: "Järjestö",
     navAdmin: "Ylläpito",
+    navAbout: "Tietoa",
 
     // Home
     homeTitle: "Löydä ehdokkaasi",
@@ -158,6 +159,28 @@ const translations = {
     voterCandidate: "Ehdokas",
     voterStartOver: "Aloita alusta",
     voterCalculating: "Lasketaan tuloksia...",
+
+    // About
+    aboutTitle: "Tietoa Vaalikoneesta",
+    aboutIntroTitle: "Mikä on Vaalikone?",
+    aboutIntroText: "Vaalikone on riippumaton alusta, jota ohjaa kansalaisyhteiskunta. Toisin kuin perinteiset vaalikompassit, joissa on yksi kiinteä kysymyssarja, Vaalikoneella useat kansalaisjärjestöt (NGO:t) voivat ehdottaa omia politiikkakysymyksiään. Äänestäjät valitsevat, mitkä aiheet ovat heille tärkeitä, ja voivat yhdistää eri järjestöjen kysymyksiä omaksi vaalikoneekseen.",
+    aboutMultiNgoTitle: "Miksi multi-NGO malli muuttaa peliä?",
+    aboutMultiNgoText: "Perinteisten vaalikompassien kysymykset tekevät harvat asiantuntijat tai journalistit. Vaalikoneessa kansalaisjärjestöt — jotka edustavat miljoonien ihmisen aidosti välittämiä asioita — voivat nostaa omat prioriteettinsa esiin. Äänestäjät eivät ole passiivisia vaan he rakentavat omansa mukaan räätälöidyn vaalikoneensa ja näkevät vain itselleen tärkeitä kysymyksiä. Näin demokratia siirtyy asiantuntijoilta kansalaisille.",
+    aboutFlexibilityTitle: "Joustavuus ja monipuolisuus",
+    aboutFlexibilityText: "Ilmasto, tasa-arvo, talous, terveydenhuolto, opetus — jokainen aihe voi saada oman kysymyssarjansa riippumattomalta järjestöltä. Äänestäjät voivat vastata sekä ilmastoasioihin että sosiaalipolitiikkaan samassa vaalikoneessa. Ei kahta samanlaista käyttäjää.",
+    aboutHowTitle: "Kuinka Vaalikone toimii?",
+    aboutHow1Title: "1. Kysymykset",
+    aboutHow1Text: "Kansalaisjärjestöt (NGO:t) ehdottavat politiikkaväittämiä. Ylläpito hyväksyy asialliset ja relevantit kysymykset sekä hylkää asiattomat tai aiempien kanssa samankaltaiset kysymykset.",
+    aboutHow2Title: "2. Ehdokkaat vastaavat",
+    aboutHow2Text: "Poliitikot ja ehdokkaat vastaavat hyväksyttyjen kysymysten kysymyksiin ottaen kantaa jokaiseen väittämään.",
+    aboutHow3Title: "3. Äänestäjät vertaavat",
+    aboutHow3Text: "Äänestäjät vastaavat samoihin kysymyksiin ja Vaalikone laskee, kenen ehdokkaan vastaukset ovat lähimpänä heidän omia. Tulokset näytettään järjestyksessä samankaltaisuuden perusteella.",
+    aboutWhyTitle: "Miksi Vaalikone?",
+    aboutWhyText: "Vaalikone auttaa äänestäjiä tekemään tietoisempia valintoja. Se myös edistää demokraattista osallistumista antamalla äänen kansalaisjärjestöille ja auttaa ehdokkaita ymmärtämään äänestäjien prioriteetteja.",
+    aboutTransparencyTitle: "Avoimuus ja luotettavuus",
+    aboutTransparencyText: "Vaalikone on avoin alusta. Kaikki lähdekoodit ovat julkisia ja sitä ylläpitävät riippumattomat järjestöt. Järjestelmässä käytetty algoritmi on yksinkertainen ja läpinäkyvä: vastausten painotettu samankaltaisuus.",
+    aboutPrivacyTitle: "Tietosuoja",
+    aboutPrivacyText: "Äänestäjien vastaukset tallennetaan vain heidän omaan selaimeensa. Vaalikone ei kerää henkilökohtaisia tietoja äänestäjistä eikä jaa tietoja kolmansille osapuolille. Kaikki äänestäjien tiedot ovat yksityisiä ja vapaaehtoisesti tallennettuja.",
   },
 
   en: {
@@ -319,6 +342,28 @@ const translations = {
     voterCandidate: "Candidate",
     voterStartOver: "Start over",
     voterCalculating: "Calculating results...",
+
+    // About
+    aboutTitle: "About Vaalikone",
+    aboutIntroTitle: "What is Vaalikone?",
+    aboutIntroText: "Vaalikone is an independent platform governed by civil society. Unlike traditional voter compasses with a single fixed question set, Vaalikone lets multiple civil society organizations (NGOs) propose their own policy questions. Voters choose which topics matter to them and combine question sets from different organizations to build their own personalized compass.",
+    aboutMultiNgoTitle: "Why the multi-NGO model changes the game",
+    aboutMultiNgoText: "Traditional voter compasses have questions created by a handful of experts or journalists, limiting perspectives and coverage. With Vaalikone, civil society organizations — representing millions of people's genuine priorities — can raise their own issues. Voters aren't passive: they build their own customized compass and see only the questions that matter to them. Democracy shifts from experts to citizens.",
+    aboutFlexibilityTitle: "Flexibility and diversity",
+    aboutFlexibilityText: "Climate, equality, economy, healthcare, education — each topic can have its own question set from an independent organization. Voters might answer both climate and social policy questions in the same compass. No two users are the same.",
+    aboutHowTitle: "How does Vaalikone work?",
+    aboutHow1Title: "1. Questions",
+    aboutHow1Text: "Civil society organizations (NGOs) propose policy statements. Administrators approve the questions that resonate most broadly.",
+    aboutHow2Title: "2. Candidates answer",
+    aboutHow2Text: "Politicians and candidates answer the approved questions, taking a stance on each statement.",
+    aboutHow3Title: "3. Voters compare",
+    aboutHow3Text: "Voters answer the same questions and Vaalikone calculates whose answers are closest to theirs. Results are displayed ranked by similarity.",
+    aboutWhyTitle: "Why Vaalikone?",
+    aboutWhyText: "Vaalikone helps voters make more informed choices. It also promotes democratic participation by giving voice to civil society organizations and helps candidates understand voters' priorities.",
+    aboutTransparencyTitle: "Openness and reliability",
+    aboutTransparencyText: "Vaalikone is an open platform. All source code is public and it is maintained by independent organizations. The algorithm used in the system is simple and transparent: weighted similarity of answers.",
+    aboutPrivacyTitle: "Privacy",
+    aboutPrivacyText: "Voter answers are stored only in their own browser. Vaalikone does not collect personal information from voters and does not share data with third parties. All voter data remains private and is voluntarily stored.",
   },
 };
 

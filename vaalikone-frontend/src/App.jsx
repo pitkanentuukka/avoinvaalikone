@@ -2,8 +2,8 @@ import { useState, useEffect, useMemo, useCallback, createContext, useContext } 
 import translations from "./translations";
 
 // ─── API Configuration ───
-// Change this to your backend URL
-const API_BASE = "http://localhost:3000/api";
+// Override with VITE_API_BASE env var at build time; defaults to same-origin /api (proxy)
+const API_BASE = import.meta.env.VITE_API_BASE || "/api";
 
 // ─── Language ───
 const DEFAULT_LANG = import.meta.env.VITE_DEFAULT_LANG || "fi";
@@ -372,7 +372,7 @@ function Header({ view, setView, setPartyToken }) {
           <span style={{ fontSize: "11px", color: palette.textLight, fontWeight: 500, marginLeft: "-4px" }}>{t.appYear}</span>
         </div>
         <nav style={{ display: "flex", gap: "4px", alignItems: "center" }}>
-          {[{ key: "home", label: t.navHome }, { key: "voter", label: t.navVoter }, { key: "ngo", label: t.navNgo }, { key: "admin", label: t.navAdmin }].map((item) => (
+          {[{ key: "home", label: t.navHome }, { key: "voter", label: t.navVoter }, { key: "ngo", label: t.navNgo }, { key: "admin", label: t.navAdmin }, { key: "about", label: t.navAbout }].map((item) => (
             <button key={item.key} onClick={() => { setView(item.key); if (item.key !== "candidate") setPartyToken(null); }}
               style={{
                 padding: "6px 14px", borderRadius: "5px", border: "none", cursor: "pointer",
@@ -419,6 +419,67 @@ function HomeView({ setView, setPartyToken }) {
             <Button onClick={() => { if (tokenInput.trim()) { setPartyToken(tokenInput.trim()); setView("candidate"); } }} disabled={!tokenInput.trim()} style={{ flexShrink: 0 }}>{t.homeGo}</Button>
           </div>
         </Card>
+      </div>
+    </div>
+  );
+}
+
+// ─── About ───
+function AboutView() {
+  const { t } = useTranslation();
+  return (
+    <div style={{ maxWidth: 800, margin: "0 auto", padding: "60px 24px" }}>
+      <h1 style={{ fontSize: "42px", fontWeight: 800, letterSpacing: "-0.03em", marginBottom: "48px", lineHeight: 1.1, textAlign: "center" }}>{t.aboutTitle}</h1>
+
+      <div style={{ marginBottom: "48px" }}>
+        <h2 style={{ fontSize: "24px", fontWeight: 700, marginBottom: "16px", color: palette.accent }}>{t.aboutIntroTitle}</h2>
+        <p style={{ fontSize: "16px", lineHeight: 1.8, color: palette.text, margin: 0 }}>{t.aboutIntroText}</p>
+      </div>
+
+      <div style={{ marginBottom: "48px", padding: "24px", background: palette.accentLight, borderRadius: "10px", border: `1px solid ${palette.accent}` }}>
+        <h2 style={{ fontSize: "24px", fontWeight: 700, marginBottom: "16px", color: palette.accent, marginTop: 0 }}>{t.aboutMultiNgoTitle}</h2>
+        <p style={{ fontSize: "16px", lineHeight: 1.8, color: palette.text, margin: 0 }}>{t.aboutMultiNgoText}</p>
+      </div>
+
+      <div style={{ marginBottom: "48px" }}>
+        <h2 style={{ fontSize: "24px", fontWeight: 700, marginBottom: "16px", color: palette.accent }}>{t.aboutFlexibilityTitle}</h2>
+        <p style={{ fontSize: "16px", lineHeight: 1.8, color: palette.text, margin: 0 }}>{t.aboutFlexibilityText}</p>
+      </div>
+
+      <div style={{ marginBottom: "48px" }}>
+        <h2 style={{ fontSize: "24px", fontWeight: 700, marginBottom: "24px", color: palette.accent }}>{t.aboutHowTitle}</h2>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+          <Card style={{ background: palette.surfaceAlt }}>
+            <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "8px", color: palette.text }}>{t.aboutHow1Title}</h3>
+            <p style={{ fontSize: "14px", lineHeight: 1.7, color: palette.textMuted, margin: 0 }}>{t.aboutHow1Text}</p>
+          </Card>
+
+          <Card style={{ background: palette.surfaceAlt }}>
+            <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "8px", color: palette.text }}>{t.aboutHow2Title}</h3>
+            <p style={{ fontSize: "14px", lineHeight: 1.7, color: palette.textMuted, margin: 0 }}>{t.aboutHow2Text}</p>
+          </Card>
+
+          <Card style={{ background: palette.surfaceAlt }}>
+            <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "8px", color: palette.text }}>{t.aboutHow3Title}</h3>
+            <p style={{ fontSize: "14px", lineHeight: 1.7, color: palette.textMuted, margin: 0 }}>{t.aboutHow3Text}</p>
+          </Card>
+        </div>
+      </div>
+
+      <div style={{ marginBottom: "48px" }}>
+        <h2 style={{ fontSize: "24px", fontWeight: 700, marginBottom: "16px", color: palette.accent }}>{t.aboutWhyTitle}</h2>
+        <p style={{ fontSize: "16px", lineHeight: 1.8, color: palette.text, margin: 0 }}>{t.aboutWhyText}</p>
+      </div>
+
+      <div style={{ marginBottom: "48px" }}>
+        <h2 style={{ fontSize: "24px", fontWeight: 700, marginBottom: "16px", color: palette.accent }}>{t.aboutTransparencyTitle}</h2>
+        <p style={{ fontSize: "16px", lineHeight: 1.8, color: palette.text, margin: 0 }}>{t.aboutTransparencyText}</p>
+      </div>
+
+      <div>
+        <h2 style={{ fontSize: "24px", fontWeight: 700, marginBottom: "16px", color: palette.accent }}>{t.aboutPrivacyTitle}</h2>
+        <p style={{ fontSize: "16px", lineHeight: 1.8, color: palette.text, margin: 0 }}>{t.aboutPrivacyText}</p>
       </div>
     </div>
   );
@@ -1484,6 +1545,7 @@ export default function App() {
         <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&display=swap" rel="stylesheet" />
         <Header view={view} setView={setView} setPartyToken={setPartyToken} />
         {view === "home" && <HomeView setView={setView} setPartyToken={setPartyToken} />}
+        {view === "about" && <AboutView />}
         {view === "admin" && <AdminView />}
         {view === "ngo" && <NgoView />}
         {view === "candidate" && <CandidateView partyToken={partyToken} initialCandidateId={initialCandidateId} />}
