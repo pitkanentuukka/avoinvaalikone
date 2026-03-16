@@ -18,7 +18,7 @@ const router = Router();
  */
 router.post("/match", async (req, res, next) => {
   try {
-    const { answers, weights = {}, questionSetIds } = req.body;
+    const { answers, weights = {}, questionSetIds, constituency } = req.body;
 
     if (!answers || typeof answers !== "object" || Object.keys(answers).length === 0) {
       return res.status(400).json({ error: "Vastaukset vaaditaan" });
@@ -61,6 +61,13 @@ router.post("/match", async (req, res, next) => {
       }
     }
 
+    // Validate constituency if provided
+    if (constituency !== undefined && constituency !== null) {
+      if (typeof constituency !== "string" || constituency.length > 255) {
+        return res.status(400).json({ error: "Virheellinen vaalipiiri" });
+      }
+    }
+
     // Optionally filter to only questions within certain sets
     let questionFilter = "";
     const params = [voterQuestionIds];
@@ -69,13 +76,22 @@ router.post("/match", async (req, res, next) => {
       params.push(questionSetIds);
     }
 
+    // Optionally filter by constituency
+    let constituencyFilter = "";
+    if (constituency) {
+      constituencyFilter = `AND c.constituency = $${params.length + 1}`;
+      params.push(constituency);
+    }
+
     // Fetch all candidate answers for the relevant questions
     const { rows: candidateAnswers } = await db.query(
       `SELECT ca.candidate_id, ca.question_id, ca.value, ca.explanation
        FROM candidate_answers ca
        JOIN questions q ON q.id = ca.question_id
+       JOIN candidates c ON c.id = ca.candidate_id
        WHERE ca.question_id = ANY($1)
-       ${questionFilter}`,
+       ${questionFilter}
+       ${constituencyFilter}`,
       params
     );
 
@@ -86,7 +102,7 @@ router.post("/match", async (req, res, next) => {
     }
 
     const { rows: candidates } = await db.query(
-      `SELECT c.id, c.name, c.photo_url, c.bio,
+      `SELECT c.id, c.name, c.photo_url, c.bio, c.constituency,
               p.id AS party_id, p.name AS party_name
        FROM candidates c
        JOIN parties p ON p.id = c.party_id
@@ -131,6 +147,7 @@ router.post("/match", async (req, res, next) => {
         name: c.name,
         photoUrl: c.photo_url,
         bio: c.bio,
+        constituency: c.constituency,
         partyId: c.party_id,
         partyName: c.party_name,
         match,

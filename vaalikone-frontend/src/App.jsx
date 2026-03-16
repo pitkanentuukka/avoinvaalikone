@@ -92,6 +92,23 @@ const api = {
     apiFetch(`/admin/question-sets/${id}`, { method: "DELETE", adminSecret: secret }),
 };
 
+// ─── Finnish constituencies ───
+const FI_CONSTITUENCIES = [
+  "Helsingin vaalipiiri",
+  "Uudenmaan vaalipiiri",
+  "Varsinais-Suomen vaalipiiri",
+  "Satakunnan vaalipiiri",
+  "Ahvenanmaan maakunnan vaalipiiri",
+  "Hämeen vaalipiiri",
+  "Pirkanmaan vaalipiiri",
+  "Kaakkois-Suomen vaalipiiri",
+  "Savo-Karjalan vaalipiiri",
+  "Vaasan vaalipiiri",
+  "Keski-Suomen vaalipiiri",
+  "Oulun vaalipiiri",
+  "Lapin vaalipiiri",
+];
+
 // ─── Constants ───
 function useLabels() {
   const { t } = useTranslation();
@@ -321,7 +338,10 @@ function CandidateProfile({ candidate, onClose, activeQuestions, voterAnswers })
             <Avatar src={candidate.photoUrl} name={candidate.name} size={80} />
             <div>
               <div style={{ fontSize: "24px", fontWeight: 800, marginBottom: "4px" }}>{candidate.name}</div>
-              <Badge color="blue">{candidate.partyName}</Badge>
+              <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                <Badge color="blue">{candidate.partyName}</Badge>
+                {candidate.constituency && <Badge color="blue">{candidate.constituency}</Badge>}
+              </div>
             </div>
           </div>
         </div>
@@ -898,6 +918,7 @@ function CandidateView({ partyToken, initialCandidateId }) {
   const [candidatePhoto, setCandidatePhoto] = useState("");
   const [candidateBio, setCandidateBio] = useState("");
   const [candidateEmail, setCandidateEmail] = useState("");
+  const [candidateConstituency, setCandidateConstituency] = useState("");
   const [answers, setAnswers] = useState({});
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -924,6 +945,7 @@ function CandidateView({ partyToken, initialCandidateId }) {
             setCandidatePhoto(full.photoUrl || "");
             setCandidateBio(full.bio || "");
             setCandidateEmail(full.email || "");
+            setCandidateConstituency(full.constituency || "");
             setAnswers(
               Object.fromEntries(
                 Object.entries(full.answers || {}).map(([k, v]) => [k, { value: v.value, text: v.explanation || "" }])
@@ -952,6 +974,7 @@ function CandidateView({ partyToken, initialCandidateId }) {
       setCandidatePhoto(full.photoUrl || "");
       setCandidateBio(full.bio || "");
       setCandidateEmail(full.email || "");
+      setCandidateConstituency(full.constituency || "");
       setAnswers(
         Object.fromEntries(
           Object.entries(full.answers || {}).map(([k, v]) => [k, { value: v.value, text: v.explanation || "" }])
@@ -983,6 +1006,7 @@ function CandidateView({ partyToken, initialCandidateId }) {
           photoUrl: candidatePhoto.trim() || null,
           bio: candidateBio.trim() || null,
           email: candidateEmail.trim() || null,
+          constituency: candidateConstituency.trim() || null,
         });
         candidateId = created.id;
       } else {
@@ -991,6 +1015,7 @@ function CandidateView({ partyToken, initialCandidateId }) {
           name: candidateName.trim(),
           photoUrl: candidatePhoto.trim() || null,
           bio: candidateBio.trim() || null,
+          constituency: candidateConstituency.trim() || null,
         });
       }
 
@@ -1096,6 +1121,17 @@ function CandidateView({ partyToken, initialCandidateId }) {
             <label style={{ fontSize: "13px", fontWeight: 600, display: "block", marginBottom: "6px" }}>{t.candidateEmailLabel}</label>
             <Input value={candidateEmail} onChange={setCandidateEmail} placeholder={t.candidateEmailPlaceholder} type="email" />
           </div>
+          <div>
+            <label style={{ fontSize: "13px", fontWeight: 600, display: "block", marginBottom: "6px" }}>{t.candidateConstituencyLabel}</label>
+            <select value={candidateConstituency} onChange={(e) => setCandidateConstituency(e.target.value)} style={{
+              width: "100%", padding: "10px 14px", borderRadius: "6px", border: `1px solid ${palette.border}`,
+              fontFamily: "'Source Serif 4', Georgia, serif", fontSize: "14px",
+              background: palette.surface, color: palette.text, outline: "none", boxSizing: "border-box",
+            }}>
+              <option value="">{t.candidateConstituencyPlaceholder}</option>
+              {FI_CONSTITUENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
         </div>
       </Card>
 
@@ -1189,6 +1225,7 @@ function VoterView() {
   const [results, setResults] = useState([]);
   const [expandedCandidate, setExpandedCandidate] = useState(null);
   const [profileCandidate, setProfileCandidate] = useState(null);
+  const [constituency, setConstituency] = useState("");
   const [error, setError] = useState(null);
   const [consentGiven, setConsentGiven] = useState(() => loadConsent());
 
@@ -1258,6 +1295,7 @@ function VoterView() {
         answers: voterAnswers,
         weights,
         questionSetIds: [...selectedSetIds],
+        constituency: constituency || null,
       });
       setResults(matchResults);
       setStep("results");
@@ -1334,6 +1372,18 @@ function VoterView() {
           </div>
         )}
         {error && <ErrorBanner message={error} />}
+        <div style={{ marginBottom: "24px" }}>
+          <label style={{ fontSize: "13px", fontWeight: 600, display: "block", marginBottom: "6px" }}>{t.voterConstituencyLabel}</label>
+          <p style={{ fontSize: "13px", color: palette.textMuted, marginBottom: "8px", marginTop: 0 }}>{t.voterConstituencyDesc}</p>
+          <select value={constituency} onChange={(e) => setConstituency(e.target.value)} style={{
+            width: "100%", padding: "10px 14px", borderRadius: "6px", border: `1px solid ${palette.border}`,
+            fontFamily: "'Source Serif 4', Georgia, serif", fontSize: "14px",
+            background: palette.surface, color: palette.text, outline: "none", boxSizing: "border-box",
+          }}>
+            <option value="">{t.voterConstituencyAll}</option>
+            {FI_CONSTITUENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
         {approvedSets.length === 0 && <p style={{ color: palette.textLight }}>{t.voterNoSets}</p>}
         {approvedSets.map((qs) => (
           <Card key={qs.id} onClick={() => toggleSet(qs.id)} style={{
@@ -1471,6 +1521,7 @@ function VoterView() {
                 <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px", flexWrap: "wrap" }}>
                   <span style={{ fontWeight: 700, fontSize: "16px" }}>{c.name}</span>
                   <Badge>{c.partyName}</Badge>
+                  {c.constituency && <Badge color="blue">{c.constituency}</Badge>}
                   {(c.bio || c.photoUrl) && (
                     <button onClick={(e) => { e.stopPropagation(); setProfileCandidate(c); }} style={{
                       background: "none", border: `1px solid ${palette.border}`, borderRadius: "4px",
@@ -1515,7 +1566,7 @@ function VoterView() {
         );
       })}
       <div style={{ marginTop: "24px" }}>
-        <Button variant="ghost" onClick={() => { clearSavedAnswers(); setStep("select"); setVoterAnswers({}); setWeights({}); setExpandedCandidate(null); setResults([]); }}>{t.voterStartOver}</Button>
+        <Button variant="ghost" onClick={() => { clearSavedAnswers(); setStep("select"); setVoterAnswers({}); setWeights({}); setConstituency(""); setExpandedCandidate(null); setResults([]); }}>{t.voterStartOver}</Button>
       </div>
       {profileCandidate && (
         <CandidateProfile candidate={profileCandidate} onClose={() => setProfileCandidate(null)} activeQuestions={activeQuestions} voterAnswers={voterAnswers} />

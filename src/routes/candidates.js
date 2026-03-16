@@ -11,7 +11,7 @@ const router = Router();
 router.get("/", async (req, res, next) => {
   try {
     const { rows } = await db.query(
-      `SELECT c.id, c.name, c.photo_url, c.bio, c.created_at,
+      `SELECT c.id, c.name, c.photo_url, c.bio, c.constituency, c.created_at,
               p.id AS party_id, p.name AS party_name
        FROM candidates c
        JOIN parties p ON p.id = c.party_id
@@ -27,7 +27,7 @@ router.get("/", async (req, res, next) => {
 router.get("/:id", validateUUIDParam("id"), async (req, res, next) => {
   try {
     const { rows: cRows } = await db.query(
-      `SELECT c.id, c.name, c.photo_url, c.bio, c.created_at,
+      `SELECT c.id, c.name, c.photo_url, c.bio, c.constituency, c.created_at,
               p.id AS party_id, p.name AS party_name
        FROM candidates c
        JOIN parties p ON p.id = c.party_id
@@ -70,7 +70,7 @@ router.get(
   async (req, res, next) => {
     try {
       const { rows } = await db.query(
-        `SELECT c.id, c.name, c.photo_url, c.bio,
+        `SELECT c.id, c.name, c.photo_url, c.bio, c.constituency,
                 (SELECT COUNT(*) FROM candidate_answers ca WHERE ca.candidate_id = c.id) AS answer_count
          FROM candidates c
          WHERE c.party_id = $1
@@ -93,7 +93,7 @@ router.post(
   requirePartyToken,
   async (req, res, next) => {
     try {
-      const { name, photoUrl, bio, email } = req.body;
+      const { name, photoUrl, bio, email, constituency } = req.body;
       if (!name?.trim()) {
         return res.status(400).json({ error: "Ehdokkaan nimi vaaditaan" });
       }
@@ -117,12 +117,15 @@ router.post(
       if (email && !isValidEmail(email)) {
         return res.status(400).json({ error: "Sähköpostiosoite on virheellinen" });
       }
+      if (constituency && !isValidLength(constituency, 255)) {
+        return res.status(400).json({ error: "Vaalipiiri on liian pitkä (maksimi: 255 merkkiä)" });
+      }
 
       const { rows } = await db.query(
-        `INSERT INTO candidates (party_id, name, photo_url, bio, email)
-         VALUES ($1, $2, $3, $4, $5)
-         RETURNING id, name, photo_url, bio, email, created_at`,
-        [req.party.id, name.trim(), photoUrl?.trim() || null, bio?.trim() || null, email?.trim() || null]
+        `INSERT INTO candidates (party_id, name, photo_url, bio, email, constituency)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING id, name, photo_url, bio, email, constituency, created_at`,
+        [req.party.id, name.trim(), photoUrl?.trim() || null, bio?.trim() || null, email?.trim() || null, constituency?.trim() || null]
       );
       res.status(201).json(rows[0]);
     } catch (err) {
@@ -138,7 +141,7 @@ router.put(
   validateUUIDParam("id"),
   async (req, res, next) => {
     try {
-      const { name, photoUrl, bio } = req.body;
+      const { name, photoUrl, bio, constituency } = req.body;
 
       // Validate field lengths
       if (name && !isValidLength(name, 255)) {
@@ -152,6 +155,9 @@ router.put(
       }
       if (bio && !isValidLength(bio, 1000)) {
         return res.status(400).json({ error: "Biografia on liian pitkä (maksimi: 1000 merkkiä)" });
+      }
+      if (constituency && !isValidLength(constituency, 255)) {
+        return res.status(400).json({ error: "Vaalipiiri on liian pitkä (maksimi: 255 merkkiä)" });
       }
 
       // Verify candidate belongs to this party
@@ -168,10 +174,11 @@ router.put(
          SET name = COALESCE($1, name),
              photo_url = $2,
              bio = $3,
+             constituency = $4,
              updated_at = now()
-         WHERE id = $4
-         RETURNING id, name, photo_url, bio, updated_at`,
-        [name?.trim(), photoUrl?.trim() || null, bio?.trim() || null, req.params.id]
+         WHERE id = $5
+         RETURNING id, name, photo_url, bio, constituency, updated_at`,
+        [name?.trim(), photoUrl?.trim() || null, bio?.trim() || null, constituency?.trim() || null, req.params.id]
       );
       res.json(rows[0]);
     } catch (err) {

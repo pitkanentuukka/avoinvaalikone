@@ -118,6 +118,8 @@ const translations = {
     candidateEmailLabel: "Sähköpostiosoite (valinnainen) — saat ilmoituksen uusista kysymyksistä",
     candidateEmailPlaceholder: "etunimi.sukunimi@esimerkki.fi",
     candidateExplainPlaceholder: "Perustele kantasi (valinnainen mutta suositeltava)…",
+    candidateConstituencyLabel: "Vaalipiiri",
+    candidateConstituencyPlaceholder: "esim. Helsingin vaalipiiri",
 
     // Candidate profile modal
     profileIntro: "Esittely",
@@ -159,6 +161,9 @@ const translations = {
     voterCandidate: "Ehdokas",
     voterStartOver: "Aloita alusta",
     voterCalculating: "Lasketaan tuloksia...",
+    voterConstituencyLabel: "Vaalipiiri",
+    voterConstituencyAll: "Kaikki vaalipiirit",
+    voterConstituencyDesc: "Valitse vaalipiirisi nähdäksesi vain oman alueesi ehdokkaat.",
 
     // About
     aboutTitle: "Tietoa Vaalikoneesta",
@@ -301,6 +306,8 @@ const translations = {
     candidateEmailLabel: "Email address (optional) — get notified about new questions",
     candidateEmailPlaceholder: "firstname.lastname@example.com",
     candidateExplainPlaceholder: "Explain your position (optional but recommended)…",
+    candidateConstituencyLabel: "Constituency",
+    candidateConstituencyPlaceholder: "e.g. Helsinki constituency",
 
     // Candidate profile modal
     profileIntro: "Introduction",
@@ -342,6 +349,9 @@ const translations = {
     voterCandidate: "Candidate",
     voterStartOver: "Start over",
     voterCalculating: "Calculating results...",
+    voterConstituencyLabel: "Constituency",
+    voterConstituencyAll: "All constituencies",
+    voterConstituencyDesc: "Select your constituency to see only candidates from your district.",
 
     // About
     aboutTitle: "About Vaalikone",
