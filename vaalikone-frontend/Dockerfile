@@ -15,6 +15,8 @@ COPY . .
 # Build-time env vars
 ARG VITE_NODE_ENV=production
 ENV VITE_NODE_ENV=${VITE_NODE_ENV}
+ARG VITE_API_BASE
+ENV VITE_API_BASE=${VITE_API_BASE}
 
 # Build the application
 RUN npm run build

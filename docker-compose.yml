@@ -30,7 +30,7 @@ services:
       NODE_ENV: development
       PORT: 3000
       DATABASE_URL: postgresql://vaalikone:vaalikone_password@db:5432/vaalikone
-      CORS_ORIGIN: http://localhost:8080
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:80}
       ADMIN_SECRET: ${ADMIN_SECRET:-password}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}
       SMTP_HOST: ${SMTP_HOST:-mailpit}
@@ -39,8 +39,6 @@ services:
       SMTP_FROM: ${SMTP_FROM:-noreply@vaalikone.fi}
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASS: ${SMTP_PASS:-}
-    ports:
-      - "3000:3000"
     depends_on:
       db:
         condition: service_healthy
@@ -66,11 +64,12 @@ services:
       context: ./vaalikone-frontend
       dockerfile: Dockerfile
       args:
-        VITE_NODE_ENV: ${VITE_NODE_ENV:-development}
+        VITE_NODE_ENV: ${VITE_NODE_ENV:-production}
+        VITE_API_BASE: ${VITE_API_BASE:-}
     container_name: vaalikone-frontend
     restart: unless-stopped
     ports:
-      - "8080:80"
+      - "80:80"
     depends_on:
       - backend
 
