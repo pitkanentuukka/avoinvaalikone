@@ -5,6 +5,7 @@ const { isValidLength, isValidUrl, isValidEmail, validateUUIDParam } = require("
 const {
   sendNewQuestionSetNotification,
   sendQuestionSetReviewedNotification,
+  sendQuestionSetPartialReviewNotification,
   sendApprovedQuestionSetNotificationToCandidate,
   sendApprovedQuestionSetNotificationToParty,
 } = require("../email");
@@ -255,6 +256,104 @@ adminRouter.patch("/:id/reject", requireAdmin, validateUUIDParam("id"), async (r
     );
   } catch (err) {
     next(err);
+  }
+});
+
+// PATCH /api/admin/question-sets/:id/review — per-question accept/reject
+adminRouter.patch("/:id/review", requireAdmin, validateUUIDParam("id"), async (req, res, next) => {
+  const client = await db.getClient();
+  try {
+    const { reviews } = req.body;
+    if (!Array.isArray(reviews) || reviews.length === 0) {
+      return res.status(400).json({ error: "reviews-kenttä vaaditaan" });
+    }
+
+    await client.query("BEGIN");
+
+    const { rows: sets } = await client.query(
+      "SELECT * FROM question_sets WHERE id = $1 FOR UPDATE",
+      [req.params.id]
+    );
+    if (sets.length === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Kysymyssarjaa ei löytynyt" });
+    }
+    const rejectedReviews = reviews.filter((r) => r.rejected);
+    let rejectedQuestionsInfo = [];
+
+    if (rejectedReviews.length > 0) {
+      const rejectedIds = rejectedReviews.map((r) => r.questionId);
+      const { rows: qRows } = await client.query(
+        "SELECT id, statement FROM questions WHERE id = ANY($1) AND question_set_id = $2",
+        [rejectedIds, req.params.id]
+      );
+      rejectedQuestionsInfo = qRows.map((q) => {
+        const review = rejectedReviews.find((r) => r.questionId === q.id);
+        return { statement: q.statement, rejectionReason: review?.rejectionReason || "" };
+      });
+      await client.query(
+        "DELETE FROM questions WHERE id = ANY($1) AND question_set_id = $2",
+        [rejectedIds, req.params.id]
+      );
+    }
+
+    const { rows: [{ count }] } = await client.query(
+      "SELECT COUNT(*) FROM questions WHERE question_set_id = $1",
+      [req.params.id]
+    );
+    const remainingCount = Number(count);
+    const newStatus = remainingCount > 0 ? "approved" : "rejected";
+
+    const { rows: updatedRows } = await client.query(
+      "UPDATE question_sets SET status = $1, reviewed_at = now() WHERE id = $2 RETURNING *",
+      [newStatus, req.params.id]
+    );
+    const updatedSet = updatedRows[0];
+
+    await client.query("COMMIT");
+
+    res.json(updatedSet);
+
+    sendQuestionSetPartialReviewNotification(updatedSet, remainingCount, rejectedQuestionsInfo).catch(
+      (err) => console.error("NGO-sähköpostin lähetys epäonnistui:", err)
+    );
+
+    if (newStatus === "approved") {
+      (async () => {
+        try {
+          const frontendBaseUrl = process.env.CORS_ORIGIN || "http://localhost:5173";
+          const { rows: candidates } = await db.query(
+            `SELECT DISTINCT c.id, c.name, c.email, p.token AS party_token
+             FROM candidates c
+             JOIN parties p ON c.party_id = p.id
+             WHERE c.email IS NOT NULL
+               AND EXISTS (SELECT 1 FROM candidate_answers ca WHERE ca.candidate_id = c.id)`
+          );
+          const { rows: parties } = await db.query(
+            `SELECT DISTINCT p.id, p.name, p.email, p.token
+             FROM parties p
+             JOIN candidates c ON c.party_id = p.id
+             WHERE p.email IS NOT NULL
+               AND EXISTS (SELECT 1 FROM candidate_answers ca WHERE ca.candidate_id = c.id)`
+          );
+          for (const c of candidates) {
+            sendApprovedQuestionSetNotificationToCandidate(updatedSet, remainingCount, c, frontendBaseUrl)
+              .catch((err) => console.error("Ehdokkaan sähköpostin lähetys epäonnistui:", err));
+          }
+          for (const p of parties) {
+            sendApprovedQuestionSetNotificationToParty(updatedSet, remainingCount, p, frontendBaseUrl)
+              .catch((err) => console.error("Puolueen sähköpostin lähetys epäonnistui:", err));
+          }
+        } catch (err) {
+          console.error("Hyväksyntäilmoitusten lähetys epäonnistui:", err);
+        }
+      })();
+    }
+  } catch (err) {
+    await client.query("ROLLBACK");
+    next(err);
+  } finally {
+    client.release();
   }
 });
 

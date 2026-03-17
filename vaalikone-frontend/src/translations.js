@@ -69,6 +69,10 @@ const translations = {
     adminPartyNamePlaceholder: "Puolueen nimi",
     adminPartyEmailPlaceholder: "Sihteerin sähköposti",
     adminAdd: "Lisää",
+    adminFinalizeReview: "Päätä arvostelu",
+    adminQuestionAccepted: "✓ Hyväksytty",
+    adminQuestionRejected: "✗ Hylätty",
+    adminRejectionReasonPlaceholder: "Hylkäämisen syy (vapaaehtoinen)…",
 
     // NGO
     ngoTitle: "Lähetä kysymyksiä",
@@ -257,6 +261,10 @@ const translations = {
     adminPartyNamePlaceholder: "Party name",
     adminPartyEmailPlaceholder: "Secretary email",
     adminAdd: "Add",
+    adminFinalizeReview: "Finalize review",
+    adminQuestionAccepted: "✓ Accepted",
+    adminQuestionRejected: "✗ Rejected",
+    adminRejectionReasonPlaceholder: "Reason for rejection (optional)…",
 
     // NGO
     ngoTitle: "Submit questions",

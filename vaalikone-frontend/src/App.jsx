@@ -90,6 +90,8 @@ const api = {
     apiFetch(`/admin/question-sets/${id}/unhide`, { method: "PATCH", adminSecret: secret }),
   deleteQuestionSet: (secret, id) =>
     apiFetch(`/admin/question-sets/${id}`, { method: "DELETE", adminSecret: secret }),
+  reviewQuestionSet: (secret, id, data) =>
+    apiFetch(`/admin/question-sets/${id}/review`, { method: "PATCH", body: data, adminSecret: secret }),
 };
 
 // ─── Finnish constituencies ───
@@ -517,6 +519,30 @@ function AdminView() {
   const [newPartyName, setNewPartyName] = useState("");
   const [newPartyEmail, setNewPartyEmail] = useState("");
   const [actionLoading, setActionLoading] = useState(null);
+  const [reviewState, setReviewState] = useState({}); // { [setId]: { [questionId]: { rejected, reason } } }
+
+  function toggleQuestionReject(setId, questionId) {
+    setReviewState((prev) => ({
+      ...prev,
+      [setId]: {
+        ...prev[setId],
+        [questionId]: {
+          rejected: !(prev[setId]?.[questionId]?.rejected ?? false),
+          reason: prev[setId]?.[questionId]?.reason || "",
+        },
+      },
+    }));
+  }
+
+  function setRejectionReason(setId, questionId, reason) {
+    setReviewState((prev) => ({
+      ...prev,
+      [setId]: {
+        ...prev[setId],
+        [questionId]: { ...prev[setId]?.[questionId], reason },
+      },
+    }));
+  }
 
   async function login() {
     setLoading(true);
@@ -543,19 +569,16 @@ function AdminView() {
     }
   }
 
-  async function approveSet(id) {
-    setActionLoading(id);
+  async function finalizeReview(setId, questions) {
+    setActionLoading(setId);
     try {
-      await api.approveQuestionSet(adminSecret, id);
-      await refresh();
-    } catch (e) { setError(e.message); }
-    finally { setActionLoading(null); }
-  }
-
-  async function rejectSet(id) {
-    setActionLoading(id);
-    try {
-      await api.rejectQuestionSet(adminSecret, id);
+      const reviews = questions.map((q) => ({
+        questionId: q.id,
+        rejected: reviewState[setId]?.[q.id]?.rejected ?? false,
+        rejectionReason: reviewState[setId]?.[q.id]?.reason ?? "",
+      }));
+      await api.reviewQuestionSet(adminSecret, setId, { reviews });
+      setReviewState((prev) => { const next = { ...prev }; delete next[setId]; return next; });
       await refresh();
     } catch (e) { setError(e.message); }
     finally { setActionLoading(null); }
@@ -643,23 +666,44 @@ function AdminView() {
         {pending.map((qs) => (
           <Card key={qs.id} style={{ marginBottom: "12px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", flexWrap: "wrap", gap: "12px" }}>
-              <div>
+              <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "4px" }}>
                   <NgoLogo src={qs.logoUrl} name={qs.ngoName} size={28} />
                   <div style={{ fontWeight: 700, fontSize: "16px" }}>{qs.title}</div>
                 </div>
-                <div style={{ fontSize: "13px", color: palette.textMuted }}>{qs.ngoName} · {qs.questions?.length || 0} {t.adminQuestions}</div>
-                <div style={{ marginTop: "12px" }}>
-                  {qs.questions?.map((q, i) => (
-                    <div key={q.id} style={{ fontSize: "13px", color: palette.text, marginBottom: "4px" }}>
-                      <span style={{ color: palette.textLight, marginRight: "6px" }}>{i + 1}.</span>{q.statement}
-                    </div>
-                  ))}
+                <div style={{ fontSize: "13px", color: palette.textMuted, marginBottom: "12px" }}>{qs.ngoName} · {qs.ngoEmail} · {qs.questions?.length || 0} {t.adminQuestions}</div>
+                <div>
+                  {qs.questions?.map((q, i) => {
+                    const isRejected = reviewState[qs.id]?.[q.id]?.rejected ?? false;
+                    const reason = reviewState[qs.id]?.[q.id]?.reason ?? "";
+                    return (
+                      <div key={q.id} style={{ marginBottom: "8px", padding: "10px 12px", background: isRejected ? palette.dangerLight : palette.accentLight, borderRadius: "6px", border: `1px solid ${isRejected ? "#f5c6c2" : "#c6dece"}` }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          <span style={{ color: palette.textLight, fontSize: "13px", flexShrink: 0 }}>{i + 1}.</span>
+                          <span style={{ fontSize: "13px", flex: 1 }}>{q.statement}</span>
+                          <button
+                            onClick={() => toggleQuestionReject(qs.id, q.id)}
+                            style={{ flexShrink: 0, padding: "3px 10px", fontSize: "12px", fontWeight: 600, borderRadius: "4px", border: "none", cursor: "pointer", background: isRejected ? palette.danger : palette.accent, color: "#fff" }}
+                          >
+                            {isRejected ? t.adminQuestionRejected : t.adminQuestionAccepted}
+                          </button>
+                        </div>
+                        {isRejected && (
+                          <textarea
+                            value={reason}
+                            onChange={(e) => setRejectionReason(qs.id, q.id, e.target.value)}
+                            placeholder={t.adminRejectionReasonPlaceholder}
+                            rows={2}
+                            style={{ marginTop: "8px", width: "100%", boxSizing: "border-box", fontSize: "13px", padding: "6px 8px", borderRadius: "4px", border: `1px solid ${palette.border}`, resize: "vertical", fontFamily: "inherit" }}
+                          />
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
               <div style={{ display: "flex", gap: "8px", flexShrink: 0 }}>
-                <Button variant="primary" size="sm" onClick={() => approveSet(qs.id)} loading={actionLoading === qs.id}>{t.adminApprove}</Button>
-                <Button variant="danger" size="sm" onClick={() => rejectSet(qs.id)} loading={actionLoading === qs.id}>{t.adminReject}</Button>
+                <Button variant="primary" size="sm" onClick={() => finalizeReview(qs.id, qs.questions || [])} loading={actionLoading === qs.id}>{t.adminFinalizeReview}</Button>
                 <Button variant="danger" size="sm" onClick={() => deleteSet(qs.id)} loading={actionLoading === qs.id}>{t.adminDelete}</Button>
               </div>
             </div>

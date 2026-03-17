@@ -66,6 +66,55 @@ async function sendQuestionSetReviewedNotification(questionSet, approved) {
   });
 }
 
+async function sendQuestionSetPartialReviewNotification(questionSet, acceptedCount, rejectedQuestions) {
+  if (!questionSet.ngo_email || !process.env.SMTP_HOST) return;
+
+  const transporter = createTransport();
+  const allRejected = acceptedCount === 0;
+
+  const subject = allRejected
+    ? sanitizeHeader(`Kysymyssarjanne on hylätty: ${questionSet.title}`)
+    : sanitizeHeader(`Kysymyssarjanne on käsitelty: ${questionSet.title}`);
+
+  const lines = [`Hei ${questionSet.ngo_name},`, ""];
+
+  if (allRejected) {
+    lines.push(`Kysymyssarjanne "${questionSet.title}" on valitettavasti hylätty kokonaan.`);
+  } else {
+    lines.push(`Kysymyssarjanne "${questionSet.title}" on käsitelty.`);
+    lines.push("");
+    lines.push(`Hyväksyttyjä kysymyksiä: ${acceptedCount}`);
+  }
+
+  if (rejectedQuestions.length > 0) {
+    lines.push("");
+    lines.push(`Hylätyt kysymykset (${rejectedQuestions.length}):`);
+    rejectedQuestions.forEach((q, i) => {
+      lines.push(`${i + 1}. "${q.statement}"`);
+      if (q.rejectionReason) {
+        lines.push(`   Syy: ${q.rejectionReason}`);
+      }
+    });
+  }
+
+  if (!allRejected) {
+    lines.push("");
+    lines.push("Hyväksytyt kysymykset ovat nyt näkyvissä Vaalikone 2026 -järjestelmässä.");
+    lines.push("");
+    lines.push("Kiitos osallistumisestanne!");
+  } else {
+    lines.push("");
+    lines.push("Jos teillä on kysyttävää, ottakaa yhteyttä ylläpitoon.");
+  }
+
+  await transporter.sendMail({
+    from: process.env.SMTP_FROM || "noreply@vaalikone.fi",
+    to: questionSet.ngo_email,
+    subject,
+    text: lines.join("\n"),
+  });
+}
+
 async function sendApprovedQuestionSetNotificationToCandidate(questionSet, questionCount, candidate, frontendBaseUrl) {
   if (!process.env.SMTP_HOST) return;
 
@@ -120,6 +169,7 @@ async function sendApprovedQuestionSetNotificationToParty(questionSet, questionC
 module.exports = {
   sendNewQuestionSetNotification,
   sendQuestionSetReviewedNotification,
+  sendQuestionSetPartialReviewNotification,
   sendApprovedQuestionSetNotificationToCandidate,
   sendApprovedQuestionSetNotificationToParty,
 };
