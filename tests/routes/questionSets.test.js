@@ -269,3 +269,164 @@ describe("PATCH /api/admin/question-sets/:id/reject", () => {
     expect(res.body.status).toBe("rejected");
   });
 });
+
+// ─── PATCH /api/admin/question-sets/:id/review ───────────────────────────────
+
+const Q1 = "aa000000-0000-0000-0000-000000000001";
+const Q2 = "aa000000-0000-0000-0000-000000000002";
+
+const pendingSet = {
+  id: VALID_UUID,
+  ngo_name: "TestiJärjestö",
+  ngo_email: "info@testi.fi",
+  title: "Testisarja",
+  status: "pending",
+};
+
+function buildReviewClient({ remainingCount = 2, updatedStatus = "approved" } = {}) {
+  const client = buildMockClient();
+  const updated = { ...pendingSet, status: updatedStatus, reviewed_at: new Date().toISOString() };
+  client.query
+    .mockResolvedValueOnce({})                               // BEGIN
+    .mockResolvedValueOnce({ rows: [pendingSet] })           // SELECT … FOR UPDATE
+    // (no rejected rows branch by default — callers can override)
+    .mockResolvedValueOnce({ rows: [{ count: String(remainingCount) }] }) // COUNT remaining
+    .mockResolvedValueOnce({ rows: [updated] })              // UPDATE status
+    .mockResolvedValueOnce({});                              // COMMIT
+  return { client, updated };
+}
+
+describe("PATCH /api/admin/question-sets/:id/review", () => {
+  test("not admin → 401", async () => {
+    const res = await request(app).patch(`/api/admin/question-sets/${VALID_UUID}/review`);
+    expect(res.status).toBe(401);
+  });
+
+  test("invalid UUID → 400", async () => {
+    const res = await request(app)
+      .patch("/api/admin/question-sets/bad-id/review")
+      .set("Authorization", authHeader);
+    expect(res.status).toBe(400);
+  });
+
+  test("missing reviews field → 400", async () => {
+    buildMockClient();
+    const res = await request(app)
+      .patch(`/api/admin/question-sets/${VALID_UUID}/review`)
+      .set("Authorization", authHeader)
+      .send({});
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/reviews/i);
+  });
+
+  test("empty reviews array → 400", async () => {
+    buildMockClient();
+    const res = await request(app)
+      .patch(`/api/admin/question-sets/${VALID_UUID}/review`)
+      .set("Authorization", authHeader)
+      .send({ reviews: [] });
+    expect(res.status).toBe(400);
+  });
+
+  test("question set not found → 404", async () => {
+    const client = buildMockClient();
+    client.query
+      .mockResolvedValueOnce({})               // BEGIN
+      .mockResolvedValueOnce({ rows: [] });    // SELECT returns nothing
+    const res = await request(app)
+      .patch(`/api/admin/question-sets/${VALID_UUID}/review`)
+      .set("Authorization", authHeader)
+      .send({ reviews: [{ questionId: Q1, rejected: false }] });
+    expect(res.status).toBe(404);
+  });
+
+  test("all questions accepted → status approved → 200", async () => {
+    const { updated } = buildReviewClient({ remainingCount: 2, updatedStatus: "approved" });
+    const res = await request(app)
+      .patch(`/api/admin/question-sets/${VALID_UUID}/review`)
+      .set("Authorization", authHeader)
+      .send({
+        reviews: [
+          { questionId: Q1, rejected: false },
+          { questionId: Q2, rejected: false },
+        ],
+      });
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("approved");
+  });
+
+  test("some questions rejected → deleted, remainder approved → 200", async () => {
+    const client = buildMockClient();
+    const updated = { ...pendingSet, status: "approved", reviewed_at: new Date().toISOString() };
+    client.query
+      .mockResolvedValueOnce({})                                                    // BEGIN
+      .mockResolvedValueOnce({ rows: [pendingSet] })                               // SELECT FOR UPDATE
+      .mockResolvedValueOnce({ rows: [{ id: Q2, statement: "Väittämä 2" }] })      // SELECT rejected statements
+      .mockResolvedValueOnce({})                                                    // DELETE rejected questions
+      .mockResolvedValueOnce({ rows: [{ count: "1" }] })                           // COUNT remaining
+      .mockResolvedValueOnce({ rows: [updated] })                                   // UPDATE status
+      .mockResolvedValueOnce({});                                                   // COMMIT
+
+    const res = await request(app)
+      .patch(`/api/admin/question-sets/${VALID_UUID}/review`)
+      .set("Authorization", authHeader)
+      .send({
+        reviews: [
+          { questionId: Q1, rejected: false },
+          { questionId: Q2, rejected: true, rejectionReason: "Aihe liian laaja" },
+        ],
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("approved");
+
+    // DELETE must have been called for rejected question
+    const deleteCalls = client.query.mock.calls.filter(([sql]) =>
+      typeof sql === "string" && sql.includes("DELETE")
+    );
+    expect(deleteCalls).toHaveLength(1);
+  });
+
+  test("all questions rejected → status rejected → 200", async () => {
+    const client = buildMockClient();
+    const updated = { ...pendingSet, status: "rejected", reviewed_at: new Date().toISOString() };
+    client.query
+      .mockResolvedValueOnce({})                                                           // BEGIN
+      .mockResolvedValueOnce({ rows: [pendingSet] })                                      // SELECT FOR UPDATE
+      .mockResolvedValueOnce({ rows: [{ id: Q1, statement: "Väittämä 1" }, { id: Q2, statement: "Väittämä 2" }] }) // SELECT rejected statements
+      .mockResolvedValueOnce({})                                                           // DELETE
+      .mockResolvedValueOnce({ rows: [{ count: "0" }] })                                  // COUNT remaining → 0
+      .mockResolvedValueOnce({ rows: [updated] })                                          // UPDATE status
+      .mockResolvedValueOnce({});                                                          // COMMIT
+
+    const res = await request(app)
+      .patch(`/api/admin/question-sets/${VALID_UUID}/review`)
+      .set("Authorization", authHeader)
+      .send({
+        reviews: [
+          { questionId: Q1, rejected: true, rejectionReason: "Epäasiallinen" },
+          { questionId: Q2, rejected: true, rejectionReason: "" },
+        ],
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("rejected");
+  });
+
+  test("DB error → ROLLBACK called, 500 returned, client released", async () => {
+    const client = buildMockClient();
+    client.query
+      .mockResolvedValueOnce({})                    // BEGIN
+      .mockRejectedValueOnce(new Error("DB down")); // SELECT FOR UPDATE fails
+
+    const res = await request(app)
+      .patch(`/api/admin/question-sets/${VALID_UUID}/review`)
+      .set("Authorization", authHeader)
+      .send({ reviews: [{ questionId: Q1, rejected: false }] });
+
+    const rollbackCall = client.query.mock.calls.find(([sql]) => sql === "ROLLBACK");
+    expect(rollbackCall).toBeDefined();
+    expect(client.release).toHaveBeenCalled();
+    expect(res.status).toBe(500);
+  });
+});
