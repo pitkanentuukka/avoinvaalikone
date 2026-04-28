@@ -66,11 +66,11 @@ async function sendQuestionSetReviewedNotification(questionSet, approved) {
   });
 }
 
-async function sendQuestionSetPartialReviewNotification(questionSet, acceptedCount, rejectedQuestions) {
+async function sendQuestionSetPartialReviewNotification(questionSet, acceptedQuestions, modifiedQuestions, rejectedQuestions) {
   if (!questionSet.ngo_email || !process.env.SMTP_HOST) return;
 
   const transporter = createTransport();
-  const allRejected = acceptedCount === 0;
+  const allRejected = acceptedQuestions.length === 0 && modifiedQuestions.length === 0;
 
   const subject = allRejected
     ? sanitizeHeader(`Kysymyssarjanne on hylätty: ${questionSet.title}`)
@@ -82,8 +82,23 @@ async function sendQuestionSetPartialReviewNotification(questionSet, acceptedCou
     lines.push(`Kysymyssarjanne "${questionSet.title}" on valitettavasti hylätty kokonaan.`);
   } else {
     lines.push(`Kysymyssarjanne "${questionSet.title}" on käsitelty.`);
-    lines.push("");
-    lines.push(`Hyväksyttyjä kysymyksiä: ${acceptedCount}`);
+
+    if (acceptedQuestions.length > 0) {
+      lines.push("");
+      lines.push(`Hyväksytyt kysymykset (${acceptedQuestions.length}):`);
+      acceptedQuestions.forEach((q, i) => {
+        lines.push(`${i + 1}. "${q.statement}"`);
+      });
+    }
+
+    if (modifiedQuestions.length > 0) {
+      lines.push("");
+      lines.push(`Muokatut kysymykset (${modifiedQuestions.length}):`);
+      modifiedQuestions.forEach((q, i) => {
+        lines.push(`${i + 1}. Alkuperäinen: "${q.originalStatement}"`);
+        lines.push(`   Muokattu:     "${q.editedStatement}"`);
+      });
+    }
   }
 
   if (rejectedQuestions.length > 0) {
@@ -99,9 +114,7 @@ async function sendQuestionSetPartialReviewNotification(questionSet, acceptedCou
 
   if (!allRejected) {
     lines.push("");
-    lines.push("Hyväksytyt kysymykset ovat nyt näkyvissä Vaalikone 2026 -järjestelmässä.");
-    lines.push("");
-    lines.push("Kiitos osallistumisestanne!");
+    lines.push("Ylläpito voi vielä muokata kysymyksiä ennen julkaisua. Saatte ilmoituksen, kun kysymyssarja on julkaistu.");
   } else {
     lines.push("");
     lines.push("Jos teillä on kysyttävää, ottakaa yhteyttä ylläpitoon.");
@@ -112,6 +125,27 @@ async function sendQuestionSetPartialReviewNotification(questionSet, acceptedCou
     to: questionSet.ngo_email,
     subject,
     text: lines.join("\n"),
+  });
+}
+
+async function sendQuestionSetPublishedNotification(questionSet, questionCount) {
+  if (!questionSet.ngo_email || !process.env.SMTP_HOST) return;
+
+  const transporter = createTransport();
+
+  await transporter.sendMail({
+    from: process.env.SMTP_FROM || "noreply@vaalikone.fi",
+    to: questionSet.ngo_email,
+    subject: sanitizeHeader(`Kysymyssarjanne on julkaistu: ${questionSet.title}`),
+    text: [
+      `Hei ${questionSet.ngo_name},`,
+      "",
+      `Kysymyssarjanne "${questionSet.title}" on nyt julkaistu Vaalikone 2026 -järjestelmässä.`,
+      "",
+      `Julkaistuja kysymyksiä: ${questionCount}`,
+      "",
+      "Kiitos osallistumisestanne!",
+    ].join("\n"),
   });
 }
 
@@ -170,6 +204,7 @@ module.exports = {
   sendNewQuestionSetNotification,
   sendQuestionSetReviewedNotification,
   sendQuestionSetPartialReviewNotification,
+  sendQuestionSetPublishedNotification,
   sendApprovedQuestionSetNotificationToCandidate,
   sendApprovedQuestionSetNotificationToParty,
 };

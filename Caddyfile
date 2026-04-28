@@ -1,0 +1,3 @@
+avoinvaalikone.fi {
+    reverse_proxy frontend:80
+}

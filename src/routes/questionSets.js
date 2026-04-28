@@ -6,6 +6,7 @@ const {
   sendNewQuestionSetNotification,
   sendQuestionSetReviewedNotification,
   sendQuestionSetPartialReviewNotification,
+  sendQuestionSetPublishedNotification,
   sendApprovedQuestionSetNotificationToCandidate,
   sendApprovedQuestionSetNotificationToParty,
 } = require("../email");
@@ -146,7 +147,7 @@ adminRouter.get("/", requireAdmin, async (req, res, next) => {
   try {
     const { rows: sets } = await db.query(
       `SELECT qs.id, qs.ngo_name, qs.ngo_email, qs.logo_url, qs.title,
-              qs.status, qs.submitted_at, qs.reviewed_at
+              qs.status, qs.hidden, qs.submitted_at, qs.reviewed_at
        FROM question_sets qs
        ORDER BY
          CASE qs.status WHEN 'pending' THEN 0 WHEN 'approved' THEN 1 ELSE 2 END,
@@ -278,35 +279,66 @@ adminRouter.patch("/:id/review", requireAdmin, validateUUIDParam("id"), async (r
       await client.query("ROLLBACK");
       return res.status(404).json({ error: "Kysymyssarjaa ei löytynyt" });
     }
-    const rejectedReviews = reviews.filter((r) => r.rejected);
-    let rejectedQuestionsInfo = [];
+    // Validate edits
+    for (const r of reviews) {
+      if (r.editedStatement != null && !isValidLength(r.editedStatement, 500)) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({ error: "Muokattu väittämä on liian pitkä (maksimi: 500 merkkiä)" });
+      }
+    }
 
+    const rejectedReviews = reviews.filter((r) => r.rejected);
+    const editedReviews = reviews.filter((r) => !r.rejected && r.editedStatement?.trim());
+
+    // Fetch originals for rejected and edited questions (needed for email)
+    const needOriginalIds = [
+      ...rejectedReviews.map((r) => r.questionId),
+      ...editedReviews.map((r) => r.questionId),
+    ];
+    let originalRows = [];
+    if (needOriginalIds.length > 0) {
+      const { rows } = await client.query(
+        "SELECT id, statement FROM questions WHERE id = ANY($1) AND question_set_id = $2",
+        [needOriginalIds, req.params.id]
+      );
+      originalRows = rows;
+    }
+
+    // Apply edits
+    for (const edit of editedReviews) {
+      await client.query(
+        "UPDATE questions SET statement = $1 WHERE id = $2 AND question_set_id = $3",
+        [edit.editedStatement.trim(), edit.questionId, req.params.id]
+      );
+    }
+
+    // Delete rejected questions
+    let rejectedQuestionsInfo = [];
     if (rejectedReviews.length > 0) {
       const rejectedIds = rejectedReviews.map((r) => r.questionId);
-      const { rows: qRows } = await client.query(
-        "SELECT id, statement FROM questions WHERE id = ANY($1) AND question_set_id = $2",
-        [rejectedIds, req.params.id]
-      );
-      rejectedQuestionsInfo = qRows.map((q) => {
-        const review = rejectedReviews.find((r) => r.questionId === q.id);
-        return { statement: q.statement, rejectionReason: review?.rejectionReason || "" };
-      });
+      rejectedQuestionsInfo = rejectedReviews
+        .map((r) => {
+          const original = originalRows.find((o) => o.id === r.questionId);
+          return original ? { statement: original.statement, rejectionReason: r.rejectionReason || "" } : null;
+        })
+        .filter(Boolean);
       await client.query(
         "DELETE FROM questions WHERE id = ANY($1) AND question_set_id = $2",
         [rejectedIds, req.params.id]
       );
     }
 
-    const { rows: [{ count }] } = await client.query(
-      "SELECT COUNT(*) FROM questions WHERE question_set_id = $1",
+    // Fetch remaining questions (with updated statements)
+    const { rows: remainingQuestions } = await client.query(
+      "SELECT id, statement FROM questions WHERE question_set_id = $1 ORDER BY sort_order",
       [req.params.id]
     );
-    const remainingCount = Number(count);
-    const newStatus = remainingCount > 0 ? "approved" : "rejected";
+    const newStatus = remainingQuestions.length > 0 ? "approved" : "rejected";
+    const newHidden = newStatus === "approved";
 
     const { rows: updatedRows } = await client.query(
-      "UPDATE question_sets SET status = $1, reviewed_at = now() WHERE id = $2 RETURNING *",
-      [newStatus, req.params.id]
+      "UPDATE question_sets SET status = $1, hidden = $2, reviewed_at = now() WHERE id = $3 RETURNING *",
+      [newStatus, newHidden, req.params.id]
     );
     const updatedSet = updatedRows[0];
 
@@ -314,41 +346,20 @@ adminRouter.patch("/:id/review", requireAdmin, validateUUIDParam("id"), async (r
 
     res.json(updatedSet);
 
-    sendQuestionSetPartialReviewNotification(updatedSet, remainingCount, rejectedQuestionsInfo).catch(
+    // Build email data: split remaining into accepted-as-is vs modified
+    const editedIds = new Set(editedReviews.map((r) => r.questionId));
+    const acceptedQuestions = remainingQuestions.filter((q) => !editedIds.has(q.id));
+    const modifiedQuestions = editedReviews
+      .map((edit) => {
+        const original = originalRows.find((o) => o.id === edit.questionId);
+        const updated = remainingQuestions.find((r) => r.id === edit.questionId);
+        return original && updated ? { originalStatement: original.statement, editedStatement: updated.statement } : null;
+      })
+      .filter(Boolean);
+
+    sendQuestionSetPartialReviewNotification(updatedSet, acceptedQuestions, modifiedQuestions, rejectedQuestionsInfo).catch(
       (err) => console.error("NGO-sähköpostin lähetys epäonnistui:", err)
     );
-
-    if (newStatus === "approved") {
-      (async () => {
-        try {
-          const frontendBaseUrl = process.env.CORS_ORIGIN || "http://localhost:5173";
-          const { rows: candidates } = await db.query(
-            `SELECT DISTINCT c.id, c.name, c.email, p.token AS party_token
-             FROM candidates c
-             JOIN parties p ON c.party_id = p.id
-             WHERE c.email IS NOT NULL
-               AND EXISTS (SELECT 1 FROM candidate_answers ca WHERE ca.candidate_id = c.id)`
-          );
-          const { rows: parties } = await db.query(
-            `SELECT DISTINCT p.id, p.name, p.email, p.token
-             FROM parties p
-             JOIN candidates c ON c.party_id = p.id
-             WHERE p.email IS NOT NULL
-               AND EXISTS (SELECT 1 FROM candidate_answers ca WHERE ca.candidate_id = c.id)`
-          );
-          for (const c of candidates) {
-            sendApprovedQuestionSetNotificationToCandidate(updatedSet, remainingCount, c, frontendBaseUrl)
-              .catch((err) => console.error("Ehdokkaan sähköpostin lähetys epäonnistui:", err));
-          }
-          for (const p of parties) {
-            sendApprovedQuestionSetNotificationToParty(updatedSet, remainingCount, p, frontendBaseUrl)
-              .catch((err) => console.error("Puolueen sähköpostin lähetys epäonnistui:", err));
-          }
-        } catch (err) {
-          console.error("Hyväksyntäilmoitusten lähetys epäonnistui:", err);
-        }
-      })();
-    }
   } catch (err) {
     await client.query("ROLLBACK");
     next(err);
@@ -373,7 +384,7 @@ adminRouter.patch("/:id/hide", requireAdmin, validateUUIDParam("id"), async (req
   }
 });
 
-// PATCH /api/admin/question-sets/:id/unhide
+// PATCH /api/admin/question-sets/:id/unhide — publish a staged set
 adminRouter.patch("/:id/unhide", requireAdmin, validateUUIDParam("id"), async (req, res, next) => {
   try {
     const { rows } = await db.query(
@@ -383,11 +394,122 @@ adminRouter.patch("/:id/unhide", requireAdmin, validateUUIDParam("id"), async (r
     if (rows.length === 0) {
       return res.status(404).json({ error: "Kysymyssarjaa ei löytynyt" });
     }
-    res.json(rows[0]);
+    const publishedSet = rows[0];
+    res.json(publishedSet);
+
+    (async () => {
+      try {
+        const { rows: [{ count }] } = await db.query(
+          "SELECT COUNT(*) FROM questions WHERE question_set_id = $1",
+          [publishedSet.id]
+        );
+        const questionCount = Number(count);
+        const frontendBaseUrl = process.env.CORS_ORIGIN || "http://localhost:5173";
+
+        sendQuestionSetPublishedNotification(publishedSet, questionCount).catch(
+          (err) => console.error("NGO-sähköpostin lähetys epäonnistui:", err)
+        );
+
+        const { rows: candidates } = await db.query(
+          `SELECT DISTINCT c.id, c.name, c.email, p.token AS party_token
+           FROM candidates c
+           JOIN parties p ON c.party_id = p.id
+           WHERE c.email IS NOT NULL
+             AND EXISTS (SELECT 1 FROM candidate_answers ca WHERE ca.candidate_id = c.id)`
+        );
+        const { rows: parties } = await db.query(
+          `SELECT DISTINCT p.id, p.name, p.email, p.token
+           FROM parties p
+           JOIN candidates c ON c.party_id = p.id
+           WHERE p.email IS NOT NULL
+             AND EXISTS (SELECT 1 FROM candidate_answers ca WHERE ca.candidate_id = c.id)`
+        );
+        for (const c of candidates) {
+          sendApprovedQuestionSetNotificationToCandidate(publishedSet, questionCount, c, frontendBaseUrl)
+            .catch((err) => console.error("Ehdokkaan sähköpostin lähetys epäonnistui:", err));
+        }
+        for (const p of parties) {
+          sendApprovedQuestionSetNotificationToParty(publishedSet, questionCount, p, frontendBaseUrl)
+            .catch((err) => console.error("Puolueen sähköpostin lähetys epäonnistui:", err));
+        }
+      } catch (err) {
+        console.error("Julkaisuilmoitusten lähetys epäonnistui:", err);
+      }
+    })();
   } catch (err) {
     next(err);
   }
 });
+
+// POST /api/admin/question-sets/:id/questions — add a question to a staged set
+adminRouter.post("/:id/questions", requireAdmin, validateUUIDParam("id"), async (req, res, next) => {
+  try {
+    const { statement } = req.body;
+    if (!statement?.trim()) {
+      return res.status(400).json({ error: "Väittämä vaaditaan" });
+    }
+    if (!isValidLength(statement, 500)) {
+      return res.status(400).json({ error: "Väittämä on liian pitkä (maksimi: 500 merkkiä)" });
+    }
+
+    const { rows: sets } = await db.query(
+      "SELECT id, status, hidden FROM question_sets WHERE id = $1",
+      [req.params.id]
+    );
+    if (sets.length === 0) {
+      return res.status(404).json({ error: "Kysymyssarjaa ei löytynyt" });
+    }
+    if (sets[0].status !== "approved" || !sets[0].hidden) {
+      return res.status(409).json({ error: "Kysymyksiä voi lisätä vain julkaisemattomiin kysymyssarjoihin" });
+    }
+
+    const { rows: [{ max }] } = await db.query(
+      "SELECT COALESCE(MAX(sort_order), 0) AS max FROM questions WHERE question_set_id = $1",
+      [req.params.id]
+    );
+
+    const { rows: [question] } = await db.query(
+      "INSERT INTO questions (question_set_id, statement, sort_order) VALUES ($1, $2, $3) RETURNING *",
+      [req.params.id, statement.trim(), Number(max) + 1]
+    );
+    res.status(201).json(question);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /api/admin/question-sets/:id/questions/:questionId — remove a question from a staged set
+adminRouter.delete(
+  "/:id/questions/:questionId",
+  requireAdmin,
+  validateUUIDParam("id"),
+  validateUUIDParam("questionId"),
+  async (req, res, next) => {
+    try {
+      const { rows: sets } = await db.query(
+        "SELECT id, status, hidden FROM question_sets WHERE id = $1",
+        [req.params.id]
+      );
+      if (sets.length === 0) {
+        return res.status(404).json({ error: "Kysymyssarjaa ei löytynyt" });
+      }
+      if (sets[0].status !== "approved" || !sets[0].hidden) {
+        return res.status(409).json({ error: "Kysymyksiä voi poistaa vain julkaisemattomista kysymyssarjoista" });
+      }
+
+      const { rowCount } = await db.query(
+        "DELETE FROM questions WHERE id = $1 AND question_set_id = $2",
+        [req.params.questionId, req.params.id]
+      );
+      if (rowCount === 0) {
+        return res.status(404).json({ error: "Kysymystä ei löytynyt" });
+      }
+      res.status(204).end();
+    } catch (err) {
+      next(err);
+    }
+  }
+);
 
 // DELETE /api/admin/question-sets/:id
 adminRouter.delete("/:id", requireAdmin, validateUUIDParam("id"), async (req, res, next) => {

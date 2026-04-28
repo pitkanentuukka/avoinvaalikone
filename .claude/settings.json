@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker run --rm vaalikone-frontend-debug grep -o \"removeParty\" /app/dist/assets/index-*.js)",
+      "Bash(docker run --rm vaalikone-frontend-debug ls /app/dist/assets/)",
+      "Bash(docker run --rm vaalikone-frontend-debug grep -o \"removeParty\" /app/dist/assets/index-JpG54AU3.js)",
+      "Bash(docker run --rm vaalikone-frontend-debug grep -o \"adminDelete\\\\|Poista\\\\|removeParty\\\\|adminPartiesTitle\" /app/dist/assets/index-JpG54AU3.js)",
+      "Bash(docker run --rm vaalikone-frontend-debug grep -o \"deleteParty\\\\|delete.*party\\\\|Puolueet\" /app/dist/assets/index-JpG54AU3.js)",
+      "Bash(docker run --rm vaalikone-frontend-debug grep -o \"adminDeletePartyConfirm\\\\|Haluatko varmasti poistaa tämän puolueen\" /app/dist/assets/index-JpG54AU3.js)"
+    ]
+  }
+}

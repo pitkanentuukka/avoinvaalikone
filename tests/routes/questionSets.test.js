@@ -283,18 +283,8 @@ const pendingSet = {
   status: "pending",
 };
 
-function buildReviewClient({ remainingCount = 2, updatedStatus = "approved" } = {}) {
-  const client = buildMockClient();
-  const updated = { ...pendingSet, status: updatedStatus, reviewed_at: new Date().toISOString() };
-  client.query
-    .mockResolvedValueOnce({})                               // BEGIN
-    .mockResolvedValueOnce({ rows: [pendingSet] })           // SELECT … FOR UPDATE
-    // (no rejected rows branch by default — callers can override)
-    .mockResolvedValueOnce({ rows: [{ count: String(remainingCount) }] }) // COUNT remaining
-    .mockResolvedValueOnce({ rows: [updated] })              // UPDATE status
-    .mockResolvedValueOnce({});                              // COMMIT
-  return { client, updated };
-}
+// Staged = approved + hidden
+const stagedSet = { ...pendingSet, status: "approved", hidden: true };
 
 describe("PATCH /api/admin/question-sets/:id/review", () => {
   test("not admin → 401", async () => {
@@ -331,8 +321,8 @@ describe("PATCH /api/admin/question-sets/:id/review", () => {
   test("question set not found → 404", async () => {
     const client = buildMockClient();
     client.query
-      .mockResolvedValueOnce({})               // BEGIN
-      .mockResolvedValueOnce({ rows: [] });    // SELECT returns nothing
+      .mockResolvedValueOnce({})            // BEGIN
+      .mockResolvedValueOnce({ rows: [] }); // SELECT FOR UPDATE → not found
     const res = await request(app)
       .patch(`/api/admin/question-sets/${VALID_UUID}/review`)
       .set("Authorization", authHeader)
@@ -340,8 +330,33 @@ describe("PATCH /api/admin/question-sets/:id/review", () => {
     expect(res.status).toBe(404);
   });
 
-  test("all questions accepted → status approved → 200", async () => {
-    const { updated } = buildReviewClient({ remainingCount: 2, updatedStatus: "approved" });
+  test("editedStatement too long → 400", async () => {
+    const client = buildMockClient();
+    client.query
+      .mockResolvedValueOnce({})                     // BEGIN
+      .mockResolvedValueOnce({ rows: [pendingSet] }) // SELECT FOR UPDATE
+      .mockResolvedValueOnce({});                    // ROLLBACK
+    const res = await request(app)
+      .patch(`/api/admin/question-sets/${VALID_UUID}/review`)
+      .set("Authorization", authHeader)
+      .send({ reviews: [{ questionId: Q1, rejected: false, editedStatement: "a".repeat(501) }] });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/liian pitkä/i);
+  });
+
+  test("all questions accepted → status approved, hidden=true → 200", async () => {
+    const client = buildMockClient();
+    const updated = { ...stagedSet, reviewed_at: new Date().toISOString() };
+    client.query
+      .mockResolvedValueOnce({})                                                                          // BEGIN
+      .mockResolvedValueOnce({ rows: [pendingSet] })                                                     // SELECT FOR UPDATE
+      // no needOriginalIds (no edits, no rejections) → skip SELECT originals
+      // no UPDATE per-question edits
+      // no DELETE
+      .mockResolvedValueOnce({ rows: [{ id: Q1, statement: "Väittämä 1" }, { id: Q2, statement: "Väittämä 2" }] }) // SELECT remaining
+      .mockResolvedValueOnce({ rows: [updated] })                                                        // UPDATE status + hidden
+      .mockResolvedValueOnce({});                                                                        // COMMIT
+
     const res = await request(app)
       .patch(`/api/admin/question-sets/${VALID_UUID}/review`)
       .set("Authorization", authHeader)
@@ -351,21 +366,57 @@ describe("PATCH /api/admin/question-sets/:id/review", () => {
           { questionId: Q2, rejected: false },
         ],
       });
+
     expect(res.status).toBe(200);
     expect(res.body.status).toBe("approved");
+    expect(res.body.hidden).toBe(true);
   });
 
-  test("some questions rejected → deleted, remainder approved → 200", async () => {
+  test("question edited → UPDATE called, stays staged → 200", async () => {
     const client = buildMockClient();
-    const updated = { ...pendingSet, status: "approved", reviewed_at: new Date().toISOString() };
+    const updated = { ...stagedSet, reviewed_at: new Date().toISOString() };
     client.query
-      .mockResolvedValueOnce({})                                                    // BEGIN
-      .mockResolvedValueOnce({ rows: [pendingSet] })                               // SELECT FOR UPDATE
-      .mockResolvedValueOnce({ rows: [{ id: Q2, statement: "Väittämä 2" }] })      // SELECT rejected statements
-      .mockResolvedValueOnce({})                                                    // DELETE rejected questions
-      .mockResolvedValueOnce({ rows: [{ count: "1" }] })                           // COUNT remaining
-      .mockResolvedValueOnce({ rows: [updated] })                                   // UPDATE status
-      .mockResolvedValueOnce({});                                                   // COMMIT
+      .mockResolvedValueOnce({})                                                                          // BEGIN
+      .mockResolvedValueOnce({ rows: [pendingSet] })                                                     // SELECT FOR UPDATE
+      .mockResolvedValueOnce({ rows: [{ id: Q1, statement: "Alkuperäinen" }] })                          // SELECT originals (edited)
+      .mockResolvedValueOnce({})                                                                         // UPDATE questions SET statement (edit Q1)
+      // no DELETE
+      .mockResolvedValueOnce({ rows: [{ id: Q1, statement: "Muokattu" }, { id: Q2, statement: "Väittämä 2" }] }) // SELECT remaining
+      .mockResolvedValueOnce({ rows: [updated] })                                                        // UPDATE status + hidden
+      .mockResolvedValueOnce({});                                                                        // COMMIT
+
+    const res = await request(app)
+      .patch(`/api/admin/question-sets/${VALID_UUID}/review`)
+      .set("Authorization", authHeader)
+      .send({
+        reviews: [
+          { questionId: Q1, rejected: false, editedStatement: "Muokattu" },
+          { questionId: Q2, rejected: false },
+        ],
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("approved");
+    expect(res.body.hidden).toBe(true);
+
+    const updateCalls = client.query.mock.calls.filter(([sql]) =>
+      typeof sql === "string" && sql.includes("UPDATE questions")
+    );
+    expect(updateCalls).toHaveLength(1);
+  });
+
+  test("some questions rejected → deleted, remainder staged → 200", async () => {
+    const client = buildMockClient();
+    const updated = { ...stagedSet, reviewed_at: new Date().toISOString() };
+    client.query
+      .mockResolvedValueOnce({})                                                  // BEGIN
+      .mockResolvedValueOnce({ rows: [pendingSet] })                              // SELECT FOR UPDATE
+      .mockResolvedValueOnce({ rows: [{ id: Q2, statement: "Väittämä 2" }] })    // SELECT originals (rejected)
+      // no edits
+      .mockResolvedValueOnce({})                                                  // DELETE rejected
+      .mockResolvedValueOnce({ rows: [{ id: Q1, statement: "Väittämä 1" }] })    // SELECT remaining
+      .mockResolvedValueOnce({ rows: [updated] })                                 // UPDATE status + hidden
+      .mockResolvedValueOnce({});                                                 // COMMIT
 
     const res = await request(app)
       .patch(`/api/admin/question-sets/${VALID_UUID}/review`)
@@ -379,25 +430,26 @@ describe("PATCH /api/admin/question-sets/:id/review", () => {
 
     expect(res.status).toBe(200);
     expect(res.body.status).toBe("approved");
+    expect(res.body.hidden).toBe(true);
 
-    // DELETE must have been called for rejected question
     const deleteCalls = client.query.mock.calls.filter(([sql]) =>
       typeof sql === "string" && sql.includes("DELETE")
     );
     expect(deleteCalls).toHaveLength(1);
   });
 
-  test("all questions rejected → status rejected → 200", async () => {
+  test("all questions rejected → status rejected, not hidden → 200", async () => {
     const client = buildMockClient();
-    const updated = { ...pendingSet, status: "rejected", reviewed_at: new Date().toISOString() };
+    const updated = { ...pendingSet, status: "rejected", hidden: false, reviewed_at: new Date().toISOString() };
     client.query
-      .mockResolvedValueOnce({})                                                           // BEGIN
-      .mockResolvedValueOnce({ rows: [pendingSet] })                                      // SELECT FOR UPDATE
-      .mockResolvedValueOnce({ rows: [{ id: Q1, statement: "Väittämä 1" }, { id: Q2, statement: "Väittämä 2" }] }) // SELECT rejected statements
-      .mockResolvedValueOnce({})                                                           // DELETE
-      .mockResolvedValueOnce({ rows: [{ count: "0" }] })                                  // COUNT remaining → 0
-      .mockResolvedValueOnce({ rows: [updated] })                                          // UPDATE status
-      .mockResolvedValueOnce({});                                                          // COMMIT
+      .mockResolvedValueOnce({})                                                                    // BEGIN
+      .mockResolvedValueOnce({ rows: [pendingSet] })                                               // SELECT FOR UPDATE
+      .mockResolvedValueOnce({ rows: [{ id: Q1, statement: "Väittämä 1" }, { id: Q2, statement: "Väittämä 2" }] }) // SELECT originals (rejected)
+      // no edits
+      .mockResolvedValueOnce({})                                                                    // DELETE
+      .mockResolvedValueOnce({ rows: [] })                                                          // SELECT remaining → empty
+      .mockResolvedValueOnce({ rows: [updated] })                                                   // UPDATE status
+      .mockResolvedValueOnce({});                                                                   // COMMIT
 
     const res = await request(app)
       .patch(`/api/admin/question-sets/${VALID_UUID}/review`)
@@ -428,5 +480,160 @@ describe("PATCH /api/admin/question-sets/:id/review", () => {
     expect(rollbackCall).toBeDefined();
     expect(client.release).toHaveBeenCalled();
     expect(res.status).toBe(500);
+  });
+});
+
+// ─── PATCH /api/admin/question-sets/:id/unhide (publish) ─────────────────────
+
+describe("PATCH /api/admin/question-sets/:id/unhide", () => {
+  test("not admin → 401", async () => {
+    const res = await request(app).patch(`/api/admin/question-sets/${VALID_UUID}/unhide`);
+    expect(res.status).toBe(401);
+  });
+
+  test("not found → 404", async () => {
+    db.query.mockResolvedValueOnce({ rows: [] });
+    const res = await request(app)
+      .patch(`/api/admin/question-sets/${VALID_UUID}/unhide`)
+      .set("Authorization", authHeader);
+    expect(res.status).toBe(404);
+  });
+
+  test("happy path → 200 with hidden=false", async () => {
+    const published = { ...stagedSet, hidden: false };
+    db.query.mockResolvedValueOnce({ rows: [published] });
+    const res = await request(app)
+      .patch(`/api/admin/question-sets/${VALID_UUID}/unhide`)
+      .set("Authorization", authHeader);
+    expect(res.status).toBe(200);
+    expect(res.body.hidden).toBe(false);
+  });
+});
+
+// ─── POST /api/admin/question-sets/:id/questions ─────────────────────────────
+
+describe("POST /api/admin/question-sets/:id/questions", () => {
+  test("not admin → 401", async () => {
+    const res = await request(app).post(`/api/admin/question-sets/${VALID_UUID}/questions`);
+    expect(res.status).toBe(401);
+  });
+
+  test("invalid set UUID → 400", async () => {
+    const res = await request(app)
+      .post("/api/admin/question-sets/bad-id/questions")
+      .set("Authorization", authHeader)
+      .send({ statement: "Uusi väittämä" });
+    expect(res.status).toBe(400);
+  });
+
+  test("missing statement → 400", async () => {
+    const res = await request(app)
+      .post(`/api/admin/question-sets/${VALID_UUID}/questions`)
+      .set("Authorization", authHeader)
+      .send({});
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/väittämä/i);
+  });
+
+  test("statement too long → 400", async () => {
+    const res = await request(app)
+      .post(`/api/admin/question-sets/${VALID_UUID}/questions`)
+      .set("Authorization", authHeader)
+      .send({ statement: "a".repeat(501) });
+    expect(res.status).toBe(400);
+  });
+
+  test("set not found → 404", async () => {
+    db.query.mockResolvedValueOnce({ rows: [] });
+    const res = await request(app)
+      .post(`/api/admin/question-sets/${VALID_UUID}/questions`)
+      .set("Authorization", authHeader)
+      .send({ statement: "Uusi väittämä" });
+    expect(res.status).toBe(404);
+  });
+
+  test("set is live (not staged) → 409", async () => {
+    db.query.mockResolvedValueOnce({ rows: [{ ...stagedSet, hidden: false }] });
+    const res = await request(app)
+      .post(`/api/admin/question-sets/${VALID_UUID}/questions`)
+      .set("Authorization", authHeader)
+      .send({ statement: "Uusi väittämä" });
+    expect(res.status).toBe(409);
+  });
+
+  test("happy path → 201 with new question", async () => {
+    const newQuestion = { id: Q1, question_set_id: VALID_UUID, statement: "Uusi väittämä", sort_order: 3 };
+    db.query
+      .mockResolvedValueOnce({ rows: [stagedSet] })     // SELECT set
+      .mockResolvedValueOnce({ rows: [{ max: 2 }] })    // SELECT MAX(sort_order)
+      .mockResolvedValueOnce({ rows: [newQuestion] });   // INSERT
+
+    const res = await request(app)
+      .post(`/api/admin/question-sets/${VALID_UUID}/questions`)
+      .set("Authorization", authHeader)
+      .send({ statement: "Uusi väittämä" });
+
+    expect(res.status).toBe(201);
+    expect(res.body.statement).toBe("Uusi väittämä");
+    expect(res.body.sort_order).toBe(3);
+  });
+});
+
+// ─── DELETE /api/admin/question-sets/:id/questions/:questionId ───────────────
+
+describe("DELETE /api/admin/question-sets/:id/questions/:questionId", () => {
+  test("not admin → 401", async () => {
+    const res = await request(app).delete(`/api/admin/question-sets/${VALID_UUID}/questions/${Q1}`);
+    expect(res.status).toBe(401);
+  });
+
+  test("invalid set UUID → 400", async () => {
+    const res = await request(app)
+      .delete(`/api/admin/question-sets/bad-id/questions/${Q1}`)
+      .set("Authorization", authHeader);
+    expect(res.status).toBe(400);
+  });
+
+  test("invalid question UUID → 400", async () => {
+    const res = await request(app)
+      .delete(`/api/admin/question-sets/${VALID_UUID}/questions/bad-id`)
+      .set("Authorization", authHeader);
+    expect(res.status).toBe(400);
+  });
+
+  test("set not found → 404", async () => {
+    db.query.mockResolvedValueOnce({ rows: [] });
+    const res = await request(app)
+      .delete(`/api/admin/question-sets/${VALID_UUID}/questions/${Q1}`)
+      .set("Authorization", authHeader);
+    expect(res.status).toBe(404);
+  });
+
+  test("set is live (not staged) → 409", async () => {
+    db.query.mockResolvedValueOnce({ rows: [{ ...stagedSet, hidden: false }] });
+    const res = await request(app)
+      .delete(`/api/admin/question-sets/${VALID_UUID}/questions/${Q1}`)
+      .set("Authorization", authHeader);
+    expect(res.status).toBe(409);
+  });
+
+  test("question not found in set → 404", async () => {
+    db.query
+      .mockResolvedValueOnce({ rows: [stagedSet] }) // SELECT set
+      .mockResolvedValueOnce({ rowCount: 0 });       // DELETE → no rows
+    const res = await request(app)
+      .delete(`/api/admin/question-sets/${VALID_UUID}/questions/${Q1}`)
+      .set("Authorization", authHeader);
+    expect(res.status).toBe(404);
+  });
+
+  test("happy path → 204", async () => {
+    db.query
+      .mockResolvedValueOnce({ rows: [stagedSet] }) // SELECT set
+      .mockResolvedValueOnce({ rowCount: 1 });       // DELETE
+    const res = await request(app)
+      .delete(`/api/admin/question-sets/${VALID_UUID}/questions/${Q1}`)
+      .set("Authorization", authHeader);
+    expect(res.status).toBe(204);
   });
 });

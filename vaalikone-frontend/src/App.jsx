@@ -92,6 +92,10 @@ const api = {
     apiFetch(`/admin/question-sets/${id}`, { method: "DELETE", adminSecret: secret }),
   reviewQuestionSet: (secret, id, data) =>
     apiFetch(`/admin/question-sets/${id}/review`, { method: "PATCH", body: data, adminSecret: secret }),
+  addQuestion: (secret, setId, statement) =>
+    apiFetch(`/admin/question-sets/${setId}/questions`, { method: "POST", body: { statement }, adminSecret: secret }),
+  removeQuestion: (secret, setId, questionId) =>
+    apiFetch(`/admin/question-sets/${setId}/questions/${questionId}`, { method: "DELETE", adminSecret: secret }),
 };
 
 // ─── Finnish constituencies ───
@@ -386,18 +390,18 @@ function CandidateProfile({ candidate, onClose, activeQuestions, voterAnswers })
 function Header({ view, setView, setPartyToken }) {
   const { t } = useTranslation();
   return (
-    <header style={{ background: palette.surface, borderBottom: `1px solid ${palette.border}`, padding: "0 32px", position: "sticky", top: 0, zIndex: 100 }}>
-      <div style={{ maxWidth: 1100, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", height: "64px" }}>
-        <div onClick={() => { setView("home"); setPartyToken(null); }} style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: "10px" }}>
-          <div style={{ width: 32, height: 32, borderRadius: "6px", background: palette.accent, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 800, fontSize: "16px", fontFamily: "'Source Serif 4', Georgia, serif" }}>V</div>
-          <span style={{ fontFamily: "'Source Serif 4', Georgia, serif", fontWeight: 700, fontSize: "18px", color: palette.text, letterSpacing: "-0.02em" }}>{t.appName}</span>
+    <header style={{ background: palette.surface, borderBottom: `1px solid ${palette.border}`, padding: "0 16px", position: "sticky", top: 0, zIndex: 100 }}>
+      <div style={{ maxWidth: 1100, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", height: "56px", gap: "8px" }}>
+        <div onClick={() => { setView("home"); setPartyToken(null); }} style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 }}>
+          <div style={{ width: 28, height: 28, borderRadius: "6px", background: palette.accent, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 800, fontSize: "15px", fontFamily: "'Source Serif 4', Georgia, serif" }}>V</div>
+          <span style={{ fontFamily: "'Source Serif 4', Georgia, serif", fontWeight: 700, fontSize: "17px", color: palette.text, letterSpacing: "-0.02em" }}>{t.appName}</span>
           <span style={{ fontSize: "11px", color: palette.textLight, fontWeight: 500, marginLeft: "-4px" }}>{t.appYear}</span>
         </div>
-        <nav style={{ display: "flex", gap: "4px", alignItems: "center" }}>
+        <nav className="app-nav" style={{ display: "flex", gap: "2px", alignItems: "center", overflowX: "auto", scrollbarWidth: "none", minWidth: 0 }}>
           {[{ key: "home", label: t.navHome }, { key: "voter", label: t.navVoter }, { key: "ngo", label: t.navNgo }, { key: "admin", label: t.navAdmin }, { key: "about", label: t.navAbout }].map((item) => (
             <button key={item.key} onClick={() => { setView(item.key); if (item.key !== "candidate") setPartyToken(null); }}
               style={{
-                padding: "6px 14px", borderRadius: "5px", border: "none", cursor: "pointer",
+                padding: "6px 10px", borderRadius: "5px", border: "none", cursor: "pointer", whiteSpace: "nowrap",
                 background: view === item.key ? palette.accentLight : "transparent",
                 color: view === item.key ? palette.accent : palette.textMuted,
                 fontWeight: view === item.key ? 700 : 500, fontSize: "13px",
@@ -520,6 +524,7 @@ function AdminView() {
   const [newPartyEmail, setNewPartyEmail] = useState("");
   const [actionLoading, setActionLoading] = useState(null);
   const [reviewState, setReviewState] = useState({}); // { [setId]: { [questionId]: { rejected, reason } } }
+  const [newQuestionText, setNewQuestionText] = useState({}); // { [setId]: string }
 
   function toggleQuestionReject(setId, questionId) {
     setReviewState((prev) => ({
@@ -540,6 +545,41 @@ function AdminView() {
       [setId]: {
         ...prev[setId],
         [questionId]: { ...prev[setId]?.[questionId], reason },
+      },
+    }));
+  }
+
+  function startEdit(setId, questionId, originalStatement) {
+    setReviewState((prev) => ({
+      ...prev,
+      [setId]: {
+        ...prev[setId],
+        [questionId]: {
+          ...prev[setId]?.[questionId],
+          // Pre-fill with original if no edit started yet
+          editedStatement: prev[setId]?.[questionId]?.editedStatement ?? originalStatement,
+          editing: true,
+        },
+      },
+    }));
+  }
+
+  function cancelEdit(setId, questionId) {
+    setReviewState((prev) => ({
+      ...prev,
+      [setId]: {
+        ...prev[setId],
+        [questionId]: { ...prev[setId]?.[questionId], editedStatement: undefined, editing: false },
+      },
+    }));
+  }
+
+  function setEditedStatement(setId, questionId, value) {
+    setReviewState((prev) => ({
+      ...prev,
+      [setId]: {
+        ...prev[setId],
+        [questionId]: { ...prev[setId]?.[questionId], editedStatement: value },
       },
     }));
   }
@@ -572,13 +612,49 @@ function AdminView() {
   async function finalizeReview(setId, questions) {
     setActionLoading(setId);
     try {
-      const reviews = questions.map((q) => ({
-        questionId: q.id,
-        rejected: reviewState[setId]?.[q.id]?.rejected ?? false,
-        rejectionReason: reviewState[setId]?.[q.id]?.reason ?? "",
-      }));
+      const reviews = questions.map((q) => {
+        const state = reviewState[setId]?.[q.id] ?? {};
+        const editedStatement = state.editedStatement?.trim();
+        const hasEdit = editedStatement && editedStatement !== q.statement;
+        return {
+          questionId: q.id,
+          rejected: state.rejected ?? false,
+          rejectionReason: state.reason ?? "",
+          ...(hasEdit ? { editedStatement } : {}),
+        };
+      });
       await api.reviewQuestionSet(adminSecret, setId, { reviews });
       setReviewState((prev) => { const next = { ...prev }; delete next[setId]; return next; });
+      await refresh();
+    } catch (e) { setError(e.message); }
+    finally { setActionLoading(null); }
+  }
+
+  async function publishSet(id) {
+    setActionLoading(id);
+    try {
+      await api.unhideQuestionSet(adminSecret, id);
+      await refresh();
+    } catch (e) { setError(e.message); }
+    finally { setActionLoading(null); }
+  }
+
+  async function addQuestion(setId) {
+    const text = newQuestionText[setId]?.trim();
+    if (!text) return;
+    setActionLoading(`add-${setId}`);
+    try {
+      await api.addQuestion(adminSecret, setId, text);
+      setNewQuestionText((prev) => ({ ...prev, [setId]: "" }));
+      await refresh();
+    } catch (e) { setError(e.message); }
+    finally { setActionLoading(null); }
+  }
+
+  async function removeQuestion(setId, questionId) {
+    setActionLoading(`q-${questionId}`);
+    try {
+      await api.removeQuestion(adminSecret, setId, questionId);
       await refresh();
     } catch (e) { setError(e.message); }
     finally { setActionLoading(null); }
@@ -648,9 +724,9 @@ function AdminView() {
   }
 
   const pending = questionSets.filter((s) => s.status === "pending");
-  const approved = questionSets.filter((s) => s.status === "approved" && !s.hidden);
-  const hidden = questionSets.filter((s) => s.hidden);
-  const rejected = questionSets.filter((s) => s.status === "rejected" && !s.hidden);
+  const staged = questionSets.filter((s) => s.status === "approved" && s.hidden);
+  const live = questionSets.filter((s) => s.status === "approved" && !s.hidden);
+  const rejected = questionSets.filter((s) => s.status === "rejected");
 
   return (
     <div style={{ maxWidth: 800, margin: "0 auto", padding: "40px 24px" }}>
@@ -674,23 +750,66 @@ function AdminView() {
                 <div style={{ fontSize: "13px", color: palette.textMuted, marginBottom: "12px" }}>{qs.ngoName} · {qs.ngoEmail} · {qs.questions?.length || 0} {t.adminQuestions}</div>
                 <div>
                   {qs.questions?.map((q, i) => {
-                    const isRejected = reviewState[qs.id]?.[q.id]?.rejected ?? false;
-                    const reason = reviewState[qs.id]?.[q.id]?.reason ?? "";
+                    const qState = reviewState[qs.id]?.[q.id] ?? {};
+                    const isRejected = qState.rejected ?? false;
+                    const isEditing = qState.editing ?? false;
+                    const editedStatement = qState.editedStatement;
+                    const hasEdit = editedStatement !== undefined && editedStatement.trim() !== q.statement;
+                    const bg = isRejected ? palette.dangerLight : hasEdit ? palette.infoLight : palette.accentLight;
+                    const border = isRejected ? "#f5c6c2" : hasEdit ? "#b8d0e8" : "#c6dece";
                     return (
-                      <div key={q.id} style={{ marginBottom: "8px", padding: "10px 12px", background: isRejected ? palette.dangerLight : palette.accentLight, borderRadius: "6px", border: `1px solid ${isRejected ? "#f5c6c2" : "#c6dece"}` }}>
+                      <div key={q.id} style={{ marginBottom: "8px", padding: "10px 12px", background: bg, borderRadius: "6px", border: `1px solid ${border}` }}>
                         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                           <span style={{ color: palette.textLight, fontSize: "13px", flexShrink: 0 }}>{i + 1}.</span>
-                          <span style={{ fontSize: "13px", flex: 1 }}>{q.statement}</span>
-                          <button
-                            onClick={() => toggleQuestionReject(qs.id, q.id)}
-                            style={{ flexShrink: 0, padding: "3px 10px", fontSize: "12px", fontWeight: 600, borderRadius: "4px", border: "none", cursor: "pointer", background: isRejected ? palette.danger : palette.accent, color: "#fff" }}
-                          >
-                            {isRejected ? t.adminQuestionRejected : t.adminQuestionAccepted}
-                          </button>
+                          <span style={{ fontSize: "13px", flex: 1 }}>
+                            {hasEdit
+                              ? <><span style={{ textDecoration: "line-through", color: palette.textLight }}>{q.statement}</span>{" → "}<span style={{ color: palette.info }}>{editedStatement.trim()}</span></>
+                              : q.statement}
+                          </span>
+                          {!isRejected && (
+                            <button
+                              onClick={() => isEditing ? cancelEdit(qs.id, q.id) : startEdit(qs.id, q.id, q.statement)}
+                              style={{ flexShrink: 0, padding: "3px 8px", fontSize: "12px", fontWeight: 600, borderRadius: "4px", border: `1px solid ${palette.border}`, cursor: "pointer", background: palette.surface, color: palette.textMuted }}
+                            >
+                              {isEditing ? t.adminCancelEdit : t.adminEditQuestion}
+                            </button>
+                          )}
+                          {isRejected ? (
+                            <button
+                              onClick={() => toggleQuestionReject(qs.id, q.id)}
+                              style={{ flexShrink: 0, padding: "3px 10px", fontSize: "12px", fontWeight: 600, borderRadius: "4px", border: "none", cursor: "pointer", background: palette.danger, color: "#fff" }}
+                            >
+                              {t.adminQuestionRejected}
+                            </button>
+                          ) : (
+                            <>
+                              <button
+                                onClick={() => {}}
+                                style={{ flexShrink: 0, padding: "3px 10px", fontSize: "12px", fontWeight: 600, borderRadius: "4px", border: `2px solid ${palette.accent}`, cursor: "default", background: palette.surface, color: palette.accent }}
+                              >
+                                {t.adminQuestionAccepted}
+                              </button>
+                              <button
+                                onClick={() => toggleQuestionReject(qs.id, q.id)}
+                                style={{ flexShrink: 0, padding: "3px 10px", fontSize: "12px", fontWeight: 600, borderRadius: "4px", border: `2px solid ${palette.danger}`, cursor: "pointer", background: palette.surface, color: palette.danger }}
+                              >
+                                {t.adminReject}
+                              </button>
+                            </>
+                          )}
                         </div>
+                        {isEditing && (
+                          <textarea
+                            value={editedStatement ?? q.statement}
+                            onChange={(e) => setEditedStatement(qs.id, q.id, e.target.value)}
+                            placeholder={t.adminEditQuestionPlaceholder}
+                            rows={2}
+                            style={{ marginTop: "8px", width: "100%", boxSizing: "border-box", fontSize: "13px", padding: "6px 8px", borderRadius: "4px", border: `1px solid ${palette.border}`, resize: "vertical", fontFamily: "inherit" }}
+                          />
+                        )}
                         {isRejected && (
                           <textarea
-                            value={reason}
+                            value={qState.reason ?? ""}
                             onChange={(e) => setRejectionReason(qs.id, q.id, e.target.value)}
                             placeholder={t.adminRejectionReasonPlaceholder}
                             rows={2}
@@ -711,9 +830,51 @@ function AdminView() {
         ))}
       </section>
 
+      {staged.length > 0 && (
+        <section style={{ marginBottom: "40px" }}>
+          <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px" }}>{t.adminStaged} <Badge color="orange">{staged.length}</Badge></h3>
+          {staged.map((qs) => (
+            <Card key={qs.id} style={{ marginBottom: "12px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", flexWrap: "wrap", gap: "12px" }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "4px" }}>
+                    <NgoLogo src={qs.logoUrl} name={qs.ngoName} size={24} />
+                    <span style={{ fontWeight: 700, fontSize: "15px" }}>{qs.title}</span>
+                  </div>
+                  <div style={{ fontSize: "13px", color: palette.textMuted, marginBottom: "12px" }}>{qs.ngoName}</div>
+                  <div style={{ marginBottom: "12px" }}>
+                    {qs.questions?.map((q, i) => (
+                      <div key={q.id} style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px", padding: "8px 10px", background: palette.surfaceAlt, borderRadius: "6px" }}>
+                        <span style={{ color: palette.textLight, fontSize: "13px", flexShrink: 0 }}>{i + 1}.</span>
+                        <span style={{ fontSize: "13px", flex: 1 }}>{q.statement}</span>
+                        <Button variant="danger" size="sm" onClick={() => removeQuestion(qs.id, q.id)} loading={actionLoading === `q-${q.id}`}>{t.adminDeleteQuestion}</Button>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ display: "flex", gap: "8px" }}>
+                    <textarea
+                      value={newQuestionText[qs.id] ?? ""}
+                      onChange={(e) => setNewQuestionText((prev) => ({ ...prev, [qs.id]: e.target.value }))}
+                      placeholder={t.adminNewQuestionPlaceholder}
+                      rows={2}
+                      style={{ flex: 1, fontSize: "13px", padding: "6px 8px", borderRadius: "4px", border: `1px solid ${palette.border}`, resize: "vertical", fontFamily: "inherit" }}
+                    />
+                    <Button variant="secondary" size="sm" onClick={() => addQuestion(qs.id)} disabled={!newQuestionText[qs.id]?.trim()} loading={actionLoading === `add-${qs.id}`}>{t.adminAddQuestion}</Button>
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: "8px", flexShrink: 0 }}>
+                  <Button variant="primary" size="sm" onClick={() => publishSet(qs.id)} loading={actionLoading === qs.id}>{t.adminPublish}</Button>
+                  <Button variant="danger" size="sm" onClick={() => deleteSet(qs.id)} loading={actionLoading === qs.id}>{t.adminDelete}</Button>
+                </div>
+              </div>
+            </Card>
+          ))}
+        </section>
+      )}
+
       <section style={{ marginBottom: "40px" }}>
-        <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px" }}>{t.adminApproved} <Badge color="green">{approved.length}</Badge></h3>
-        {approved.map((qs) => (
+        <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px" }}>{t.adminApproved} <Badge color="green">{live.length}</Badge></h3>
+        {live.map((qs) => (
           <Card key={qs.id} style={{ marginBottom: "8px", padding: "16px 24px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
@@ -723,34 +884,12 @@ function AdminView() {
               </div>
               <div style={{ display: "flex", gap: "8px", flexShrink: 0, alignItems: "center" }}>
                 <Badge color="green">{t.adminPublished}</Badge>
-                <Button variant="secondary" size="sm" onClick={() => hideSet(qs.id)} loading={actionLoading === qs.id}>{t.adminHide}</Button>
                 <Button variant="danger" size="sm" onClick={() => deleteSet(qs.id)} loading={actionLoading === qs.id}>{t.adminDelete}</Button>
               </div>
             </div>
           </Card>
         ))}
       </section>
-
-      {hidden.length > 0 && (
-        <section style={{ marginBottom: "40px" }}>
-          <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px" }}>{t.adminHidden} <Badge color="gray">{hidden.length}</Badge></h3>
-          {hidden.map((qs) => (
-            <Card key={qs.id} style={{ marginBottom: "8px", padding: "16px 24px", opacity: 0.7 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                  <NgoLogo src={qs.logoUrl} name={qs.ngoName} size={24} />
-                  <span style={{ fontWeight: 600 }}>{qs.title}</span>
-                  <span style={{ color: palette.textMuted, fontSize: "13px" }}>— {qs.ngoName}</span>
-                </div>
-                <div style={{ display: "flex", gap: "8px", flexShrink: 0 }}>
-                  <Button variant="secondary" size="sm" onClick={() => unhideSet(qs.id)} loading={actionLoading === qs.id}>{t.adminUnhide}</Button>
-                  <Button variant="danger" size="sm" onClick={() => deleteSet(qs.id)} loading={actionLoading === qs.id}>{t.adminDelete}</Button>
-                </div>
-              </div>
-            </Card>
-          ))}
-        </section>
-      )}
 
       {rejected.length > 0 && (
         <section style={{ marginBottom: "40px" }}>
@@ -1636,7 +1775,7 @@ export default function App() {
   return (
     <LanguageContext.Provider value={langValue}>
       <div style={{ minHeight: "100vh", background: palette.bg, fontFamily: "'Source Serif 4', Georgia, serif", color: palette.text }}>
-        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } } .app-nav::-webkit-scrollbar { display: none; }`}</style>
         <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&display=swap" rel="stylesheet" />
         <Header view={view} setView={setView} setPartyToken={setPartyToken} />
         {view === "home" && <HomeView setView={setView} setPartyToken={setPartyToken} />}

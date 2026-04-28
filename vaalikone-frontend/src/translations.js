@@ -73,6 +73,14 @@ const translations = {
     adminQuestionAccepted: "✓ Hyväksytty",
     adminQuestionRejected: "✗ Hylätty",
     adminRejectionReasonPlaceholder: "Hylkäämisen syy (vapaaehtoinen)…",
+    adminEditQuestion: "Muokkaa",
+    adminEditQuestionPlaceholder: "Muokattu väittämä…",
+    adminCancelEdit: "Peru muokkaus",
+    adminStaged: "Odottaa julkaisua",
+    adminPublish: "Julkaise",
+    adminAddQuestion: "Lisää väittämä",
+    adminNewQuestionPlaceholder: "Uusi väittämä…",
+    adminDeleteQuestion: "Poista",
 
     // NGO
     ngoTitle: "Lähetä kysymyksiä",
@@ -189,7 +197,7 @@ const translations = {
     aboutTransparencyTitle: "Avoimuus ja luotettavuus",
     aboutTransparencyText: "Vaalikone on avoin alusta. Kaikki lähdekoodit ovat julkisia ja sitä ylläpitävät riippumattomat järjestöt. Järjestelmässä käytetty algoritmi on yksinkertainen ja läpinäkyvä: vastausten painotettu samankaltaisuus.",
     aboutPrivacyTitle: "Tietosuoja",
-    aboutPrivacyText: "Äänestäjien vastaukset tallennetaan vain heidän omaan selaimeensa. Vaalikone ei kerää henkilökohtaisia tietoja äänestäjistä eikä jaa tietoja kolmansille osapuolille. Kaikki äänestäjien tiedot ovat yksityisiä ja vapaaehtoisesti tallennettuja.",
+    aboutPrivacyText: "Äänestäjien vastaukset tallennetaan anonyymisti tutkimustarkoituksia varten. Vaalikone ei kerää henkilökohtaisia tai tunnistettavia tietoja äänestäjistä eikä myöskään jaa niitä kolmansille osapuolille.",
   },
 
   en: {
@@ -265,6 +273,14 @@ const translations = {
     adminQuestionAccepted: "✓ Accepted",
     adminQuestionRejected: "✗ Rejected",
     adminRejectionReasonPlaceholder: "Reason for rejection (optional)…",
+    adminEditQuestion: "Edit",
+    adminEditQuestionPlaceholder: "Edited statement…",
+    adminCancelEdit: "Cancel edit",
+    adminStaged: "Staged — awaiting publish",
+    adminPublish: "Publish",
+    adminAddQuestion: "Add statement",
+    adminNewQuestionPlaceholder: "New statement…",
+    adminDeleteQuestion: "Remove",
 
     // NGO
     ngoTitle: "Submit questions",
@@ -381,7 +397,7 @@ const translations = {
     aboutTransparencyTitle: "Openness and reliability",
     aboutTransparencyText: "Vaalikone is an open platform. All source code is public and it is maintained by independent organizations. The algorithm used in the system is simple and transparent: weighted similarity of answers.",
     aboutPrivacyTitle: "Privacy",
-    aboutPrivacyText: "Voter answers are stored only in their own browser. Vaalikone does not collect personal information from voters and does not share data with third parties. All voter data remains private and is voluntarily stored.",
+    aboutPrivacyText: "Voter answers are stored anonymously for research purposes. Vaalikone does not collect personal or identifiable information from voters and does not share any such data with third parties.",
   },
 };
 
