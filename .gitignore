@@ -3,3 +3,13 @@ node_modules/
 .env.docker
 .env.local
 *.log
+
+# SSH keys — never commit
+laptop
+laptop.pub
+upcloud
+upcloud.pub
+*.pem
+
+# Test artifacts
+test-results/
