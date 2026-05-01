@@ -7,6 +7,13 @@ async function migrate() {
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
   try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        version INTEGER PRIMARY KEY,
+        applied_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
     // Find all .sql files sorted by name
     const files = fs
       .readdirSync(__dirname)

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, createContext, useContext } from "react";
+import { useState, useEffect, useMemo, createContext, useContext } from "react";
 import { marked } from "marked";
 import translations from "./translations";
 import voterGuideContent from "./guides/voter-guide.md?raw";
@@ -37,7 +37,7 @@ function mapKeys(obj, fn) {
 }
 
 const toCamel = (data) => mapKeys(data, snakeToCamel);
-const toSnake = (data) => mapKeys(data, camelToSnake);
+const _toSnake = (data) => mapKeys(data, camelToSnake);
 
 async function apiFetch(path, options = {}) {
   const { body, adminSecret, ...rest } = options;
@@ -694,7 +694,7 @@ function AdminView() {
     finally { setActionLoading(null); }
   }
 
-  async function hideSet(id) {
+  async function _hideSet(id) {
     setActionLoading(id);
     try {
       await api.hideQuestionSet(adminSecret, id);
@@ -703,7 +703,7 @@ function AdminView() {
     finally { setActionLoading(null); }
   }
 
-  async function unhideSet(id) {
+  async function _unhideSet(id) {
     setActionLoading(id);
     try {
       await api.unhideQuestionSet(adminSecret, id);
@@ -1397,7 +1397,7 @@ function loadConsent() {
 }
 
 function saveConsent(value) {
-  try { localStorage.setItem(STORAGE_KEYS.consent, value ? "true" : "false"); } catch {}
+  try { localStorage.setItem(STORAGE_KEYS.consent, value ? "true" : "false"); } catch { /* ignore */ }
 }
 
 function loadSavedAnswers() {
@@ -1415,19 +1415,19 @@ function persistAnswers(answers, weights, sets) {
     localStorage.setItem(STORAGE_KEYS.answers, JSON.stringify(answers));
     localStorage.setItem(STORAGE_KEYS.weights, JSON.stringify(weights));
     localStorage.setItem(STORAGE_KEYS.sets, JSON.stringify([...sets]));
-  } catch {}
+  } catch { /* ignore */ }
 }
 
 function clearSavedAnswers() {
   try {
     [STORAGE_KEYS.answers, STORAGE_KEYS.weights, STORAGE_KEYS.sets].forEach((k) => localStorage.removeItem(k));
-  } catch {}
+  } catch { /* ignore */ }
 }
 
 function revokeConsent() {
   try {
     Object.values(STORAGE_KEYS).forEach((k) => localStorage.removeItem(k));
-  } catch {}
+  } catch { /* ignore */ }
 }
 
 // ─── Voter ───

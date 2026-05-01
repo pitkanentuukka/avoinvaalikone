@@ -109,7 +109,7 @@ const translations = {
 
     // Candidate
     candidateInvalidToken: "Virheellinen tunniste",
-    candidateInvalidTokenDesc: (token, extra) => `Tunniste "${token}" ei vastaa mitään rekisteröityä puoluetta. Tarkista puoluesihteeriltäsi oikea tunniste.`,
+    candidateInvalidTokenDesc: (token) => `Tunniste "${token}" ei vastaa mitään rekisteröityä puoluetta. Tarkista puoluesihteeriltäsi oikea tunniste.`,
     candidateSavedTitle: "Vastaukset tallennettu",
     candidateSavedDesc: (name, partyName) => `Kiitos, ${name}. Vastauksesi puolueelle ${partyName} on tallennettu.`,
     candidatePortalTitle: "Ehdokasportaali",
