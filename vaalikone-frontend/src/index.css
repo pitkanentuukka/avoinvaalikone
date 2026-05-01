@@ -52,6 +52,25 @@ button:focus-visible {
   outline: 4px auto -webkit-focus-ring-color;
 }
 
+.markdown-guide {
+  font-size: 14px;
+  line-height: 1.7;
+  color: #1A1A1A;
+}
+.markdown-guide h1 { font-size: 18px; font-weight: 700; margin: 0 0 16px; }
+.markdown-guide h2 { font-size: 15px; font-weight: 700; margin: 24px 0 10px; color: #2D5A3D; }
+.markdown-guide h3 { font-size: 13px; font-weight: 700; margin: 16px 0 8px; }
+.markdown-guide p { margin: 0 0 12px; }
+.markdown-guide ul, .markdown-guide ol { margin: 0 0 12px; padding-left: 20px; }
+.markdown-guide li { margin-bottom: 4px; }
+.markdown-guide hr { border: none; border-top: 1px solid #E2DFD8; margin: 20px 0; }
+.markdown-guide blockquote { border-left: 3px solid #2D5A3D; margin: 12px 0; padding: 8px 16px; background: #E8F0EB; border-radius: 0 6px 6px 0; color: #6B6560; font-style: normal; }
+.markdown-guide code { background: #F3F1ED; padding: 1px 5px; border-radius: 3px; font-size: 12px; font-family: monospace; }
+.markdown-guide table { border-collapse: collapse; width: 100%; margin: 12px 0 16px; font-size: 13px; }
+.markdown-guide th { background: #F3F1ED; font-weight: 700; text-align: left; padding: 8px 12px; border: 1px solid #E2DFD8; }
+.markdown-guide td { padding: 8px 12px; border: 1px solid #E2DFD8; vertical-align: top; }
+.markdown-guide tr:nth-child(even) td { background: #FAF9F6; }
+
 @media (prefers-color-scheme: light) {
   :root {
     color: #213547;

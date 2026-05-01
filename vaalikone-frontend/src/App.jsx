@@ -1,5 +1,9 @@
 import { useState, useEffect, useMemo, useCallback, createContext, useContext } from "react";
+import { marked } from "marked";
 import translations from "./translations";
+import voterGuideContent from "./guides/voter-guide.md?raw";
+import candidateGuideContent from "./guides/candidate-guide.md?raw";
+import adminGuideContent from "./guides/admin-guide.md?raw";
 
 // ─── API Configuration ───
 // Override with VITE_API_BASE env var at build time; defaults to same-origin /api (proxy)
@@ -135,6 +139,36 @@ const palette = {
   danger: "#A63D2F", dangerLight: "#FCEAE8",
   info: "#2A5C8C", infoLight: "#E8F0F8",
 };
+
+// ─── Markdown Guide ───
+
+function MarkdownGuide({ content, label }) {
+  const [open, setOpen] = useState(false);
+  const html = useMemo(() => marked.parse(content), [content]);
+  return (
+    <div style={{ marginBottom: "24px", border: `1px solid ${palette.border}`, borderRadius: "10px", overflow: "hidden" }}>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        style={{
+          width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center",
+          padding: "12px 16px", background: palette.surfaceAlt, border: "none", borderRadius: 0,
+          cursor: "pointer", fontFamily: "inherit", fontSize: "13px", fontWeight: 600,
+          color: palette.textMuted,
+        }}
+      >
+        <span>? {open ? "Piilota ohje" : label}</span>
+        <span style={{ fontSize: "10px" }}>{open ? "▲" : "▼"}</span>
+      </button>
+      {open && (
+        <div
+          className="markdown-guide"
+          dangerouslySetInnerHTML={{ __html: html }}
+          style={{ padding: "20px 24px", borderTop: `1px solid ${palette.border}` }}
+        />
+      )}
+    </div>
+  );
+}
 
 // ─── Shared UI Components ───
 
@@ -731,7 +765,8 @@ function AdminView() {
   return (
     <div style={{ maxWidth: 800, margin: "0 auto", padding: "40px 24px" }}>
       <h2 style={{ fontSize: "28px", fontWeight: 800, letterSpacing: "-0.02em", marginBottom: "8px" }}>{t.adminPanelTitle}</h2>
-      <p style={{ color: palette.textMuted, marginBottom: "36px" }}>{t.adminPanelDesc}</p>
+      <p style={{ color: palette.textMuted, marginBottom: "16px" }}>{t.adminPanelDesc}</p>
+      <MarkdownGuide content={adminGuideContent} label="Ohje kysymysten käsittelyyn" />
       {error && <ErrorBanner message={error} onRetry={refresh} />}
 
       <section style={{ marginBottom: "40px" }}>
@@ -1243,7 +1278,8 @@ function CandidateView({ partyToken, initialCandidateId }) {
       <div style={{ maxWidth: 600, margin: "0 auto", padding: "40px 24px" }}>
         <Badge color="blue">{partyData?.party?.name}</Badge>
         <h2 style={{ fontSize: "28px", fontWeight: 800, letterSpacing: "-0.02em", margin: "12px 0 8px" }}>{t.candidatePortalTitle}</h2>
-        <p style={{ color: palette.textMuted, marginBottom: "28px" }}>{t.candidatePortalDesc}</p>
+        <p style={{ color: palette.textMuted, marginBottom: "16px" }}>{t.candidatePortalDesc}</p>
+        <MarkdownGuide content={candidateGuideContent} label="Ohje vastaamiseen" />
         {partyData?.candidates?.length > 0 && (
           <div style={{ marginBottom: "16px" }}>
             <div style={{ fontSize: "13px", fontWeight: 600, marginBottom: "10px" }}>{t.candidateExisting}</div>
@@ -1539,7 +1575,8 @@ function VoterView() {
     return (
       <div style={{ maxWidth: 640, margin: "0 auto", padding: "40px 24px" }}>
         <h2 style={{ fontSize: "28px", fontWeight: 800, letterSpacing: "-0.02em", marginBottom: "8px" }}>{t.voterSelectTitle}</h2>
-        <p style={{ color: palette.textMuted, marginBottom: "28px" }}>{t.voterSelectDesc}</p>
+        <p style={{ color: palette.textMuted, marginBottom: "16px" }}>{t.voterSelectDesc}</p>
+        <MarkdownGuide content={voterGuideContent} label="Ohje vaalikoneen käyttöön" />
         {hasSaved && (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: palette.accentLight, border: `1px solid ${palette.accent}`, borderRadius: "8px", padding: "10px 16px", marginBottom: "20px", fontSize: "13px" }}>
             <span style={{ color: palette.accent, fontWeight: 600 }}>{t.voterPrefilled}</span>
