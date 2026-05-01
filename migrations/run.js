@@ -13,29 +13,33 @@ async function migrate() {
         applied_at TIMESTAMPTZ DEFAULT NOW()
       )
     `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS migration_history (
+        filename TEXT PRIMARY KEY,
+        applied_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
 
-    // Find all .sql files sorted by name
     const files = fs
       .readdirSync(__dirname)
       .filter((f) => f.endsWith(".sql"))
       .sort();
 
-    for (const file of files) {
-      // Extract numeric prefix, e.g. 001_initial.sql → 1
-      const version = parseInt(file, 10);
-      if (isNaN(version)) continue;
+    const { rows } = await pool.query("SELECT filename FROM migration_history");
+    const applied = new Set(rows.map((r) => r.filename));
 
-      const { rows } = await pool.query(
-        "SELECT 1 FROM schema_migrations WHERE version = $1",
-        [version]
-      );
-      if (rows.length > 0) {
+    for (const file of files) {
+      if (applied.has(file)) {
         console.log(`  Migration ${file} already applied, skipping`);
         continue;
       }
 
       const sql = fs.readFileSync(path.join(__dirname, file), "utf8");
       await pool.query(sql);
+      await pool.query(
+        "INSERT INTO migration_history (filename) VALUES ($1)",
+        [file]
+      );
       console.log(`✓ Migration ${file} applied successfully`);
     }
   } catch (err) {
