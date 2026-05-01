@@ -47,7 +47,7 @@ app.use(
     credentials: true,
   })
 );
-app.use(morgan("short"));
+app.use(morgan(":date[iso] :method :url :status :response-time ms - :res[content-length]"));
 app.use(express.json({ limit: "1mb" }));
 
 // ─── Rate Limiters ───

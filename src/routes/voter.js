@@ -167,14 +167,14 @@ router.post("/match", async (req, res, next) => {
 
     if (voterQuestionIds.length > 0) {
       const placeholders = voterQuestionIds
-        .map((_, i) => `($1, $${i * 2 + 2}, $${i * 2 + 3})`)
+        .map((_, i) => `($1, $${i * 3 + 2}, $${i * 3 + 3}, $${i * 3 + 4})`)
         .join(", ");
       const flatValues = [sessionId];
       for (const qId of voterQuestionIds) {
-        flatValues.push(qId, parseInt(answers[qId], 10));
+        flatValues.push(qId, parseInt(answers[qId], 10), parseInt(weights[qId], 10) || 0);
       }
       await db.query(
-        `INSERT INTO voter_responses (session_id, question_id, value) VALUES ${placeholders}
+        `INSERT INTO voter_responses (session_id, question_id, value, weight) VALUES ${placeholders}
          ON CONFLICT DO NOTHING`,
         flatValues
       );
