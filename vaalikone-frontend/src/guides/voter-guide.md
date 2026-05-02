@@ -110,6 +110,6 @@ Tulosten alapuolella on **Aloita alusta** -nappi. Se tyhjentää vastauksesi ja 
 
 ## Tietosuoja lyhyesti
 
-- Vastauksesi tallennetaan vain omaan selaimeesi, jos annoit siihen luvan
-- Niitä ei lähetetä palvelimelle eikä jaeta kolmansille osapuolille
+- Vastauksesi tallennetaan omaan selaimeesi, jos annoit siihen luvan
 - Voit poistaa tallennetut vastauksesi milloin tahansa aiheiden valintasivulta klikkaamalla **Poista tallennetut vastaukset**
+- Kaikki vastaukset tallennetaan anonyymisti tutkimuskäyttöä varten anonyymisti ilman mitään yksilöiviä tai henkilöön yhdistettäviä tietoja.
