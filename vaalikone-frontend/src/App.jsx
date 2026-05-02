@@ -4,6 +4,7 @@ import translations from "./translations";
 import voterGuideContent from "./guides/voter-guide.md?raw";
 import candidateGuideContent from "./guides/candidate-guide.md?raw";
 import adminGuideContent from "./guides/admin-guide.md?raw";
+import ngoGuideContent from "./guides/ngo-guide.md?raw";
 
 // ─── API Configuration ───
 // Override with VITE_API_BASE env var at build time; defaults to same-origin /api (proxy)
@@ -1079,6 +1080,7 @@ function NgoView() {
           </div>
         </div>
       )}
+      <MarkdownGuide content={ngoGuideContent} label="Ohje kysymysten lähettämiseen" />
       {error && <ErrorBanner message={error} />}
       <Card>
         <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
