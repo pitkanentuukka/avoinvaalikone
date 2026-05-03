@@ -1518,7 +1518,7 @@ function VoterView() {
         questionSetIds: [...selectedSetIds],
         constituency: constituency || null,
       });
-      setResults(matchResults);
+      setResults(matchResults ?? []);
       setStep("results");
     } catch (e) {
       setError(e.message);

@@ -105,14 +105,14 @@ describe("POST /api/voter/match — algorithm", () => {
     expect(res.body.results[0].match).toBe(50);
   });
 
-  test("empty candidateIds (no one answered) → returns []", async () => {
+  test("empty candidateIds (no one answered) → returns { results: [] }", async () => {
     db.query.mockResolvedValueOnce({ rows: [{ count: "100" }] }); // COUNT(*) FROM questions
     db.query.mockResolvedValueOnce({ rows: [] }); // no candidate_answers, early return
     const res = await request(app)
       .post("/api/voter/match")
       .send({ answers: { [VALID_UUID]: 2 } });
     expect(res.status).toBe(200);
-    expect(res.body).toEqual([]);
+    expect(res.body).toEqual({ results: [] });
   });
 
   test("two candidates → sorted descending by match", async () => {
@@ -182,6 +182,23 @@ describe("POST /api/voter/match — response shape", () => {
     expect(res.body).toHaveProperty("sessionId");
     expect(typeof res.body.sessionId).toBe("string");
     expect(Array.isArray(res.body.results)).toBe(true);
+  });
+
+  // Regression: previously returned bare [] when no candidates existed, causing
+  // frontend to destructure { results } from an array → undefined → white screen.
+  test("empty results has same envelope shape as non-empty results", async () => {
+    db.query.mockResolvedValueOnce({ rows: [{ count: "100" }] }); // COUNT(*) FROM questions
+    db.query.mockResolvedValueOnce({ rows: [] }); // no candidate_answers
+
+    const res = await request(app)
+      .post("/api/voter/match")
+      .send({ answers: { [VALID_UUID]: 2 } });
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty("results");
+    expect(Array.isArray(res.body.results)).toBe(true);
+    expect(res.body.results).toHaveLength(0);
+    // Must NOT be a bare array — frontend does `const { results } = body`
+    expect(Array.isArray(res.body)).toBe(false);
   });
 
   test("result items include expected fields", async () => {
@@ -329,6 +346,17 @@ describe("POST /api/voter/match — validation", () => {
       .post("/api/voter/match")
       .send({ answers: { [VALID_UUID]: 4 } });
     expect(res.status).toBe(200);
+  });
+
+  test("empty candidateIds with questionSetIds filter → still { results: [] } not bare []", async () => {
+    db.query.mockResolvedValueOnce({ rows: [{ count: "100" }] }); // COUNT(*) FROM questions
+    db.query.mockResolvedValueOnce({ rows: [] }); // no candidate_answers
+    const res = await request(app)
+      .post("/api/voter/match")
+      .send({ answers: { [VALID_UUID]: 2 }, questionSetIds: [VALID_UUID2] });
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty("results");
+    expect(Array.isArray(res.body.results)).toBe(true);
   });
 
   test("empty questionSetIds array → no filter applied, accepted", async () => {

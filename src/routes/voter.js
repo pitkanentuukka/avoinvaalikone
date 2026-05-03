@@ -98,7 +98,7 @@ router.post("/match", async (req, res, next) => {
     // Fetch candidate info
     const candidateIds = [...new Set(candidateAnswers.map((a) => a.candidate_id))];
     if (candidateIds.length === 0) {
-      return res.json([]);
+      return res.json({ results: [] });
     }
 
     const { rows: candidates } = await db.query(
