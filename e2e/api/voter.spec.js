@@ -162,9 +162,8 @@ test.describe("UC-VOTER-1: Voter match validation", () => {
       answers: { "00000000-0000-0000-0000-000000000099": 2 },
     });
     expect(res.status()).toBe(200);
-    // When no candidates overlap, backend returns [] directly
-    expect(Array.isArray(body)).toBe(true);
-    expect(body).toHaveLength(0);
+    expect(Array.isArray(body.results)).toBe(true);
+    expect(body.results).toHaveLength(0);
   });
 });
 
