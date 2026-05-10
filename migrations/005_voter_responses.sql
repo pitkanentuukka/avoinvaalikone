@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS voter_responses (
 CREATE INDEX IF NOT EXISTS idx_voter_responses_question ON voter_responses (question_id);
 CREATE INDEX IF NOT EXISTS idx_voter_responses_date     ON voter_responses (answered_on);
 
-INSERT INTO schema_migrations (version) VALUES (3)
+INSERT INTO schema_migrations (version) VALUES (5)
   ON CONFLICT DO NOTHING;
 
 COMMIT;

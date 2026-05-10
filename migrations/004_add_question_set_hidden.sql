@@ -7,7 +7,7 @@ ALTER TABLE question_sets
 
 CREATE INDEX IF NOT EXISTS idx_question_sets_hidden ON question_sets (hidden);
 
-INSERT INTO schema_migrations (version) VALUES (2)
+INSERT INTO schema_migrations (version) VALUES (4)
   ON CONFLICT DO NOTHING;
 
 COMMIT;
