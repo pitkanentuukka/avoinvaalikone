@@ -176,6 +176,8 @@ const translations = {
     voterConstituencyLabel: "Vaalipiiri",
     voterConstituencyAll: "Kaikki vaalipiirit",
     voterConstituencyDesc: "Valitse vaalipiirisi nähdäksesi vain oman alueesi ehdokkaat.",
+    voterResearchNotice: "Lähettämäsi vastaussarja tallennetaan nimettömästi tutkimus- ja tilastointitarkoituksiin. Sitä ei yhdistetä nimeesi, IP-osoitteeseesi, laitteeseesi, selaimeen, käyttäjätiliin, evästeisiin tai mihinkään muuhun tunnisteeseen. Koska tallennus on nimetön, emme myöhemmin pysty tunnistamaan tai poistamaan yksittäistä vastaussarjaasi.",
+    voterResearchOptOut: "Älä sisällytä nimetöntä vastaussarjaani tutkimukseen ja tilastoihin",
 
     // About
     aboutTitle: "Tietoa Vaalikoneesta",
@@ -376,6 +378,8 @@ const translations = {
     voterConstituencyLabel: "Constituency",
     voterConstituencyAll: "All constituencies",
     voterConstituencyDesc: "Select your constituency to see only candidates from your district.",
+    voterResearchNotice: "Your submitted answer set is stored anonymously for research and statistics. It is not linked to your name, IP address, device, browser, account, cookie, or any other identifier. Because it is anonymous, we cannot later identify or delete your individual answer set.",
+    voterResearchOptOut: "Do not include my anonymous answer set in research and statistics",
 
     // About
     aboutTitle: "About Vaalikone",

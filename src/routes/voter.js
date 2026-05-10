@@ -18,7 +18,7 @@ const router = Router();
  */
 router.post("/match", async (req, res, next) => {
   try {
-    const { answers, weights = {}, questionSetIds, constituency } = req.body;
+    const { answers, weights = {}, questionSetIds, constituency, includeInResearch = true } = req.body;
 
     if (!answers || typeof answers !== "object" || Object.keys(answers).length === 0) {
       return res.status(400).json({ error: "Vastaukset vaaditaan" });
@@ -159,13 +159,12 @@ router.post("/match", async (req, res, next) => {
     // Sort by match descending
     results.sort((a, b) => b.match - a.match);
 
-    // Persist anonymous voter responses for aggregate analysis.
-    // session_id is a server-generated random UUID — not linked to any identity.
-    const { rows: [{ session_id: sessionId }] } = await db.query(
-      "SELECT gen_random_uuid() AS session_id"
-    );
-
-    if (voterQuestionIds.length > 0) {
+    let sessionId = null;
+    if (includeInResearch !== false && voterQuestionIds.length > 0) {
+      const { rows: [{ session_id }] } = await db.query(
+        "SELECT gen_random_uuid() AS session_id"
+      );
+      sessionId = session_id;
       const placeholders = voterQuestionIds
         .map((_, i) => `($1, $${i * 3 + 2}, $${i * 3 + 3}, $${i * 3 + 4})`)
         .join(", ");

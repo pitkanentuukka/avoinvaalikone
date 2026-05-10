@@ -1449,6 +1449,7 @@ function VoterView() {
   const [constituency, setConstituency] = useState("");
   const [error, setError] = useState(null);
   const [consentGiven, setConsentGiven] = useState(() => loadConsent());
+  const [includeInResearch, setIncludeInResearch] = useState(true);
 
   useEffect(() => {
     async function load() {
@@ -1517,6 +1518,7 @@ function VoterView() {
         weights,
         questionSetIds: [...selectedSetIds],
         constituency: constituency || null,
+        includeInResearch,
       });
       setResults(matchResults ?? []);
       setStep("results");
@@ -1714,6 +1716,13 @@ function VoterView() {
             </div>
           </Card>
         ))}
+        <div style={{ marginTop: "24px", background: palette.surfaceAlt, border: `1px solid ${palette.border}`, borderRadius: "8px", padding: "14px 16px", fontSize: "13px", color: palette.textMuted, lineHeight: 1.65 }}>
+          <p style={{ margin: "0 0 12px 0" }}>{t.voterResearchNotice}</p>
+          <label style={{ display: "flex", alignItems: "flex-start", gap: "10px", cursor: "pointer" }}>
+            <input type="checkbox" checked={!includeInResearch} onChange={(e) => setIncludeInResearch(!e.target.checked)} style={{ marginTop: "2px", flexShrink: 0 }} />
+            <span>{t.voterResearchOptOut}</span>
+          </label>
+        </div>
         <div style={{ marginTop: "20px", display: "flex", gap: "12px" }}>
           <Button size="lg" onClick={finishWeighting}>{t.voterShowResults}</Button>
           <Button variant="ghost" size="lg" onClick={finishWeighting}>{t.voterSkipWeighting}</Button>
