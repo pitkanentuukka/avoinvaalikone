@@ -1313,7 +1313,7 @@ function CandidateView({ partyToken, initialCandidateId }) {
           <h2 style={{ fontSize: "24px", fontWeight: 800, margin: "8px 0 4px" }}>{t.candidateAnswerTitle}</h2>
           <p style={{ color: palette.textMuted, fontSize: "14px" }}>{answeredCount} / {allQuestions.length} {t.candidateAnsweredCount}</p>
         </div>
-        <Button onClick={save} loading={saving} disabled={!candidateName.trim() || answeredCount === 0}>{t.candidateSaveAnswers}</Button>
+        <Button onClick={save} loading={saving} disabled={!candidateName.trim() || !candidateConstituency || answeredCount === 0}>{t.candidateSaveAnswers}</Button>
       </div>
       {error && <ErrorBanner message={error} />}
 
@@ -1343,7 +1343,7 @@ function CandidateView({ partyToken, initialCandidateId }) {
             <Input value={candidateEmail} onChange={setCandidateEmail} placeholder={t.candidateEmailPlaceholder} type="email" />
           </div>
           <div>
-            <label style={{ fontSize: "13px", fontWeight: 600, display: "block", marginBottom: "6px" }}>{t.candidateConstituencyLabel}</label>
+            <label style={{ fontSize: "13px", fontWeight: 600, display: "block", marginBottom: "6px" }}>{t.candidateConstituencyLabel} *</label>
             <select value={candidateConstituency} onChange={(e) => setCandidateConstituency(e.target.value)} style={{
               width: "100%", padding: "10px 14px", borderRadius: "6px", border: `1px solid ${palette.border}`,
               fontFamily: "'Source Serif 4', Georgia, serif", fontSize: "14px",
@@ -1378,7 +1378,7 @@ function CandidateView({ partyToken, initialCandidateId }) {
       ))}
 
       <div style={{ textAlign: "center", paddingBottom: "40px" }}>
-        <Button size="lg" onClick={save} loading={saving} disabled={!candidateName.trim() || answeredCount === 0}>
+        <Button size="lg" onClick={save} loading={saving} disabled={!candidateName.trim() || !candidateConstituency || answeredCount === 0}>
           {t.candidateSaveAnswers} ({answeredCount}/{allQuestions.length})
         </Button>
       </div>

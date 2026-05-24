@@ -97,6 +97,9 @@ router.post(
       if (!name?.trim()) {
         return res.status(400).json({ error: "Ehdokkaan nimi vaaditaan" });
       }
+      if (!constituency?.trim()) {
+        return res.status(400).json({ error: "Vaalipiiri vaaditaan" });
+      }
 
       // Validate field lengths
       if (!isValidLength(name, 255)) {
@@ -156,6 +159,9 @@ router.put(
       if (bio && !isValidLength(bio, 1000)) {
         return res.status(400).json({ error: "Biografia on liian pitkä (maksimi: 1000 merkkiä)" });
       }
+      if (constituency !== undefined && !constituency?.trim()) {
+        return res.status(400).json({ error: "Vaalipiiri vaaditaan" });
+      }
       if (constituency && !isValidLength(constituency, 255)) {
         return res.status(400).json({ error: "Vaalipiiri on liian pitkä (maksimi: 255 merkkiä)" });
       }
@@ -174,7 +180,7 @@ router.put(
          SET name = COALESCE($1, name),
              photo_url = $2,
              bio = $3,
-             constituency = $4,
+             constituency = COALESCE($4, constituency),
              updated_at = now()
          WHERE id = $5
          RETURNING id, name, photo_url, bio, constituency, updated_at`,
