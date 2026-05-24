@@ -1576,6 +1576,7 @@ function VoterView() {
   // Set selection
   if (step === "select") {
     const hasSaved = consentGiven && Object.keys(voterAnswers).length > 0;
+    const allAnswered = activeQuestions.length > 0 && activeQuestions.every((q) => voterAnswers[q.id] !== undefined);
     return (
       <div style={{ maxWidth: 640, margin: "0 auto", padding: "40px 24px" }}>
         <h2 style={{ fontSize: "28px", fontWeight: 800, letterSpacing: "-0.02em", marginBottom: "8px" }}>{t.voterSelectTitle}</h2>
@@ -1633,10 +1634,21 @@ function VoterView() {
             </div>
           </Card>
         ))}
-        <div style={{ marginTop: "20px" }}>
-          <Button size="lg" onClick={startAnswering} disabled={selectedSetIds.size === 0 || activeQuestions.length === 0}>
-            {t.voterStart} ({activeQuestions.length} {t.voterQuestions})
-          </Button>
+        <div style={{ marginTop: "20px", display: "flex", flexDirection: "column", gap: "10px" }}>
+          {hasSaved && allAnswered ? (
+            <>
+              <Button size="lg" onClick={() => setStep("weight")} disabled={selectedSetIds.size === 0}>
+                {t.voterContinueToResults}
+              </Button>
+              <Button size="lg" variant="ghost" onClick={startAnswering} disabled={selectedSetIds.size === 0}>
+                {t.voterReviewAnswers} ({activeQuestions.length} {t.voterQuestions})
+              </Button>
+            </>
+          ) : (
+            <Button size="lg" onClick={startAnswering} disabled={selectedSetIds.size === 0 || activeQuestions.length === 0}>
+              {t.voterStart} ({activeQuestions.length} {t.voterQuestions})
+            </Button>
+          )}
         </div>
       </div>
     );
