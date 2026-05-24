@@ -130,11 +130,6 @@ jobs:
           ssh -i ~/.ssh/deploy_key root@80.69.172.220 \
             "cd /opt/vaalikone && docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build -d"
 
-      - name: Run migrations
-        run: |
-          ssh -i ~/.ssh/deploy_key root@80.69.172.220 \
-            "cd /opt/vaalikone && docker compose -f docker-compose.yml -f docker-compose.prod.yml exec -T backend npm run migrate"
-
       - name: Verify deployment
         run: |
           for i in {1..15}; do

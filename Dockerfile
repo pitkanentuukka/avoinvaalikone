@@ -17,4 +17,4 @@ COPY migrations ./migrations
 EXPOSE 3000
 
 # Start the application
-CMD ["npm", "start"]
+CMD ["sh", "-c", "npm run migrate && npm start"]
