@@ -37,12 +37,23 @@ test.describe("UC-CAND: Candidate management (party-token gated)", () => {
         bio: "Kokenut kunnallispoliitikko",
         photoUrl: "https://example.com/photo.jpg",
         email: "matti@example.fi",
+        constituency: "Helsingin vaalipiiri",
       }
     );
     expect(res.status()).toBe(201);
     expect(body.name).toBe("Matti Meikäläinen");
     expect(body.id).toBeTruthy();
     expect(body.email).toBe("matti@example.fi");
+    expect(body.constituency).toBe("Helsingin vaalipiiri");
+  });
+
+  test("register candidate without constituency returns 400", async ({ request }) => {
+    const { res } = await post(
+      request,
+      `/candidates/party/${party.token}`,
+      { name: "Test" }
+    );
+    expect(res.status()).toBe(400);
   });
 
   test("UC-CAND-1: view party's candidates (with candidates)", async ({ request }) => {

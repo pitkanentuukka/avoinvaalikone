@@ -105,14 +105,23 @@ describe("POST /api/candidates/party/:partyToken", () => {
     expect(res.body.error).toMatch(/liian pitkä/i);
   });
 
+  test("missing constituency → 400", async () => {
+    db.query.mockResolvedValueOnce({ rows: [PARTY] }); // requirePartyToken
+    const res = await request(app)
+      .post(`/api/candidates/party/${PARTY_TOKEN}`)
+      .send({ name: "Eeva" });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/vaalipiiri vaaditaan/i);
+  });
+
   test("happy path → 201 with new candidate", async () => {
     db.query.mockResolvedValueOnce({ rows: [PARTY] }); // requirePartyToken
-    const newCandidate = { id: CANDIDATE_ID, name: "Eeva", photo_url: null, bio: null, created_at: new Date() };
+    const newCandidate = { id: CANDIDATE_ID, name: "Eeva", photo_url: null, bio: null, constituency: "Helsingin vaalipiiri", created_at: new Date() };
     db.query.mockResolvedValueOnce({ rows: [newCandidate] });
 
     const res = await request(app)
       .post(`/api/candidates/party/${PARTY_TOKEN}`)
-      .send({ name: "Eeva" });
+      .send({ name: "Eeva", constituency: "Helsingin vaalipiiri" });
     expect(res.status).toBe(201);
     expect(res.body.name).toBe("Eeva");
   });
@@ -125,7 +134,7 @@ describe("POST /api/candidates/party/:partyToken — optional field validation",
     db.query.mockResolvedValueOnce({ rows: [PARTY] }); // requirePartyToken
     const res = await request(app)
       .post(`/api/candidates/party/${PARTY_TOKEN}`)
-      .send({ name: "Eeva", photoUrl: "https://example.com/" + "a".repeat(490) });
+      .send({ name: "Eeva", constituency: "Helsingin vaalipiiri", photoUrl: "https://example.com/" + "a".repeat(490) });
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/liian pitkä/i);
   });
@@ -134,7 +143,7 @@ describe("POST /api/candidates/party/:partyToken — optional field validation",
     db.query.mockResolvedValueOnce({ rows: [PARTY] }); // requirePartyToken
     const res = await request(app)
       .post(`/api/candidates/party/${PARTY_TOKEN}`)
-      .send({ name: "Eeva", photoUrl: "ftp://example.com/image.jpg" });
+      .send({ name: "Eeva", constituency: "Helsingin vaalipiiri", photoUrl: "ftp://example.com/image.jpg" });
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/virheellinen/i);
   });
@@ -143,7 +152,7 @@ describe("POST /api/candidates/party/:partyToken — optional field validation",
     db.query.mockResolvedValueOnce({ rows: [PARTY] }); // requirePartyToken
     const res = await request(app)
       .post(`/api/candidates/party/${PARTY_TOKEN}`)
-      .send({ name: "Eeva", bio: "a".repeat(1001) });
+      .send({ name: "Eeva", constituency: "Helsingin vaalipiiri", bio: "a".repeat(1001) });
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/liian pitkä/i);
   });
@@ -152,7 +161,7 @@ describe("POST /api/candidates/party/:partyToken — optional field validation",
     db.query.mockResolvedValueOnce({ rows: [PARTY] }); // requirePartyToken
     const res = await request(app)
       .post(`/api/candidates/party/${PARTY_TOKEN}`)
-      .send({ name: "Eeva", email: "not-an-email" });
+      .send({ name: "Eeva", constituency: "Helsingin vaalipiiri", email: "not-an-email" });
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/virheellinen/i);
   });
@@ -162,18 +171,18 @@ describe("POST /api/candidates/party/:partyToken — optional field validation",
     // 252 + "@b.fi" = 256 chars, exceeds 255 limit
     const res = await request(app)
       .post(`/api/candidates/party/${PARTY_TOKEN}`)
-      .send({ name: "Eeva", email: "a".repeat(252) + "@b.fi" });
+      .send({ name: "Eeva", constituency: "Helsingin vaalipiiri", email: "a".repeat(252) + "@b.fi" });
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/liian pitkä/i);
   });
 
   test("valid email → included in 201 response", async () => {
     db.query.mockResolvedValueOnce({ rows: [PARTY] }); // requirePartyToken
-    const newCandidate = { id: CANDIDATE_ID, name: "Eeva", photo_url: null, bio: null, email: "eeva@example.fi", created_at: new Date() };
+    const newCandidate = { id: CANDIDATE_ID, name: "Eeva", photo_url: null, bio: null, email: "eeva@example.fi", constituency: "Helsingin vaalipiiri", created_at: new Date() };
     db.query.mockResolvedValueOnce({ rows: [newCandidate] });
     const res = await request(app)
       .post(`/api/candidates/party/${PARTY_TOKEN}`)
-      .send({ name: "Eeva", email: "eeva@example.fi" });
+      .send({ name: "Eeva", email: "eeva@example.fi", constituency: "Helsingin vaalipiiri" });
     expect(res.status).toBe(201);
     expect(res.body.email).toBe("eeva@example.fi");
   });

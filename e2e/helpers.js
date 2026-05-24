@@ -93,14 +93,15 @@ async function approveQuestionSet(request, id) {
 
 /**
  * Register a candidate via party token. Returns candidate object (snake_case keys).
- * Backend expects camelCase body: { name, photoUrl, bio, email }
+ * Backend expects camelCase body: { name, photoUrl, bio, email, constituency }
  */
-async function createCandidate(request, partyToken, { name, email, photoUrl, bio }) {
+async function createCandidate(request, partyToken, { name, email, photoUrl, bio, constituency }) {
   const { body } = await post(request, `/candidates/party/${partyToken}`, {
     name,
     email: email || null,
     photoUrl: photoUrl || null,
     bio: bio || null,
+    constituency: constituency || "Helsingin vaalipiiri",
   });
   return body;
 }

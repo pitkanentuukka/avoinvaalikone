@@ -97,14 +97,14 @@ router.post(
       if (!name?.trim()) {
         return res.status(400).json({ error: "Ehdokkaan nimi vaaditaan" });
       }
+      if (!isValidLength(name, 255)) {
+        return res.status(400).json({ error: "Ehdokkaan nimi on liian pitkä (maksimi: 255 merkkiä)" });
+      }
       if (!constituency?.trim()) {
         return res.status(400).json({ error: "Vaalipiiri vaaditaan" });
       }
 
-      // Validate field lengths
-      if (!isValidLength(name, 255)) {
-        return res.status(400).json({ error: "Ehdokkaan nimi on liian pitkä (maksimi: 255 merkkiä)" });
-      }
+      // Validate optional field lengths and formats
       if (photoUrl && !isValidLength(photoUrl, 500)) {
         return res.status(400).json({ error: "Kuvan URL on liian pitkä (maksimi: 500 merkkiä)" });
       }
