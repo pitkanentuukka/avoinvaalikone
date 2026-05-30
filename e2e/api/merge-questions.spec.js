@@ -78,7 +78,7 @@ test.describe("UC-MERGE: many-to-many question deduplication", () => {
     expect(me.answeredCount).toBe(1);
   });
 
-  test("on conflicting candidate answers the later one wins after merge", async ({ request }) => {
+  test("on conflicting candidate answers the kept question's own answer is preserved (phrasing fidelity)", async ({ request }) => {
     const ts = Date.now();
     const party = await createParty(request, `Yhdistä-konflikti ${ts}`, "p@test.fi");
     const setA = await submitQuestionSet(request, {
@@ -94,15 +94,44 @@ test.describe("UC-MERGE: many-to-many question deduplication", () => {
     const dropId = setB.questions[0].id;
     const candidate = await createCandidate(request, party.token, { name: "Ehdokas", email: "c@test.fi" });
 
-    // Answer the kept question first, then the duplicate later with a different value.
-    await saveAnswers(request, party.token, candidate.id, { [keepId]: { value: 0, explanation: "vanha" } });
-    await saveAnswers(request, party.token, candidate.id, { [dropId]: { value: 4, explanation: "uusi" } });
+    // Answer the kept question first, then the duplicate LATER with a different value.
+    // Even though the duplicate's answer is newer, the kept question's own answer
+    // must survive — its wording is what the voter sees.
+    await saveAnswers(request, party.token, candidate.id, { [keepId]: { value: 0, explanation: "säilytettävän sanamuoto" } });
+    await saveAnswers(request, party.token, candidate.id, { [dropId]: { value: 4, explanation: "kaksoiskappaleen sanamuoto" } });
 
     await mergeQuestions(request, keepId, [dropId]);
 
     const { body: profile } = await get(request, `/candidates/${candidate.id}`);
-    expect(profile.answers[keepId].value).toBe(4);
-    expect(profile.answers[keepId].explanation).toBe("uusi");
+    expect(profile.answers[keepId].value).toBe(0);
+    expect(profile.answers[keepId].explanation).toBe("säilytettävän sanamuoto");
+    expect(profile.answers[dropId]).toBeUndefined();
+  });
+
+  test("a duplicate-only answer is carried over when the candidate never answered the kept question", async ({ request }) => {
+    const ts = Date.now();
+    const party = await createParty(request, `Yhdistä-siirto ${ts}`, "p@test.fi");
+    const setA = await submitQuestionSet(request, {
+      ngoName: "A", title: `A ${ts}`, questions: ["Väite"],
+    });
+    await approveQuestionSet(request, setA.id);
+    const setB = await submitQuestionSet(request, {
+      ngoName: "B", title: `B ${ts}`, questions: ["Väite (dup)"],
+    });
+    await approveQuestionSet(request, setB.id);
+
+    const keepId = setA.questions[0].id;
+    const dropId = setB.questions[0].id;
+    const candidate = await createCandidate(request, party.token, { name: "Ehdokas", email: "c@test.fi" });
+
+    // Candidate answered ONLY the duplicate; the kept question has no answer to defend.
+    await saveAnswers(request, party.token, candidate.id, { [dropId]: { value: 3, explanation: "vain dup" } });
+
+    await mergeQuestions(request, keepId, [dropId]);
+
+    const { body: profile } = await get(request, `/candidates/${candidate.id}`);
+    expect(profile.answers[keepId].value).toBe(3);
+    expect(profile.answers[keepId].explanation).toBe("vain dup");
     expect(profile.answers[dropId]).toBeUndefined();
   });
 

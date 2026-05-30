@@ -55,8 +55,11 @@ async function deleteOrphanQuestions(client, questionIds) {
  * Merge the duplicate question `dropId` into the canonical question `keepId`.
  * Caller must run this inside a transaction.
  *
- * - Candidate answers on the duplicate are copied onto the canonical question.
- *   If a candidate answered both, the later answer (by answered_at) wins.
+ * - Candidate answers on the duplicate are copied onto the canonical question,
+ *   but only for candidates who had not answered the canonical question. If a
+ *   candidate answered both, the canonical question's own answer is kept — its
+ *   wording is what voters see, and the slightly different duplicate wording may
+ *   have drawn a different answer, so we don't let it override.
  * - Anonymous voter responses are copied where they don't already exist.
  * - The duplicate's set links are moved onto the canonical question, so every set
  *   that posed the duplicate now points at the canonical question instead.
@@ -69,9 +72,7 @@ async function mergeQuestions(client, keepId, dropId) {
     `INSERT INTO candidate_answers (candidate_id, question_id, value, explanation, answered_at)
      SELECT candidate_id, $1, value, explanation, answered_at
      FROM candidate_answers WHERE question_id = $2
-     ON CONFLICT (candidate_id, question_id) DO UPDATE
-       SET value = EXCLUDED.value, explanation = EXCLUDED.explanation, answered_at = EXCLUDED.answered_at
-       WHERE candidate_answers.answered_at < EXCLUDED.answered_at`,
+     ON CONFLICT (candidate_id, question_id) DO NOTHING`,
     [keepId, dropId]
   );
 

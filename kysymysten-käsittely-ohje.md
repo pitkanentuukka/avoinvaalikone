@@ -107,7 +107,7 @@ Joskus kaksoiskappale huomataan vasta sen jälkeen, kun molemmat sarjat on jo hy
 2. Valitse rastituista se, jonka teksti **säilytetään** (valitse *Säilytä*)
 3. Klikkaa **Yhdistä valitut**
 
-Säilytettävä väittämä saa kaikkien valittujen järjestöjen liitokset, ja muut väittämät poistetaan. Ehdokkaiden vastaukset siirtyvät säilytettävälle väittämälle — jos sama ehdokas oli vastannut useampaan kaksoiskappaleeseen eri tavoin, **uudempi vastaus voittaa**.
+Säilytettävä väittämä saa kaikkien valittujen järjestöjen liitokset, ja muut väittämät poistetaan. Ehdokkaiden vastaukset säilyvät: jos ehdokas oli jo vastannut **säilytettävään** väittämään, juuri se vastaus jää voimaan (sen sanamuoto on se, jonka äänestäjät näkevät — hieman eri tavoin muotoiltu kaksoiskappale on voinut saada eri vastauksen, eikä sen anneta korvata). Kaksoiskappaleen vastaus siirtyy vain niille ehdokkaille, jotka eivät olleet vastanneet säilytettävään väittämään lainkaan.
 
 ---
 
