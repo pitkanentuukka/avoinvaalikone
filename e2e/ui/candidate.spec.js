@@ -49,6 +49,7 @@ test.describe("Candidate portal UI", () => {
     // Fill profile
     await page.getByPlaceholder("esim. Matti Meikäläinen").fill("UI Testiehdokas");
     await page.getByPlaceholder("etunimi.sukunimi@esimerkki.fi").fill("ui@test.fi");
+    await page.locator("select").filter({ hasText: "esim. Helsingin vaalipiiri" }).selectOption("Helsingin vaalipiiri");
 
     // Scroll to our question set section and answer questions
     const q1Text = page.getByText("UI Väittämä 1").first();
