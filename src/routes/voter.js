@@ -68,26 +68,31 @@ router.post("/match", async (req, res, next) => {
       }
     }
 
-    // Optionally filter to only questions within certain sets
+    // Optionally filter to only questions that belong to certain sets. A question
+    // can now belong to several sets, so we test set membership with EXISTS against
+    // the join table rather than a column on questions (which avoids duplicate rows
+    // when a question is shared by multiple selected sets).
     let questionFilter = "";
     const params = [voterQuestionIds];
     if (Array.isArray(questionSetIds) && questionSetIds.length > 0) {
-      questionFilter = "AND q.question_set_id = ANY($2)";
       params.push(questionSetIds);
+      questionFilter = `AND EXISTS (
+        SELECT 1 FROM question_set_questions qsq
+        WHERE qsq.question_id = ca.question_id AND qsq.question_set_id = ANY($${params.length})
+      )`;
     }
 
     // Optionally filter by constituency
     let constituencyFilter = "";
     if (constituency) {
-      constituencyFilter = `AND c.constituency = $${params.length + 1}`;
       params.push(constituency);
+      constituencyFilter = `AND c.constituency = $${params.length}`;
     }
 
     // Fetch all candidate answers for the relevant questions
     const { rows: candidateAnswers } = await db.query(
       `SELECT ca.candidate_id, ca.question_id, ca.value, ca.explanation
        FROM candidate_answers ca
-       JOIN questions q ON q.id = ca.question_id
        JOIN candidates c ON c.id = ca.candidate_id
        WHERE ca.question_id = ANY($1)
        ${questionFilter}
