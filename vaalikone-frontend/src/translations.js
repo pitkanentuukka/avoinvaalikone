@@ -45,7 +45,7 @@ const translations = {
 
     // Admin
     adminLoginTitle: "Ylläpidon kirjautuminen",
-    adminLoginDesc: "Syötä ylläpidon salasana (.env-tiedoston ADMIN_SECRET).",
+    adminLoginDesc: "Syötä ylläpidon salasana",
     adminPasswordPlaceholder: "Ylläpidon salasana",
     adminLogin: "Kirjaudu",
     adminPanelTitle: "Ylläpidon hallintapaneeli",
@@ -249,7 +249,7 @@ const translations = {
 
     // Admin
     adminLoginTitle: "Admin login",
-    adminLoginDesc: "Enter the admin password (ADMIN_SECRET from .env file).",
+    adminLoginDesc: "Enter the admin password ",
     adminPasswordPlaceholder: "Admin password",
     adminLogin: "Log in",
     adminPanelTitle: "Admin panel",
