@@ -22,7 +22,7 @@ module.exports = defineConfig({
       name: "ui",
       testMatch: /ui\/.+\.spec\.js$/,
       use: {
-        baseURL: "http://localhost:8080",
+        baseURL: "http://localhost:80",
         browserName: "chromium",
       },
     },
