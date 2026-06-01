@@ -2,6 +2,7 @@
   "name": "vaalikone-backend",
   "version": "1.0.0",
   "description": "Voter advisory machine backend — Vaalikone 2026",
+  "license": "AGPL-3.0-only",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",

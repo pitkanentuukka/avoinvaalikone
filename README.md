@@ -1,8 +1,41 @@
 # Vaalikone 2026
 
-Finnish voter advisory machine (election compass). Voters answer policy questions and are matched with candidates based on weighted answer similarity.
+A Finnish *voter advisory machine* (vaalikone / election compass): voters answer a set of policy statements, candidates answer the same statements, and the app ranks candidates by how closely their answers match the voter's.
 
 **Stack:** Node.js + Express + PostgreSQL (backend) · React 19 + Vite (frontend) · Docker Compose (full stack)
+
+---
+
+## What this is
+
+Most Finnish vaalikoneet are built and owned by a single media house (Yle, Helsingin Sanomat, MTV…). One editorial team writes every question, and the resulting compass reflects that single team's view of what matters in the election.
+
+**This project is different: it is built around many organizations contributing questions, not one.** Civil-society organizations — NGOs, unions, advocacy groups, associations — each submit their *own* thematic set of statements. An administrator moderates the submissions, and the approved sets are published side by side. The result is an election compass assembled from many independent voices rather than a single editorial desk.
+
+### The multi-NGO model
+
+The whole system is shaped around this idea. Three groups of people interact with it, and the design keeps them deliberately decoupled:
+
+- **🏛️ Organizations (NGOs)** propose **question sets** — a titled, themed bundle of policy statements (e.g. *"Climate & energy"* from one group, *"Education"* from another). Anyone can submit one through a public form; no account is needed. Each set carries the submitting organization's name (and optional logo), so its origin stays visible all the way to the voter.
+- **🛡️ The administrator** is the neutral moderator. They review every incoming set and approve, edit, or reject it. The admin does **not** author the questions — their job is curation and quality control across all the organizations' submissions. Only approved sets become visible to candidates and voters.
+- **🗳️ Voters** don't get one monolithic questionnaire. On starting the compass they see **every approved set listed by theme and by the organization behind it**, and they freely **mix and match** which sets to answer — all of them, or just the themes they care about, drawn from whichever organizations they like. Their match is computed only over the questions they actually chose.
+
+Candidates, in turn, answer the pooled approved questions (via a per-party link) so that whatever combination a voter picks, there are candidate answers to match against.
+
+```
+      Many NGOs                Admin                      Voter
+ ┌──────────────────┐    ┌───────────────┐       ┌──────────────────┐
+ │ Set: Climate     │    │               │       │ picks themes from │
+ │ Set: Education    │──► │  moderates &  │ ───►  │ any mix of NGOs,  │
+ │ Set: Health      │    │   approves    │ appr. │ then gets matched │
+ │ …                │    │     sets      │ sets  │ to candidates     │
+ └──────────────────┘    └───────────────┘       └──────────────────┘
+       (decoupled: no NGO sees another's; the voter sees the union)
+```
+
+Because question authorship is distributed, the compass can grow organically: a new organization can add a perspective the others missed without anyone rebuilding the questionnaire. The trade-off — and the reason the admin role exists — is that submissions need moderation to stay neutral, non-leading, and free of duplicates.
+
+> **Repurposing:** this is currently scoped to the 2026 Finnish parliamentary election (the 13 eduskuntavaalit constituencies are baked into a DB constraint and a frontend constant). To run it for other elections, update both — see *Database Schema* below and `CLAUDE.md`.
 
 ---
 
@@ -14,11 +47,12 @@ Finnish voter advisory machine (election compass). Voters answer policy question
 docker compose up --build
 ```
 
-| Service  | URL                        |
-|----------|----------------------------|
-| Frontend | http://localhost:8080      |
-| Backend  | http://localhost:3000      |
-| Mailpit  | http://localhost:8025      |
+| Service  | URL                     | Notes                                  |
+|----------|-------------------------|----------------------------------------|
+| Frontend | http://localhost        | Nginx-served SPA on port **80**        |
+| Backend  | http://localhost:3000   | Express API (`/api/...`)               |
+| Mailpit  | http://localhost:8025   | Local email capture UI (dev only)      |
+| Postgres | `localhost:5433`        | Database, mapped from container `5432` |
 
 ### Local Development
 
@@ -132,9 +166,11 @@ All primary keys are UUIDs (`gen_random_uuid()`). New migrations should follow t
 
 ### Question Sets
 
+A *question set* is one organization's themed bundle of statements — the core unit of the multi-NGO model. Submission is public (any NGO, no account); visibility is gated on admin approval.
+
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | `/api/question-sets` | None | Approved sets + questions |
+| GET | `/api/question-sets` | None | Approved sets + questions (the union voters choose from) |
 | POST | `/api/question-sets` | None | NGO submits a set (→ pending) |
 | GET | `/api/admin/question-sets` | Admin | All sets (any status) |
 | PATCH | `/api/admin/question-sets/:id/approve` | Admin | Approve; sends email notifications |
@@ -222,7 +258,7 @@ The entire React SPA lives in [vaalikone-frontend/src/App.jsx](vaalikone-fronten
 | View | URL | Purpose |
 |------|-----|---------|
 | Home | `/` | Navigation hub |
-| Voter | `?view=voter` | Answer questions, set weights, view matches |
+| Voter | `?view=voter` | Pick which NGO question sets to use, answer, set weights, view matches |
 | Results | (within voter flow) | Candidate match results with comparison |
 | Admin | `?view=admin` | Manage parties, approve/reject question sets |
 | NGO | `?view=ngo` | Submit a new question set |
@@ -251,7 +287,7 @@ The entire React SPA lives in [vaalikone-frontend/src/App.jsx](vaalikone-fronten
 | `SMTP_USER` | — | SMTP username (optional) |
 | `SMTP_PASS` | — | SMTP password (optional) |
 
-In Docker Compose, `mailpit` provides a local SMTP server (port 1025) and web UI at http://localhost:8025.
+In Docker Compose, `mailpit` provides a local SMTP server (port 1025) and web UI at http://localhost:8025, and `CORS_ORIGIN` is overridden to `http://localhost:80` to match the containerized frontend.
 
 ---
 
@@ -286,3 +322,11 @@ Rate limiting is skipped in development (`NODE_ENV=development`) for admin endpo
 - Admin endpoints: `/api/admin/*` with Bearer token
 - Party-gated endpoints: `/api/candidates/party/:partyToken/...`
 - Voter responses are stored anonymously (random session UUID, no IP or user data)
+
+---
+
+## License
+Copyright (C) Tuukka Pitkänen
+Licensed under the **GNU Affero General Public License v3.0** (AGPL-3.0-only). See [LICENSE](LICENSE) for the full text.
+
+Because the AGPL is a network-copyleft license, anyone who runs a modified version of this software as a public service (e.g. a hosted vaalikone) must make the corresponding source code available to its users. If you deploy a fork, offer your source — for example via a "Source" link in the UI — as required by section 13.
