@@ -413,7 +413,8 @@ describe("PATCH /api/admin/question-sets/:id/review", () => {
       .mockResolvedValueOnce({ rows: [pendingSet] })                              // SELECT FOR UPDATE
       .mockResolvedValueOnce({ rows: [{ id: Q2, statement: "Väittämä 2" }] })    // SELECT originals (rejected)
       // no edits
-      .mockResolvedValueOnce({})                                                  // DELETE rejected
+      .mockResolvedValueOnce({})                                                  // DELETE FROM question_set_questions (unlink)
+      .mockResolvedValueOnce({})                                                  // DELETE FROM questions (orphan cleanup)
       .mockResolvedValueOnce({ rows: [{ id: Q1, statement: "Väittämä 1" }] })    // SELECT remaining
       .mockResolvedValueOnce({ rows: [updated] })                                 // UPDATE status + hidden
       .mockResolvedValueOnce({});                                                 // COMMIT
@@ -432,10 +433,12 @@ describe("PATCH /api/admin/question-sets/:id/review", () => {
     expect(res.body.status).toBe("approved");
     expect(res.body.hidden).toBe(true);
 
+    // Rejecting a question now unlinks it from the set and then deletes the
+    // canonical question if it is orphaned → two DELETE statements.
     const deleteCalls = client.query.mock.calls.filter(([sql]) =>
       typeof sql === "string" && sql.includes("DELETE")
     );
-    expect(deleteCalls).toHaveLength(1);
+    expect(deleteCalls).toHaveLength(2);
   });
 
   test("all questions rejected → status rejected, not hidden → 200", async () => {
@@ -446,7 +449,8 @@ describe("PATCH /api/admin/question-sets/:id/review", () => {
       .mockResolvedValueOnce({ rows: [pendingSet] })                                               // SELECT FOR UPDATE
       .mockResolvedValueOnce({ rows: [{ id: Q1, statement: "Väittämä 1" }, { id: Q2, statement: "Väittämä 2" }] }) // SELECT originals (rejected)
       // no edits
-      .mockResolvedValueOnce({})                                                                    // DELETE
+      .mockResolvedValueOnce({})                                                                    // DELETE FROM question_set_questions (unlink)
+      .mockResolvedValueOnce({})                                                                    // DELETE FROM questions (orphan cleanup)
       .mockResolvedValueOnce({ rows: [] })                                                          // SELECT remaining → empty
       .mockResolvedValueOnce({ rows: [updated] })                                                   // UPDATE status
       .mockResolvedValueOnce({});                                                                   // COMMIT
@@ -527,6 +531,7 @@ describe("POST /api/admin/question-sets/:id/questions", () => {
   });
 
   test("missing statement → 400", async () => {
+    buildMockClient();
     const res = await request(app)
       .post(`/api/admin/question-sets/${VALID_UUID}/questions`)
       .set("Authorization", authHeader)
@@ -536,6 +541,7 @@ describe("POST /api/admin/question-sets/:id/questions", () => {
   });
 
   test("statement too long → 400", async () => {
+    buildMockClient();
     const res = await request(app)
       .post(`/api/admin/question-sets/${VALID_UUID}/questions`)
       .set("Authorization", authHeader)
@@ -544,7 +550,8 @@ describe("POST /api/admin/question-sets/:id/questions", () => {
   });
 
   test("set not found → 404", async () => {
-    db.query.mockResolvedValueOnce({ rows: [] });
+    const client = buildMockClient();
+    client.query.mockResolvedValueOnce({ rows: [] }); // SELECT set
     const res = await request(app)
       .post(`/api/admin/question-sets/${VALID_UUID}/questions`)
       .set("Authorization", authHeader)
@@ -553,7 +560,8 @@ describe("POST /api/admin/question-sets/:id/questions", () => {
   });
 
   test("set is live (not staged) → 409", async () => {
-    db.query.mockResolvedValueOnce({ rows: [{ ...stagedSet, hidden: false }] });
+    const client = buildMockClient();
+    client.query.mockResolvedValueOnce({ rows: [{ ...stagedSet, hidden: false }] }); // SELECT set
     const res = await request(app)
       .post(`/api/admin/question-sets/${VALID_UUID}/questions`)
       .set("Authorization", authHeader)
@@ -562,11 +570,14 @@ describe("POST /api/admin/question-sets/:id/questions", () => {
   });
 
   test("happy path → 201 with new question", async () => {
-    const newQuestion = { id: Q1, question_set_id: VALID_UUID, statement: "Uusi väittämä", sort_order: 3 };
-    db.query
-      .mockResolvedValueOnce({ rows: [stagedSet] })     // SELECT set
-      .mockResolvedValueOnce({ rows: [{ max: 2 }] })    // SELECT MAX(sort_order)
-      .mockResolvedValueOnce({ rows: [newQuestion] });   // INSERT
+    const client = buildMockClient();
+    client.query
+      .mockResolvedValueOnce({ rows: [stagedSet] })                              // SELECT set
+      .mockResolvedValueOnce({})                                                  // BEGIN
+      .mockResolvedValueOnce({ rows: [{ max: 2 }] })                              // SELECT MAX(sort_order)
+      .mockResolvedValueOnce({ rows: [{ id: Q1, statement: "Uusi väittämä" }] }) // INSERT question
+      .mockResolvedValueOnce({})                                                  // INSERT link
+      .mockResolvedValueOnce({});                                                 // COMMIT
 
     const res = await request(app)
       .post(`/api/admin/question-sets/${VALID_UUID}/questions`)
@@ -575,7 +586,7 @@ describe("POST /api/admin/question-sets/:id/questions", () => {
 
     expect(res.status).toBe(201);
     expect(res.body.statement).toBe("Uusi väittämä");
-    expect(res.body.sort_order).toBe(3);
+    expect(res.body.sortOrder).toBe(3);
   });
 });
 
@@ -602,7 +613,8 @@ describe("DELETE /api/admin/question-sets/:id/questions/:questionId", () => {
   });
 
   test("set not found → 404", async () => {
-    db.query.mockResolvedValueOnce({ rows: [] });
+    const client = buildMockClient();
+    client.query.mockResolvedValueOnce({ rows: [] }); // SELECT set
     const res = await request(app)
       .delete(`/api/admin/question-sets/${VALID_UUID}/questions/${Q1}`)
       .set("Authorization", authHeader);
@@ -610,7 +622,8 @@ describe("DELETE /api/admin/question-sets/:id/questions/:questionId", () => {
   });
 
   test("set is live (not staged) → 409", async () => {
-    db.query.mockResolvedValueOnce({ rows: [{ ...stagedSet, hidden: false }] });
+    const client = buildMockClient();
+    client.query.mockResolvedValueOnce({ rows: [{ ...stagedSet, hidden: false }] }); // SELECT set
     const res = await request(app)
       .delete(`/api/admin/question-sets/${VALID_UUID}/questions/${Q1}`)
       .set("Authorization", authHeader);
@@ -618,9 +631,11 @@ describe("DELETE /api/admin/question-sets/:id/questions/:questionId", () => {
   });
 
   test("question not found in set → 404", async () => {
-    db.query
+    const client = buildMockClient();
+    client.query
       .mockResolvedValueOnce({ rows: [stagedSet] }) // SELECT set
-      .mockResolvedValueOnce({ rowCount: 0 });       // DELETE → no rows
+      .mockResolvedValueOnce({})                    // BEGIN
+      .mockResolvedValueOnce({ rowCount: 0 });      // DELETE link → no rows
     const res = await request(app)
       .delete(`/api/admin/question-sets/${VALID_UUID}/questions/${Q1}`)
       .set("Authorization", authHeader);
@@ -628,12 +643,88 @@ describe("DELETE /api/admin/question-sets/:id/questions/:questionId", () => {
   });
 
   test("happy path → 204", async () => {
-    db.query
+    const client = buildMockClient();
+    client.query
       .mockResolvedValueOnce({ rows: [stagedSet] }) // SELECT set
-      .mockResolvedValueOnce({ rowCount: 1 });       // DELETE
+      .mockResolvedValueOnce({})                    // BEGIN
+      .mockResolvedValueOnce({ rowCount: 1 })       // DELETE link
+      .mockResolvedValueOnce({})                    // DELETE orphan question
+      .mockResolvedValueOnce({});                   // COMMIT
     const res = await request(app)
       .delete(`/api/admin/question-sets/${VALID_UUID}/questions/${Q1}`)
       .set("Authorization", authHeader);
     expect(res.status).toBe(204);
+  });
+});
+
+// ─── POST /api/admin/question-sets/merge-questions ───────────────────────────
+
+describe("POST /api/admin/question-sets/merge-questions", () => {
+  test("not admin → 401", async () => {
+    const res = await request(app).post("/api/admin/question-sets/merge-questions");
+    expect(res.status).toBe(401);
+  });
+
+  test("invalid keepId → 400", async () => {
+    buildMockClient();
+    const res = await request(app)
+      .post("/api/admin/question-sets/merge-questions")
+      .set("Authorization", authHeader)
+      .send({ keepId: "bad-id", dropIds: [Q1] });
+    expect(res.status).toBe(400);
+  });
+
+  test("empty dropIds → 400", async () => {
+    buildMockClient();
+    const res = await request(app)
+      .post("/api/admin/question-sets/merge-questions")
+      .set("Authorization", authHeader)
+      .send({ keepId: VALID_UUID, dropIds: [] });
+    expect(res.status).toBe(400);
+  });
+
+  test("dropIds contains keepId → 400", async () => {
+    buildMockClient();
+    const res = await request(app)
+      .post("/api/admin/question-sets/merge-questions")
+      .set("Authorization", authHeader)
+      .send({ keepId: VALID_UUID, dropIds: [VALID_UUID] });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/itseensä/i);
+  });
+
+  test("a question does not exist → 404", async () => {
+    const client = buildMockClient();
+    client.query
+      .mockResolvedValueOnce({})              // BEGIN
+      .mockResolvedValueOnce({ rows: [{ id: VALID_UUID }] }); // SELECT FOR UPDATE → only 1 of 2 found
+    const res = await request(app)
+      .post("/api/admin/question-sets/merge-questions")
+      .set("Authorization", authHeader)
+      .send({ keepId: VALID_UUID, dropIds: [Q1] });
+    expect(res.status).toBe(404);
+  });
+
+  test("happy path → 200 with merged count", async () => {
+    const client = buildMockClient();
+    client.query
+      .mockResolvedValueOnce({})                                              // BEGIN
+      .mockResolvedValueOnce({ rows: [{ id: VALID_UUID }, { id: Q1 }] })      // SELECT FOR UPDATE (both exist)
+      .mockResolvedValueOnce({})                                              // merge: INSERT candidate_answers
+      .mockResolvedValueOnce({})                                              // merge: INSERT voter_responses
+      .mockResolvedValueOnce({})                                              // merge: INSERT links
+      .mockResolvedValueOnce({})                                              // merge: DELETE question
+      .mockResolvedValueOnce({ rows: [{ id: VALID_UUID, statement: "Kanoninen" }] }) // SELECT canonical
+      .mockResolvedValueOnce({ rows: [{ id: "s1", title: "Sarja", ngo_name: "NGO" }] }) // SELECT set links
+      .mockResolvedValueOnce({});                                             // COMMIT
+
+    const res = await request(app)
+      .post("/api/admin/question-sets/merge-questions")
+      .set("Authorization", authHeader)
+      .send({ keepId: VALID_UUID, dropIds: [Q1] });
+
+    expect(res.status).toBe(200);
+    expect(res.body.merged).toBe(1);
+    expect(res.body.sets).toHaveLength(1);
   });
 });

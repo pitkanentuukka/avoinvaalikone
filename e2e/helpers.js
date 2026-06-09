@@ -91,9 +91,20 @@ async function approveQuestionSet(request, id) {
   return body;
 }
 
+/** Merge duplicate questions into a canonical one via admin API. */
+async function mergeQuestions(request, keepId, dropIds) {
+  return post(
+    request,
+    "/admin/question-sets/merge-questions",
+    { keepId, dropIds },
+    adminHeaders()
+  );
+}
+
 /**
  * Register a candidate via party token. Returns candidate object (snake_case keys).
- * Backend expects camelCase body: { name, photoUrl, bio, email, constituency }
+
+* Backend expects camelCase body: { name, photoUrl, bio, email, constituency }
  */
 async function createCandidate(request, partyToken, { name, email, photoUrl, bio, constituency }) {
   const { body } = await post(request, `/candidates/party/${partyToken}`, {
@@ -183,5 +194,6 @@ module.exports = {
   createCandidate,
   saveAnswers,
   voterMatch,
+  mergeQuestions,
   fullSetup,
 };

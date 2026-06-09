@@ -101,6 +101,8 @@ const api = {
     apiFetch(`/admin/question-sets/${setId}/questions`, { method: "POST", body: { statement }, adminSecret: secret }),
   removeQuestion: (secret, setId, questionId) =>
     apiFetch(`/admin/question-sets/${setId}/questions/${questionId}`, { method: "DELETE", adminSecret: secret }),
+  mergeQuestions: (secret, keepId, dropIds) =>
+    apiFetch("/admin/question-sets/merge-questions", { method: "POST", body: { keepId, dropIds }, adminSecret: secret }),
 };
 
 // ─── Finnish constituencies ───
@@ -558,8 +560,10 @@ function AdminView() {
   const [newPartyName, setNewPartyName] = useState("");
   const [newPartyEmail, setNewPartyEmail] = useState("");
   const [actionLoading, setActionLoading] = useState(null);
-  const [reviewState, setReviewState] = useState({}); // { [setId]: { [questionId]: { rejected, reason } } }
+  const [reviewState, setReviewState] = useState({}); // { [setId]: { [questionId]: { rejected, reason, duplicateOf } } }
   const [newQuestionText, setNewQuestionText] = useState({}); // { [setId]: string }
+  const [mergeSelection, setMergeSelection] = useState([]); // questionIds selected in the merge tool
+  const [mergeKeepId, setMergeKeepId] = useState(null);     // which selected question to keep as canonical
 
   function toggleQuestionReject(setId, questionId) {
     setReviewState((prev) => ({
@@ -619,6 +623,16 @@ function AdminView() {
     }));
   }
 
+  function setDuplicateOf(setId, questionId, targetId) {
+    setReviewState((prev) => ({
+      ...prev,
+      [setId]: {
+        ...prev[setId],
+        [questionId]: { ...prev[setId]?.[questionId], duplicateOf: targetId || undefined },
+      },
+    }));
+  }
+
   async function login() {
     setLoading(true);
     setError(null);
@@ -655,6 +669,7 @@ function AdminView() {
           questionId: q.id,
           rejected: state.rejected ?? false,
           rejectionReason: state.reason ?? "",
+          ...(state.duplicateOf ? { duplicateOf: state.duplicateOf } : {}),
           ...(hasEdit ? { editedStatement } : {}),
         };
       });
@@ -690,6 +705,27 @@ function AdminView() {
     setActionLoading(`q-${questionId}`);
     try {
       await api.removeQuestion(adminSecret, setId, questionId);
+      await refresh();
+    } catch (e) { setError(e.message); }
+    finally { setActionLoading(null); }
+  }
+
+  function toggleMergeSelect(questionId) {
+    setMergeSelection((sel) => {
+      const next = sel.includes(questionId) ? sel.filter((id) => id !== questionId) : [...sel, questionId];
+      setMergeKeepId((k) => (next.includes(k) ? k : next[0] || null));
+      return next;
+    });
+  }
+
+  async function doMerge() {
+    if (mergeSelection.length < 2 || !mergeKeepId) return;
+    const dropIds = mergeSelection.filter((id) => id !== mergeKeepId);
+    setActionLoading("merge");
+    try {
+      await api.mergeQuestions(adminSecret, mergeKeepId, dropIds);
+      setMergeSelection([]);
+      setMergeKeepId(null);
       await refresh();
     } catch (e) { setError(e.message); }
     finally { setActionLoading(null); }
@@ -763,6 +799,22 @@ function AdminView() {
   const live = questionSets.filter((s) => s.status === "approved" && !s.hidden);
   const rejected = questionSets.filter((s) => s.status === "rejected");
 
+  // Distinct questions across every set, with the NGOs/sets that share each one.
+  // Used both for the inline "duplicate of…" picker and the dedicated merge tool.
+  const allQuestionsFlat = (() => {
+    const map = new Map(); // id → { id, statement, ngos: [], setTitles: [], approved }
+    questionSets.forEach((s) => {
+      (s.questions || []).forEach((q) => {
+        if (!map.has(q.id)) map.set(q.id, { id: q.id, statement: q.statement, ngos: [], setTitles: [], approved: false });
+        const entry = map.get(q.id);
+        if (s.ngoName && !entry.ngos.includes(s.ngoName)) entry.ngos.push(s.ngoName);
+        if (s.title && !entry.setTitles.includes(s.title)) entry.setTitles.push(s.title);
+        if (s.status === "approved") entry.approved = true;
+      });
+    });
+    return [...map.values()];
+  })();
+
   return (
     <div style={{ maxWidth: 800, margin: "0 auto", padding: "40px 24px" }}>
       <h2 style={{ fontSize: "28px", fontWeight: 800, letterSpacing: "-0.02em", marginBottom: "8px" }}>{t.adminPanelTitle}</h2>
@@ -791,8 +843,14 @@ function AdminView() {
                     const isEditing = qState.editing ?? false;
                     const editedStatement = qState.editedStatement;
                     const hasEdit = editedStatement !== undefined && editedStatement.trim() !== q.statement;
-                    const bg = isRejected ? palette.dangerLight : hasEdit ? palette.infoLight : palette.accentLight;
-                    const border = isRejected ? "#f5c6c2" : hasEdit ? "#b8d0e8" : "#c6dece";
+                    const isDuplicate = !!qState.duplicateOf;
+                    const dupTarget = isDuplicate ? allQuestionsFlat.find((x) => x.id === qState.duplicateOf) : null;
+                    // Offer already-approved questions from other sets as merge targets.
+                    const currentSetQIds = new Set((qs.questions || []).map((x) => x.id));
+                    const mergeTargets = allQuestionsFlat.filter((x) => x.approved && !currentSetQIds.has(x.id));
+                    const highlighted = hasEdit || isDuplicate;
+                    const bg = isRejected ? palette.dangerLight : highlighted ? palette.infoLight : palette.accentLight;
+                    const border = isRejected ? "#f5c6c2" : highlighted ? "#b8d0e8" : "#c6dece";
                     return (
                       <div key={q.id} style={{ marginBottom: "8px", padding: "10px 12px", background: bg, borderRadius: "6px", border: `1px solid ${border}` }}>
                         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -802,15 +860,14 @@ function AdminView() {
                               ? <><span style={{ textDecoration: "line-through", color: palette.textLight }}>{q.statement}</span>{" → "}<span style={{ color: palette.info }}>{editedStatement.trim()}</span></>
                               : q.statement}
                           </span>
-                          {!isRejected && (
+                          {isDuplicate ? (
                             <button
-                              onClick={() => isEditing ? cancelEdit(qs.id, q.id) : startEdit(qs.id, q.id, q.statement)}
-                              style={{ flexShrink: 0, padding: "3px 8px", fontSize: "12px", fontWeight: 600, borderRadius: "4px", border: `1px solid ${palette.border}`, cursor: "pointer", background: palette.surface, color: palette.textMuted }}
+                              onClick={() => setDuplicateOf(qs.id, q.id, null)}
+                              style={{ flexShrink: 0, padding: "3px 10px", fontSize: "12px", fontWeight: 600, borderRadius: "4px", border: `2px solid ${palette.info}`, cursor: "pointer", background: palette.surface, color: palette.info }}
                             >
-                              {isEditing ? t.adminCancelEdit : t.adminEditQuestion}
+                              {t.adminCancelDuplicate}
                             </button>
-                          )}
-                          {isRejected ? (
+                          ) : isRejected ? (
                             <button
                               onClick={() => toggleQuestionReject(qs.id, q.id)}
                               style={{ flexShrink: 0, padding: "3px 10px", fontSize: "12px", fontWeight: 600, borderRadius: "4px", border: "none", cursor: "pointer", background: palette.danger, color: "#fff" }}
@@ -819,6 +876,12 @@ function AdminView() {
                             </button>
                           ) : (
                             <>
+                              <button
+                                onClick={() => isEditing ? cancelEdit(qs.id, q.id) : startEdit(qs.id, q.id, q.statement)}
+                                style={{ flexShrink: 0, padding: "3px 8px", fontSize: "12px", fontWeight: 600, borderRadius: "4px", border: `1px solid ${palette.border}`, cursor: "pointer", background: palette.surface, color: palette.textMuted }}
+                              >
+                                {isEditing ? t.adminCancelEdit : t.adminEditQuestion}
+                              </button>
                               <button
                                 onClick={() => {}}
                                 style={{ flexShrink: 0, padding: "3px 10px", fontSize: "12px", fontWeight: 600, borderRadius: "4px", border: `2px solid ${palette.accent}`, cursor: "default", background: palette.surface, color: palette.accent }}
@@ -834,6 +897,26 @@ function AdminView() {
                             </>
                           )}
                         </div>
+                        {!isRejected && (
+                          isDuplicate ? (
+                            <div style={{ marginTop: "8px", fontSize: "12px", color: palette.info }}>
+                              {t.adminDuplicateOf} "{dupTarget?.statement ?? "—"}"{dupTarget?.ngos?.length ? ` (${dupTarget.ngos.join(", ")})` : ""}
+                            </div>
+                          ) : mergeTargets.length > 0 && !isEditing ? (
+                            <select
+                              value=""
+                              onChange={(e) => e.target.value && setDuplicateOf(qs.id, q.id, e.target.value)}
+                              style={{ marginTop: "8px", width: "100%", boxSizing: "border-box", fontSize: "12px", padding: "5px 6px", borderRadius: "4px", border: `1px solid ${palette.border}`, fontFamily: "inherit", background: palette.surface, color: palette.textMuted }}
+                            >
+                              <option value="">{t.adminMarkDuplicate} — {t.adminDuplicateOfPlaceholder}</option>
+                              {mergeTargets.map((tq) => (
+                                <option key={tq.id} value={tq.id}>
+                                  {tq.ngos.join(", ")}: {tq.statement.length > 80 ? tq.statement.slice(0, 80) + "…" : tq.statement}
+                                </option>
+                              ))}
+                            </select>
+                          ) : null
+                        )}
                         {isEditing && (
                           <textarea
                             value={editedStatement ?? q.statement}
@@ -926,6 +1009,37 @@ function AdminView() {
           </Card>
         ))}
       </section>
+
+      {allQuestionsFlat.filter((x) => x.approved).length > 1 && (
+        <section style={{ marginBottom: "40px" }}>
+          <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "8px" }}>{t.adminMergeTitle}</h3>
+          <p style={{ fontSize: "13px", color: palette.textMuted, marginBottom: "16px" }}>{t.adminMergeDesc}</p>
+          <Card>
+            {allQuestionsFlat.filter((x) => x.approved).map((q) => {
+              const selected = mergeSelection.includes(q.id);
+              return (
+                <div key={q.id} style={{ display: "flex", alignItems: "flex-start", gap: "10px", padding: "8px 0", borderBottom: `1px solid ${palette.border}` }}>
+                  <input type="checkbox" checked={selected} onChange={() => toggleMergeSelect(q.id)} style={{ marginTop: "3px", flexShrink: 0 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: "13px" }}>{q.statement}</div>
+                    <div style={{ fontSize: "11px", color: palette.textLight }}>{t.adminMergeInSets} {q.setTitles.join(", ")}</div>
+                  </div>
+                  {selected && (
+                    <label style={{ fontSize: "11px", color: palette.textMuted, display: "flex", alignItems: "center", gap: "4px", flexShrink: 0 }}>
+                      <input type="radio" name="merge-keep" checked={mergeKeepId === q.id} onChange={() => setMergeKeepId(q.id)} />
+                      {t.adminMergeKeepLabel}
+                    </label>
+                  )}
+                </div>
+              );
+            })}
+            <div style={{ marginTop: "12px", display: "flex", alignItems: "center", gap: "12px" }}>
+              <Button variant="primary" size="sm" onClick={doMerge} disabled={mergeSelection.length < 2 || !mergeKeepId} loading={actionLoading === "merge"}>{t.adminMergeButton}</Button>
+              {mergeSelection.length < 2 && <span style={{ fontSize: "12px", color: palette.textLight }}>{t.adminMergeHint}</span>}
+            </div>
+          </Card>
+        </section>
+      )}
 
       {rejected.length > 0 && (
         <section style={{ marginBottom: "40px" }}>
@@ -1183,7 +1297,10 @@ function CandidateView({ partyToken, initialCandidateId }) {
   }, [partyToken, initialCandidateId]);
 
   const approvedSets = questionSets.filter((s) => s.status === "approved");
-  const allQuestions = approvedSets.flatMap((s) => s.questions || []);
+  // Dedup shared questions by id so the answered-count denominator is the number of
+  // distinct questions. Questions are still rendered under each NGO section below;
+  // answering a shared question once fills it everywhere (answers are keyed by id).
+  const allQuestions = [...new Map(approvedSets.flatMap((s) => s.questions || []).map((q) => [q.id, q])).values()];
 
   async function selectExisting(c) {
     setError(null);
@@ -1481,7 +1598,23 @@ function VoterView() {
   }, []);
 
   const approvedSets = questionSets;
-  const activeQuestions = approvedSets.filter((s) => selectedSetIds.has(s.id)).flatMap((s) => s.questions || []);
+  // A single question can belong to several selected sets (NGOs that posed the
+  // same statement). Show it exactly once, and remember every NGO — among the
+  // selected sets — that asked it, for attribution in the quiz.
+  const { activeQuestions, ngosByQuestion } = useMemo(() => {
+    const seen = new Map(); // questionId → question (first occurrence)
+    const ngos = {};        // questionId → [ngoName, ...]
+    approvedSets
+      .filter((s) => selectedSetIds.has(s.id))
+      .forEach((s) => {
+        (s.questions || []).forEach((q) => {
+          if (!seen.has(q.id)) seen.set(q.id, q);
+          if (!ngos[q.id]) ngos[q.id] = [];
+          if (s.ngoName && !ngos[q.id].includes(s.ngoName)) ngos[q.id].push(s.ngoName);
+        });
+      });
+    return { activeQuestions: [...seen.values()], ngosByQuestion: ngos };
+  }, [approvedSets, selectedSetIds]);
 
   function toggleSet(id) {
     setSelectedSetIds((s) => {
@@ -1657,13 +1790,13 @@ function VoterView() {
   // Answering
   if (step === "answer") {
     const q = activeQuestions[currentQ];
-    const parentSet = approvedSets.find((s) => (s.questions || []).some((sq) => sq.id === q.id));
+    const askedBy = ngosByQuestion[q.id] || [];
     const progress = (currentQ / activeQuestions.length) * 100;
     return (
       <div style={{ maxWidth: 600, margin: "0 auto", padding: "40px 24px" }}>
         <div style={{ marginBottom: "24px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: "13px", color: palette.textMuted, marginBottom: "8px" }}>
-            <span>{parentSet?.title}</span><span>{currentQ + 1} / {activeQuestions.length}</span>
+            <span>{askedBy.join(" · ")}</span><span>{currentQ + 1} / {activeQuestions.length}</span>
           </div>
           <ProgressBar value={progress} />
         </div>

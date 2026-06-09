@@ -121,9 +121,10 @@ vaalikone/
 | **parties** | id, name, token, email | `token` is shared with party secretaries |
 | **candidates** | id, party_id, name, photo_url, bio, email | Linked to a party |
 | **candidate_answers** | candidate_id, question_id, value (0–4), explanation | Unique per candidate+question |
-| **question_sets** | id, ngo_name, ngo_email, title, status | `status`: `pending \| approved \| rejected` |
-| **questions** | id, question_set_id, statement, sort_order | Belongs to a question set |
-| **voter_responses** | session_id, question_id, value, answered_on | Anonymous analytics (no PII) |
+| **question_sets** | id, ngo_name, ngo_email, title, status, hidden | `status`: `pending \| approved \| rejected` |
+| **questions** | id, statement | Canonical question; may belong to several sets |
+| **question_set_questions** | question_set_id, question_id, sort_order | Join table (a question ↔ many sets, per-set ordering) |
+| **voter_responses** | session_id, question_id, value, weight | Anonymous analytics (no PII) |
 
 All primary keys are UUIDs (`gen_random_uuid()`). New migrations should follow the versioned pattern and update `schema_migrations`.
 
@@ -175,6 +176,8 @@ A *question set* is one organization's themed bundle of statements — the core 
 | GET | `/api/admin/question-sets` | Admin | All sets (any status) |
 | PATCH | `/api/admin/question-sets/:id/approve` | Admin | Approve; sends email notifications |
 | PATCH | `/api/admin/question-sets/:id/reject` | Admin | Reject |
+| PATCH | `/api/admin/question-sets/:id/review` | Admin | Per-question accept/edit/reject; `duplicateOf` merges a question into an existing canonical one |
+| POST | `/api/admin/question-sets/merge-questions` | Admin | Merge duplicates retroactively: `{ keepId, dropIds }` |
 
 ```json
 // POST body (NGO submission)
