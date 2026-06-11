@@ -5,6 +5,19 @@ services:
   db:
     ports: !reset []
 
+  # Same rationale as db: in production all API traffic comes through
+  # Caddy → frontend nginx, so the backend must not be reachable directly
+  # (plaintext, bypassing TLS and Cloudflare) on a published host port.
+  backend:
+    ports: !reset []
+    environment:
+      # Proxy hops in front of the app: Cloudflare → Caddy → frontend nginx.
+      # Must match the real chain or rate limiting keys on a proxy IP instead
+      # of the client. Set TRUST_PROXY_HOPS=2 if you run without Cloudflare.
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-3}
+      # Public hostname used for the HTTP→HTTPS redirect.
+      PUBLIC_HOST: ${PUBLIC_HOST:-}
+
   frontend:
     ports: !reset []
 

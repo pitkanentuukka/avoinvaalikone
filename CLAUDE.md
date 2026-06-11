@@ -82,7 +82,7 @@ When a set or a per-set link is removed, the route layer deletes any question th
 
 ### Environment Variables
 
-Copy `.env.example` to `.env`. Required: `DATABASE_URL`, `ADMIN_SECRET`. Optional: `PORT` (default 3000), `CORS_ORIGIN` (default `http://localhost:5173`), `NODE_ENV`.
+Copy `.env.example` to `.env`. Required: `DATABASE_URL`, `ADMIN_SECRET`. Optional: `PORT` (default 3000), `CORS_ORIGIN` (default `http://localhost:5173`), `NODE_ENV`, `PUBLIC_HOST` (production HTTPS-redirect target), `TRUST_PROXY_HOPS` (number of reverse proxies in front of the app, default 1; the production Cloudflare → Caddy → nginx chain needs 3, set in `docker-compose.prod.yml`).
 
 ## Key Conventions
 

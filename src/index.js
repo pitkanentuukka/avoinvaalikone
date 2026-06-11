@@ -15,8 +15,12 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // ─── HTTPS Enforcement Middleware ───
-// Trust proxy to handle HTTPS correctly in production
-app.set('trust proxy', 1);
+// Trust proxy to handle HTTPS correctly in production.
+// TRUST_PROXY_HOPS must equal the number of reverse proxies in front of the app
+// (e.g. Cloudflare → Caddy → frontend nginx = 3). If it's lower than the real
+// chain, req.ip resolves to a proxy's address instead of the client's, which
+// collapses every rate-limit bucket into one shared per-proxy bucket.
+app.set('trust proxy', parseInt(process.env.TRUST_PROXY_HOPS || '1', 10));
 
 // Redirect HTTP to HTTPS in production.
 // Requires PUBLIC_HOST env var — falls back to skipping the redirect rather
