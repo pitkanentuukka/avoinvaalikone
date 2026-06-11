@@ -24,19 +24,10 @@ router.post("/match", async (req, res, next) => {
       return res.status(400).json({ error: "Vastaukset vaaditaan" });
     }
 
-    const voterQuestionIds = Object.keys(answers);
-
-    // Reject if the caller sends more answers than there are questions in the DB.
-    // This prevents unbounded voter_responses inserts without needing an arbitrary magic number.
-    const { rows: [{ count: questionCount }] } = await db.query(
-      "SELECT COUNT(*) FROM questions"
-    );
-    if (voterQuestionIds.length > parseInt(questionCount, 10)) {
-      return res.status(400).json({ error: "Liian monta vastausta" });
-    }
+    const allQuestionIds = Object.keys(answers);
 
     // Validate all question IDs are valid UUIDs
-    if (!voterQuestionIds.every(id => isValidUUID(id))) {
+    if (!allQuestionIds.every(id => isValidUUID(id))) {
       return res.status(400).json({ error: "Virheelliset kysymyksen tunnisteet" });
     }
 
@@ -66,6 +57,20 @@ router.post("/match", async (req, res, next) => {
       if (typeof constituency !== "string" || constituency.length > 255) {
         return res.status(400).json({ error: "Virheellinen vaalipiiri" });
       }
+    }
+
+    // Keep only answers for questions that still exist. Voter answers are stored
+    // in browser localStorage, so they can reference questions that have since
+    // been merged or deleted; those must not reach the voter_responses insert
+    // (FK violation) or the match computation. This also bounds the insert to
+    // the number of questions actually in the DB.
+    const { rows: existingRows } = await db.query(
+      "SELECT id FROM questions WHERE id = ANY($1)",
+      [allQuestionIds]
+    );
+    const voterQuestionIds = existingRows.map((r) => r.id);
+    if (voterQuestionIds.length === 0) {
+      return res.json({ sessionId: null, results: [] });
     }
 
     // Optionally filter to only questions that belong to certain sets. A question
