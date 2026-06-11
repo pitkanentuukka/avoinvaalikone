@@ -1,4 +1,10 @@
 services:
+  # Don't publish the database port in production. Docker-published ports bind
+  # 0.0.0.0 and bypass the host firewall; other services reach the db over the
+  # internal compose network without it being exposed to the internet.
+  db:
+    ports: !reset []
+
   frontend:
     ports: !reset []
 

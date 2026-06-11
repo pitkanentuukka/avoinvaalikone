@@ -30,7 +30,7 @@ services:
       PORT: 3000
       DATABASE_URL: postgresql://vaalikone:vaalikone_password@db:5432/vaalikone
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:80}
-      ADMIN_SECRET: ${ADMIN_SECRET:-password}
+      ADMIN_SECRET: ${ADMIN_SECRET:?ADMIN_SECRET must be set (no insecure default)}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}
       SMTP_HOST: ${SMTP_HOST:-mailpit}
       SMTP_PORT: ${SMTP_PORT:-1025}
@@ -50,11 +50,14 @@ services:
       retries: 3
       start_period: 40s
 
-  # Local SMTP capture (dev only) — web UI at http://localhost:8025
+  # Local SMTP capture (dev only) — web UI at http://localhost:8025.
+  # Gated behind the "dev" profile so it never starts in production; the prod
+  # deploy doesn't request the profile, so this container is simply absent there.
   mailpit:
     image: axllent/mailpit
     container_name: vaalikone-mailpit
     restart: unless-stopped
+    profiles: ["dev"]
     ports:
       - "8025:8025"
       - "1025:1025"

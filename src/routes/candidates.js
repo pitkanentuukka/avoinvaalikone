@@ -1,9 +1,20 @@
 const { Router } = require("express");
+const rateLimit = require("express-rate-limit");
 const db = require("../db/pool");
 const { requirePartyToken } = require("../middleware/auth");
 const { isValidLength, isValidUrl, isValidEmail, validateUUIDParam, isValidUUID } = require("../middleware/validation");
 
 const router = Router();
+
+// Party tokens are bearer credentials. Rate-limit the token-gated routes so the
+// token space cannot be brute-forced (public candidate reads below stay unthrottled).
+const partyLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 60,
+  message: { error: "Liian monta pyyntöä. Yritä myöhemmin uudelleen." },
+  skip: (req) => process.env.NODE_ENV !== "production",
+});
+router.use("/party", partyLimiter);
 
 // ─── Public ───
 

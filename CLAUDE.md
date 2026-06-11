@@ -32,9 +32,12 @@ npm run preview       # Preview production build
 ### Docker (full stack)
 
 ```bash
-docker compose up --build   # Start all services (db, backend, frontend)
-docker compose down         # Stop all services
+docker compose --profile dev up --build   # Start all services incl. mailpit (local SMTP capture)
+docker compose up --build                 # Start without mailpit
+docker compose down                       # Stop all services
 ```
+
+`mailpit` (dev SMTP capture, web UI at http://localhost:8025) is gated behind the `dev` Compose profile, so it only starts when you pass `--profile dev`. Production (`docker-compose.prod.yml`) never requests the profile, so mailpit is absent there.
 
 ## Architecture
 

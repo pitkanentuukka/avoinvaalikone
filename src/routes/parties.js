@@ -1,5 +1,5 @@
 const { Router } = require("express");
-const { v4: uuidv4 } = require("uuid");
+const crypto = require("crypto");
 const db = require("../db/pool");
 const { requireAdmin } = require("../middleware/auth");
 const { isValidLength, isValidEmail, validateUUIDParam } = require("../middleware/validation");
@@ -37,14 +37,16 @@ router.post("/", requireAdmin, async (req, res, next) => {
       return res.status(400).json({ error: "Virheellinen sähköpostiosoite" });
     }
 
-    // Generate a URL-safe token
+    // Generate a URL-safe token. The slug is only a human-readable prefix; the
+    // security comes from 24 random bytes (192 bits) of CSPRNG entropy, since the
+    // token is a bearer credential for the party portal.
     const slug = name
       .toLowerCase()
       .replace(/[äå]/g, "a")
       .replace(/ö/g, "o")
       .replace(/[^a-z0-9]+/g, "-")
       .slice(0, 12);
-    const token = `${slug}-${uuidv4().slice(0, 8)}`;
+    const token = `${slug}-${crypto.randomBytes(24).toString("base64url")}`;
 
     const { rows } = await db.query(
       `INSERT INTO parties (name, token, email)
