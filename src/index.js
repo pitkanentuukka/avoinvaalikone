@@ -6,6 +6,9 @@ const helmet = require("helmet");
 const morgan = require("morgan");
 const rateLimit = require("express-rate-limit");
 
+const { noStore } = require("./middleware/cacheControl");
+const redisStore = require("./middleware/rateLimitStore");
+const { pool } = require("./db/pool");
 const partiesRouter = require("./routes/parties");
 const { publicRouter: questionSetsPublicRouter, adminRouter: questionSetsAdminRouter } = require("./routes/questionSets");
 const candidatesRouter = require("./routes/candidates");
@@ -51,10 +54,17 @@ app.use(
     credentials: true,
   })
 );
-app.use(morgan(":date[iso] :method :url :status :response-time ms - :res[content-length]"));
+// In production only log failures: per-request logging at election-day rates
+// is measurable event-loop and disk overhead with no diagnostic value.
+app.use(morgan(":date[iso] :method :url :status :response-time ms - :res[content-length]", {
+  skip: (req, res) => process.env.NODE_ENV === "production" && res.statusCode < 400,
+}));
 app.use(express.json({ limit: "1mb" }));
 
 // ─── Rate Limiters ───
+
+// Stores live in Redis when REDIS_URL is set, so the limits hold across
+// backend replicas instead of multiplying by the replica count.
 
 // Rate limiting for admin endpoints (strict)
 const adminLimiter = rateLimit({
@@ -62,6 +72,7 @@ const adminLimiter = rateLimit({
   max: 30,
   message: { error: "Liian monta pyyntöä. Yritä myöhemmin uudelleen." },
   skip: (req) => process.env.NODE_ENV !== 'production',
+  store: redisStore("rl:admin:"),
 });
 
 // Rate limiting for public submission endpoints
@@ -70,26 +81,37 @@ const submissionLimiter = rateLimit({
   max: 20,
   message: { error: "Liian monta pyyntöä. Yritä myöhemmin uudelleen." },
   skip: (req) => process.env.NODE_ENV !== 'production',
+  store: redisStore("rl:submission:"),
 });
 
-// Rate limiting for voter match endpoint
+// Rate limiting for voter match endpoint. The default allows for heavy carrier
+// CGNAT (one IP can be hundreds of simultaneous voters on election night)
+// while still capping a single abuser at ~5 req/s on the most expensive
+// endpoint. RATE_LIMIT_MATCH_MAX is the election-night dial, and is also
+// needed to run k6 load tests against a production-mode deployment.
 const matchLimiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1 minute
-  max: 60,
+  max: parseInt(process.env.RATE_LIMIT_MATCH_MAX || "300", 10),
   message: { error: "Liian monta pyyntöä. Yritä myöhemmin uudelleen." },
   skip: (req) => process.env.NODE_ENV !== 'production',
+  store: redisStore("rl:match:"),
 });
 
 // ─── Routes ───
 
-// Health check
+// Health check. Deliberately no DB roundtrip (Docker/CI probe it frequently);
+// the pool counters give free load visibility during the event.
 app.get("/api/health", (req, res) => {
-  res.json({ status: "ok", timestamp: new Date().toISOString() });
+  res.json({
+    status: "ok",
+    timestamp: new Date().toISOString(),
+    pool: { total: pool.totalCount, idle: pool.idleCount, waiting: pool.waitingCount },
+  });
 });
 
 // Admin routes (with rate limiting)
-app.use("/api/admin/parties", adminLimiter, partiesRouter);
-app.use("/api/admin/question-sets", adminLimiter, questionSetsAdminRouter);
+app.use("/api/admin/parties", adminLimiter, noStore, partiesRouter);
+app.use("/api/admin/question-sets", adminLimiter, noStore, questionSetsAdminRouter);
 
 // Public question-set routes (NGO submission rate limited)
 app.post("/api/question-sets", submissionLimiter);

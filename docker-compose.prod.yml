@@ -10,6 +10,13 @@ services:
   # (plaintext, bypassing TLS and Cloudflare) on a published host port.
   backend:
     ports: !reset []
+    # One Node process per vCPU (the match computation is CPU-bound JS).
+    # nginx re-resolves the backend service name via Docker DNS and
+    # round-robins across replicas (see vaalikone-frontend/nginx.conf).
+    # DB connections: replicas × PG_POOL_MAX (3 × 10 = 30) — keep well under
+    # Postgres max_connections (100).
+    deploy:
+      replicas: 3
     environment:
       # Proxy hops in front of the app: Cloudflare → Caddy → frontend nginx.
       # Must match the real chain or rate limiting keys on a proxy IP instead
@@ -34,6 +41,11 @@ services:
       - caddy_config:/config
     depends_on:
       - frontend
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   caddy_data:

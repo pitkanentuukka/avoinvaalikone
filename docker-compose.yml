@@ -1,9 +1,26 @@
+# Bounded log files on every service — unbounded json-file logs can fill the
+# disk under sustained traffic (e.g. election night).
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   # PostgreSQL Database
   db:
     image: postgres:16-alpine
     container_name: vaalikone-db
     restart: unless-stopped
+    # Modest tuning for the read-mostly hot dataset; log_min_duration_statement
+    # surfaces slow queries in the container logs.
+    command:
+      [
+        "postgres",
+        "-c", "shared_buffers=256MB",
+        "-c", "effective_cache_size=768MB",
+        "-c", "log_min_duration_statement=250",
+      ]
     environment:
       POSTGRES_USER: vaalikone
       POSTGRES_PASSWORD: vaalikone_password
@@ -17,18 +34,36 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    logging: *default-logging
 
-  # Backend API
+  # Shared rate-limit store. No published ports (internal network only) and no
+  # persistence (--save "") — rate-limit state is disposable. noeviction
+  # because silently evicting rate-limit keys under memory pressure would
+  # disable limiting.
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--maxmemory", "64mb", "--maxmemory-policy", "noeviction", "--save", ""]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    logging: *default-logging
+
+  # Backend API. No container_name: production runs this service with multiple
+  # replicas (docker-compose.prod.yml), which fixed names don't allow.
   backend:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: vaalikone-backend
     restart: unless-stopped
     environment:
       NODE_ENV: ${NODE_ENV:-production}
       PORT: 3000
       DATABASE_URL: postgresql://vaalikone:vaalikone_password@db:5432/vaalikone
+      REDIS_URL: redis://redis:6379
+      PG_POOL_MAX: ${PG_POOL_MAX:-10}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:80}
       ADMIN_SECRET: ${ADMIN_SECRET:?ADMIN_SECRET must be set (no insecure default)}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}
@@ -43,12 +78,15 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
+    logging: *default-logging
 
   # Local SMTP capture (dev only) — web UI at http://localhost:8025.
   # Gated behind the "dev" profile so it never starts in production; the prod
@@ -61,6 +99,7 @@ services:
     ports:
       - "8025:8025"
       - "1025:1025"
+    logging: *default-logging
 
   # Frontend
   frontend:
@@ -76,6 +115,7 @@ services:
       - "80:80"
     depends_on:
       - backend
+    logging: *default-logging
 
 volumes:
   postgres_data:

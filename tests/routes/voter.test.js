@@ -7,7 +7,7 @@ const db = require("../../src/db/pool");
 const VALID_UUID = "550e8400-e29b-41d4-a716-446655440000";
 const VALID_UUID2 = "660e8400-e29b-41d4-a716-446655440000";
 const CANDIDATE_ID = "770e8400-e29b-41d4-a716-446655440000";
-const SESSION_UUID = "990e8400-e29b-41d4-a716-446655440000";
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 beforeEach(() => {
   db.query.mockReset();
@@ -17,12 +17,12 @@ beforeEach(() => {
 
 describe("POST /api/voter/match — algorithm", () => {
   /**
-   * Sets up the 5 DB queries the route runs when candidates have answers:
+   * Sets up the 4 DB queries the route runs when candidates have answers:
    * 1. SELECT id FROM questions (filter to questions that still exist)
    * 2. candidate_answers JOIN questions
    * 3. SELECT candidates + parties
-   * 4. SELECT gen_random_uuid()
-   * 5. INSERT INTO voter_responses
+   * 4. INSERT INTO voter_responses (fire-and-forget; session id comes from
+   *    crypto.randomUUID, not the DB)
    */
   function setupDb(candidateAnswerRows, candidateRows) {
     const candidates = candidateRows || [
@@ -38,7 +38,6 @@ describe("POST /api/voter/match — algorithm", () => {
     db.query.mockResolvedValueOnce({ rows: [{ id: VALID_UUID }] }); // questions that still exist
     db.query.mockResolvedValueOnce({ rows: candidateAnswerRows });
     db.query.mockResolvedValueOnce({ rows: candidates });
-    db.query.mockResolvedValueOnce({ rows: [{ session_id: SESSION_UUID }] });
     db.query.mockResolvedValueOnce({ rows: [] });
   }
 
@@ -83,7 +82,6 @@ describe("POST /api/voter/match — algorithm", () => {
     db.query.mockResolvedValueOnce({
       rows: [{ id: CANDIDATE_ID, name: "Testi Ehdokas", photo_url: null, bio: null, party_id: "aaa", party_name: "Testi Puolue" }],
     });
-    db.query.mockResolvedValueOnce({ rows: [{ session_id: SESSION_UUID }] });
     db.query.mockResolvedValueOnce({ rows: [] });
 
     const res = await request(app)
@@ -131,7 +129,6 @@ describe("POST /api/voter/match — algorithm", () => {
         { id: CAND2, name: "B", photo_url: null, bio: null, party_id: "p1", party_name: "P" },
       ],
     });
-    db.query.mockResolvedValueOnce({ rows: [{ session_id: SESSION_UUID }] });
     db.query.mockResolvedValueOnce({ rows: [] });
 
     const res = await request(app)
@@ -151,7 +148,6 @@ describe("POST /api/voter/match — algorithm", () => {
     db.query.mockResolvedValueOnce({
       rows: [{ id: CANDIDATE_ID, name: "A", photo_url: null, bio: null, party_id: "p1", party_name: "P" }],
     });
-    db.query.mockResolvedValueOnce({ rows: [{ session_id: SESSION_UUID }] });
     db.query.mockResolvedValueOnce({ rows: [] });
 
     const res = await request(app)
@@ -173,7 +169,6 @@ describe("POST /api/voter/match — response shape", () => {
     db.query.mockResolvedValueOnce({
       rows: [{ id: CANDIDATE_ID, name: "A", photo_url: null, bio: null, party_id: "p1", party_name: "P" }],
     });
-    db.query.mockResolvedValueOnce({ rows: [{ session_id: SESSION_UUID }] });
     db.query.mockResolvedValueOnce({ rows: [] });
 
     const res = await request(app)
@@ -210,7 +205,6 @@ describe("POST /api/voter/match — response shape", () => {
     db.query.mockResolvedValueOnce({
       rows: [{ id: CANDIDATE_ID, name: "Eeva", photo_url: null, bio: "bio", party_id: "p1", party_name: "Puolue" }],
     });
-    db.query.mockResolvedValueOnce({ rows: [{ session_id: SESSION_UUID }] });
     db.query.mockResolvedValueOnce({ rows: [] });
 
     const res = await request(app)
@@ -236,16 +230,15 @@ describe("POST /api/voter/match — voter response storage", () => {
     db.query.mockResolvedValueOnce({
       rows: [{ id: CANDIDATE_ID, name: "A", photo_url: null, bio: null, party_id: "p1", party_name: "P" }],
     });
-    db.query.mockResolvedValueOnce({ rows: [{ session_id: SESSION_UUID }] });
     db.query.mockResolvedValueOnce({ rows: [] });
 
     await request(app)
       .post("/api/voter/match")
       .send({ answers: { [VALID_UUID]: 2 } });
 
-    const insertCall = db.query.mock.calls[4];
+    const insertCall = db.query.mock.calls[3];
     expect(insertCall[0]).toMatch(/INSERT INTO voter_responses/);
-    expect(insertCall[1]).toContain(SESSION_UUID);
+    expect(insertCall[1][0]).toMatch(UUID_RE); // generated session id leads the params
     expect(insertCall[1]).toContain(VALID_UUID);
     expect(insertCall[1]).toContain(2);
   });
@@ -277,7 +270,6 @@ describe("POST /api/voter/match — stale question IDs", () => {
     db.query.mockResolvedValueOnce({
       rows: [{ id: CANDIDATE_ID, name: "A", photo_url: null, bio: null, party_id: "p1", party_name: "P" }],
     });
-    db.query.mockResolvedValueOnce({ rows: [{ session_id: SESSION_UUID }] });
     db.query.mockResolvedValueOnce({ rows: [] });
 
     const res = await request(app)
@@ -287,7 +279,7 @@ describe("POST /api/voter/match — stale question IDs", () => {
     expect(res.body.results[0].match).toBe(100);
     expect(res.body.results[0].answeredCount).toBe(1);
 
-    const insertCall = db.query.mock.calls[4];
+    const insertCall = db.query.mock.calls[3];
     expect(insertCall[0]).toMatch(/INSERT INTO voter_responses/);
     expect(insertCall[1]).toContain(VALID_UUID);
     expect(insertCall[1]).not.toContain(VALID_UUID2);

@@ -1562,6 +1562,9 @@ function VoterView() {
   const [currentQ, setCurrentQ] = useState(0);
   const [results, setResults] = useState([]);
   const [expandedCandidate, setExpandedCandidate] = useState(null);
+  // Full candidate records (incl. answer explanations) fetched lazily on first
+  // expand — the match response only carries answer values to keep it small.
+  const [candidateDetails, setCandidateDetails] = useState({});
   const [profileCandidate, setProfileCandidate] = useState(null);
   const [constituency, setConstituency] = useState("");
   const [error, setError] = useState(null);
@@ -1888,7 +1891,14 @@ function VoterView() {
         const matchColor = c.match >= 75 ? palette.accent : c.match >= 50 ? palette.warn : palette.danger;
         return (
           <Card key={c.id} style={{ marginBottom: "12px" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "16px", cursor: "pointer" }} onClick={() => setExpandedCandidate(isExpanded ? null : c.id)}>
+            <div style={{ display: "flex", alignItems: "center", gap: "16px", cursor: "pointer" }} onClick={() => {
+              setExpandedCandidate(isExpanded ? null : c.id);
+              if (!isExpanded && !candidateDetails[c.id]) {
+                api.getCandidate(c.id)
+                  .then((full) => setCandidateDetails((prev) => ({ ...prev, [c.id]: full })))
+                  .catch(() => {}); // explanations are progressive enhancement; values already shown
+              }
+            }}>
               <div style={{ position: "relative", flexShrink: 0 }}>
                 <Avatar src={c.photoUrl} name={c.name} size={52} />
                 <div style={{ position: "absolute", bottom: -4, right: -4, background: matchColor, color: "#fff", fontWeight: 800, fontSize: "11px", borderRadius: "10px", padding: "2px 6px", border: `2px solid ${palette.surface}` }}>{c.match}%</div>
@@ -1921,6 +1931,7 @@ function VoterView() {
                   if (!ca) return null;
                   const agree = ca.value === va;
                   const close = Math.abs(ca.value - va) <= 1;
+                  const explanation = candidateDetails[c.id]?.answers?.[q.id]?.explanation;
                   return (
                     <div key={q.id} style={{ marginBottom: "16px" }}>
                       <div style={{ fontSize: "13px", fontWeight: 600, marginBottom: "6px" }}>{q.statement}</div>
@@ -1930,8 +1941,8 @@ function VoterView() {
                           {t.voterCandidate}: <strong>{labels[ca.value]}</strong>{agree && " ✓"}
                         </span>
                       </div>
-                      {ca.explanation && (
-                        <div style={{ marginTop: "6px", padding: "8px 12px", background: palette.surfaceAlt, borderRadius: "6px", fontSize: "13px", color: palette.textMuted, fontStyle: "italic", borderLeft: `3px solid ${palette.border}` }}>"{ca.explanation}"</div>
+                      {explanation && (
+                        <div style={{ marginTop: "6px", padding: "8px 12px", background: palette.surfaceAlt, borderRadius: "6px", fontSize: "13px", color: palette.textMuted, fontStyle: "italic", borderLeft: `3px solid ${palette.border}` }}>"{explanation}"</div>
                       )}
                     </div>
                   );
@@ -1942,7 +1953,7 @@ function VoterView() {
         );
       })}
       <div style={{ marginTop: "24px" }}>
-        <Button variant="ghost" onClick={() => { clearSavedAnswers(); setStep("select"); setVoterAnswers({}); setWeights({}); setConstituency(""); setExpandedCandidate(null); setResults([]); }}>{t.voterStartOver}</Button>
+        <Button variant="ghost" onClick={() => { clearSavedAnswers(); setStep("select"); setVoterAnswers({}); setWeights({}); setConstituency(""); setExpandedCandidate(null); setResults([]); setCandidateDetails({}); }}>{t.voterStartOver}</Button>
       </div>
       {profileCandidate && (
         <CandidateProfile candidate={profileCandidate} onClose={() => setProfileCandidate(null)} activeQuestions={activeQuestions} voterAnswers={voterAnswers} />

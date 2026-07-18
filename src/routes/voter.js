@@ -1,4 +1,5 @@
 const { Router } = require("express");
+const { randomUUID } = require("crypto");
 const db = require("../db/pool");
 const { isValidUUID, validateUUIDArray, isValidRange } = require("../middleware/validation");
 
@@ -94,9 +95,12 @@ router.post("/match", async (req, res, next) => {
       constituencyFilter = `AND c.constituency = $${params.length}`;
     }
 
-    // Fetch all candidate answers for the relevant questions
+    // Fetch all candidate answers for the relevant questions. Explanations are
+    // deliberately not selected: they dominate the response size (free text ×
+    // questions × candidates) and the UI lazy-loads them per candidate via
+    // GET /api/candidates/:id when a result card is expanded.
     const { rows: candidateAnswers } = await db.query(
-      `SELECT ca.candidate_id, ca.question_id, ca.value, ca.explanation
+      `SELECT ca.candidate_id, ca.question_id, ca.value
        FROM candidate_answers ca
        JOIN candidates c ON c.id = ca.candidate_id
        WHERE ca.question_id = ANY($1)
@@ -126,7 +130,6 @@ router.post("/match", async (req, res, next) => {
       if (!answersByCandidate[a.candidate_id]) answersByCandidate[a.candidate_id] = {};
       answersByCandidate[a.candidate_id][a.question_id] = {
         value: a.value,
-        explanation: a.explanation,
       };
     });
 
@@ -171,10 +174,7 @@ router.post("/match", async (req, res, next) => {
 
     let sessionId = null;
     if (includeInResearch !== false && voterQuestionIds.length > 0) {
-      const { rows: [{ session_id }] } = await db.query(
-        "SELECT gen_random_uuid() AS session_id"
-      );
-      sessionId = session_id;
+      sessionId = randomUUID();
       const placeholders = voterQuestionIds
         .map((_, i) => `($1, $${i * 3 + 2}, $${i * 3 + 3}, $${i * 3 + 4})`)
         .join(", ");
@@ -182,11 +182,15 @@ router.post("/match", async (req, res, next) => {
       for (const qId of voterQuestionIds) {
         flatValues.push(qId, parseInt(answers[qId], 10), parseInt(weights[qId], 10) || 0);
       }
-      await db.query(
+      // Fire-and-forget: the research insert must not add latency to the match
+      // response. Losing anonymized rows on a crash is acceptable.
+      db.query(
         `INSERT INTO voter_responses (session_id, question_id, value, weight) VALUES ${placeholders}
          ON CONFLICT DO NOTHING`,
         flatValues
-      );
+      ).catch((err) => {
+        console.error("voter_responses insert failed:", err.message);
+      });
     }
 
     res.json({ sessionId, results });

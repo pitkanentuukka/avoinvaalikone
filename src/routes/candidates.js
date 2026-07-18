@@ -3,6 +3,9 @@ const rateLimit = require("express-rate-limit");
 const db = require("../db/pool");
 const { requirePartyToken } = require("../middleware/auth");
 const { isValidLength, isValidUrl, isValidEmail, validateUUIDParam, isValidUUID } = require("../middleware/validation");
+const { publicCache, noStore } = require("../middleware/cacheControl");
+const microCache = require("../middleware/microCache");
+const redisStore = require("../middleware/rateLimitStore");
 
 const router = Router();
 
@@ -13,13 +16,14 @@ const partyLimiter = rateLimit({
   max: 60,
   message: { error: "Liian monta pyyntöä. Yritä myöhemmin uudelleen." },
   skip: (req) => process.env.NODE_ENV !== "production",
+  store: redisStore("rl:party:"),
 });
-router.use("/party", partyLimiter);
+router.use("/party", partyLimiter, noStore);
 
 // ─── Public ───
 
 // GET /api/candidates — list all candidates with party info
-router.get("/", async (req, res, next) => {
+router.get("/", publicCache(300), microCache(), async (req, res, next) => {
   try {
     const { rows } = await db.query(
       `SELECT c.id, c.name, c.photo_url, c.bio, c.constituency, c.created_at,
@@ -35,7 +39,7 @@ router.get("/", async (req, res, next) => {
 });
 
 // GET /api/candidates/:id — single candidate with all answers
-router.get("/:id", validateUUIDParam("id"), async (req, res, next) => {
+router.get("/:id", validateUUIDParam("id"), publicCache(300), microCache(), async (req, res, next) => {
   try {
     const { rows: cRows } = await db.query(
       `SELECT c.id, c.name, c.photo_url, c.bio, c.constituency, c.created_at,

@@ -2,6 +2,8 @@ const { Router } = require("express");
 const db = require("../db/pool");
 const { requireAdmin } = require("../middleware/auth");
 const { isValidLength, isValidUrl, isValidEmail, isValidUUID, validateUUIDParam } = require("../middleware/validation");
+const { publicCache } = require("../middleware/cacheControl");
+const microCache = require("../middleware/microCache");
 const {
   sendNewQuestionSetNotification,
   sendQuestionSetReviewedNotification,
@@ -100,7 +102,7 @@ async function mergeQuestions(client, keepId, dropId) {
 const publicRouter = Router();
 
 // GET /api/question-sets — list approved, visible sets with their questions
-publicRouter.get("/", async (req, res, next) => {
+publicRouter.get("/", publicCache(300), microCache(), async (req, res, next) => {
   try {
     const { rows: sets } = await db.query(
       `SELECT qs.id, qs.ngo_name, qs.logo_url, qs.title,
