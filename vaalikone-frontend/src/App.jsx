@@ -44,11 +44,26 @@ async function apiFetch(path, options = {}) {
   const { body, adminSecret, ...rest } = options;
   const headers = { "Content-Type": "application/json", ...rest.headers };
   if (adminSecret) headers["Authorization"] = `Bearer ${adminSecret}`;
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...rest,
-    headers,
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  const doFetch = () =>
+    fetch(`${API_BASE}${path}`, {
+      ...rest,
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  let res;
+  try {
+    res = await doFetch();
+    // One retry on transient upstream errors (rolling deploy restarting a
+    // replica). Safe for the match POST too: its insert is ON CONFLICT DO
+    // NOTHING, so a duplicate submission is a no-op server-side.
+    if ([502, 503, 504].includes(res.status)) {
+      await new Promise((r) => setTimeout(r, 1000));
+      res = await doFetch();
+    }
+  } catch {
+    await new Promise((r) => setTimeout(r, 1000));
+    res = await doFetch();
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: "Server error" }));
     throw new Error(err.error || `HTTP ${res.status}`);
@@ -1967,6 +1982,12 @@ export default function App() {
   const _urlParams = new URLSearchParams(window.location.search);
   const _urlPartyToken = _urlParams.get("partyToken") || null;
   const _urlCandidateId = _urlParams.get("candidateId") || null;
+  // The party token is a bearer secret delivered as a magic link. Scrub it
+  // from the address bar once read so it doesn't linger in browser history,
+  // bookmarks, or anything else that copies the URL.
+  if (_urlPartyToken || _urlCandidateId) {
+    window.history.replaceState({}, "", window.location.pathname);
+  }
 
   const [view, setView] = useState(_urlPartyToken ? "candidate" : "home");
   const [partyToken, setPartyToken] = useState(_urlPartyToken);

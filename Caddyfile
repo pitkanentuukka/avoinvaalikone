@@ -1,3 +1,4 @@
 avoinvaalikone.fi {
-    reverse_proxy frontend:80
+    # 8080: frontend nginx runs unprivileged (see vaalikone-frontend/Dockerfile)
+    reverse_proxy frontend:8080
 }

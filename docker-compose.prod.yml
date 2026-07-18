@@ -28,6 +28,33 @@ services:
   frontend:
     ports: !reset []
 
+  # Nightly pg_dump → UpCloud Object Storage (S3-compatible) via rclone.
+  # Production-only: election data lives in a single Docker volume otherwise.
+  # If the BACKUP_S3_* vars are unset the sidecar still runs and keeps a
+  # local dump in backup_data, but logs a warning instead of uploading.
+  backup:
+    build:
+      context: ./scripts/backup
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://vaalikone:vaalikone_password@db:5432/vaalikone
+      BACKUP_BUCKET: ${BACKUP_BUCKET:-}
+      RCLONE_CONFIG_UPCLOUD_TYPE: s3
+      RCLONE_CONFIG_UPCLOUD_PROVIDER: Other
+      RCLONE_CONFIG_UPCLOUD_ENDPOINT: ${BACKUP_S3_ENDPOINT:-}
+      RCLONE_CONFIG_UPCLOUD_ACCESS_KEY_ID: ${BACKUP_S3_ACCESS_KEY:-}
+      RCLONE_CONFIG_UPCLOUD_SECRET_ACCESS_KEY: ${BACKUP_S3_SECRET_KEY:-}
+    volumes:
+      - backup_data:/backups
+    depends_on:
+      db:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   caddy:
     image: caddy:alpine
     container_name: vaalikone-caddy
@@ -51,4 +78,6 @@ volumes:
   caddy_data:
     driver: local
   caddy_config:
+    driver: local
+  backup_data:
     driver: local

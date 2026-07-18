@@ -10,6 +10,10 @@ const pool = new Pool({
   max,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000,
+  // Server-side kill switch for runaway queries: one bad plan must not pin
+  // pool slots across every replica. Generous vs the ~800ms p95 target.
+  // Migrations use their own Client (migrations/run.js) and are unaffected.
+  statement_timeout: parseInt(process.env.PG_STATEMENT_TIMEOUT_MS || "10000", 10),
 });
 
 pool.on("error", (err) => {

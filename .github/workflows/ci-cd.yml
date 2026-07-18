@@ -141,3 +141,12 @@ jobs:
           done
           echo "✗ Health check failed after deploy"
           exit 1
+
+      # The Cloudflare Cache Rule is manual dashboard state; if it vanishes,
+      # origin load multiplies silently. Warn (don't fail the deploy) so the
+      # site stays up while someone recreates the rule per docs/scaling.md.
+      - name: Verify edge cache
+        run: |
+          if ! bash scripts/verify-edge-cache.sh avoinvaalikone.fi; then
+            echo "::warning::Cloudflare edge cache is NOT serving /api/question-sets — recreate the Cache Rule (docs/scaling.md)"
+          fi

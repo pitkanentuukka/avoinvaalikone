@@ -13,8 +13,12 @@ RUN npm ci --only=production
 COPY src ./src
 COPY migrations ./migrations
 
+# Run as the unprivileged node user (the app writes nothing to disk)
+USER node
+
 # Expose port
 EXPOSE 3000
 
-# Start the application
-CMD ["sh", "-c", "npm run migrate && npm start"]
+# exec makes node PID 1 so it receives SIGTERM for graceful shutdown
+# (under `npm start` the signal stops at npm/sh and requests get dropped).
+CMD ["sh", "-c", "node migrations/run.js && exec node src/index.js"]

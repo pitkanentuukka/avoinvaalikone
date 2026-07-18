@@ -65,6 +65,7 @@ services:
       REDIS_URL: redis://redis:6379
       PG_POOL_MAX: ${PG_POOL_MAX:-10}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:80}
+      SENTRY_DSN: ${SENTRY_DSN:-}
       ADMIN_SECRET: ${ADMIN_SECRET:?ADMIN_SECRET must be set (no insecure default)}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}
       SMTP_HOST: ${SMTP_HOST:-mailpit}
@@ -109,10 +110,12 @@ services:
       args:
         VITE_NODE_ENV: ${VITE_NODE_ENV:-production}
         VITE_API_BASE: ${VITE_API_BASE:-}
+        VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
     container_name: vaalikone-frontend
     restart: unless-stopped
     ports:
-      - "80:80"
+      # Container listens on 8080 (unprivileged nginx); host still serves :80.
+      - "80:8080"
     depends_on:
       - backend
     logging: *default-logging

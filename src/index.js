@@ -1,4 +1,5 @@
 require("dotenv").config();
+const Sentry = require("./instrument");
 
 const express = require("express");
 const cors = require("cors");
@@ -8,6 +9,7 @@ const rateLimit = require("express-rate-limit");
 
 const { noStore } = require("./middleware/cacheControl");
 const redisStore = require("./middleware/rateLimitStore");
+const redisClient = require("./redis");
 const { pool } = require("./db/pool");
 const partiesRouter = require("./routes/parties");
 const { publicRouter: questionSetsPublicRouter, adminRouter: questionSetsAdminRouter } = require("./routes/questionSets");
@@ -130,6 +132,12 @@ app.use((req, res) => {
   res.status(404).json({ error: "Reittiä ei löytynyt" });
 });
 
+// Report unhandled errors to Sentry before the JSON error response below
+// (which still owns the client-facing Finnish message).
+if (process.env.SENTRY_DSN) {
+  Sentry.setupExpressErrorHandler(app);
+}
+
 app.use((err, req, res, next) => {
   console.error("Unhandled error:", err);
   res.status(err.status || 500).json({
@@ -142,11 +150,38 @@ app.use((err, req, res, next) => {
 
 // ─── Start ───
 if (require.main === module) {
-  app.listen(PORT, () => {
+  const server = app.listen(PORT, () => {
     console.log(`\n🗳️  Vaalikone API running on http://localhost:${PORT}`);
     console.log(`   Environment: ${process.env.NODE_ENV || "development"}`);
     console.log(`   CORS origin: ${process.env.CORS_ORIGIN || "http://localhost:5173"}\n`);
   });
+
+  // Graceful shutdown: stop accepting connections, let in-flight requests
+  // finish, then release DB/Redis connections so rolling deploys don't drop
+  // requests. Force-exit fallback keeps a stuck socket from hanging the
+  // container past Docker's stop grace period.
+  const shutdown = (signal) => {
+    console.log(`${signal} received — shutting down gracefully`);
+    const force = setTimeout(() => {
+      console.error("Forced shutdown after 10s timeout");
+      process.exit(1);
+    }, 10000);
+    force.unref();
+    server.close(async () => {
+      try {
+        await pool.end();
+        if (redisClient) await redisClient.quit();
+      } catch (err) {
+        console.error("Error during shutdown:", err.message);
+      }
+      process.exit(0);
+    });
+    // server.close() waits for keep-alive sockets (nginx holds them open);
+    // drop the idle ones so close can actually complete.
+    server.closeIdleConnections();
+  };
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
 }
 
 module.exports = app;
