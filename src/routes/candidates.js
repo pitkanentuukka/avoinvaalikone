@@ -17,6 +17,9 @@ const partyLimiter = rateLimit({
   message: { error: "Liian monta pyyntöä. Yritä myöhemmin uudelleen." },
   skip: (req) => process.env.NODE_ENV !== "production",
   store: redisStore("rl:party:"),
+  // Fail open on Redis errors: tokens are high-entropy, so a transient outage
+  // dropping the brute-force cap is a lesser evil than 500ing candidate edits.
+  passOnStoreError: true,
 });
 router.use("/party", partyLimiter, noStore);
 

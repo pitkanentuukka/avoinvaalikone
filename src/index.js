@@ -8,6 +8,7 @@ const morgan = require("morgan");
 const rateLimit = require("express-rate-limit");
 
 const { noStore } = require("./middleware/cacheControl");
+const { isAdminRequest } = require("./middleware/auth");
 const redisStore = require("./middleware/rateLimitStore");
 const redisClient = require("./redis");
 const { pool } = require("./db/pool");
@@ -67,6 +68,12 @@ app.use(express.json({ limit: "1mb" }));
 
 // Stores live in Redis when REDIS_URL is set, so the limits hold across
 // backend replicas instead of multiplying by the replica count.
+//
+// passOnStoreError makes the limiter fail *open*: if Redis is unreachable or
+// rejects a write (single instance, noeviction), the request is allowed
+// through instead of 500ing. Losing shared rate limiting during a Redis
+// outage is far better than dropping the voter-match endpoint on election
+// night — that would be strictly worse than the per-process fallback.
 
 // Rate limiting for admin endpoints (strict)
 const adminLimiter = rateLimit({
@@ -75,6 +82,7 @@ const adminLimiter = rateLimit({
   message: { error: "Liian monta pyyntöä. Yritä myöhemmin uudelleen." },
   skip: (req) => process.env.NODE_ENV !== 'production',
   store: redisStore("rl:admin:"),
+  passOnStoreError: true,
 });
 
 // Rate limiting for public submission endpoints
@@ -84,6 +92,7 @@ const submissionLimiter = rateLimit({
   message: { error: "Liian monta pyyntöä. Yritä myöhemmin uudelleen." },
   skip: (req) => process.env.NODE_ENV !== 'production',
   store: redisStore("rl:submission:"),
+  passOnStoreError: true,
 });
 
 // Rate limiting for voter match endpoint. The default allows for heavy carrier
@@ -97,18 +106,21 @@ const matchLimiter = rateLimit({
   message: { error: "Liian monta pyyntöä. Yritä myöhemmin uudelleen." },
   skip: (req) => process.env.NODE_ENV !== 'production',
   store: redisStore("rl:match:"),
+  passOnStoreError: true,
 });
 
 // ─── Routes ───
 
-// Health check. Deliberately no DB roundtrip (Docker/CI probe it frequently);
-// the pool counters give free load visibility during the event.
+// Health check. Deliberately no DB roundtrip (Docker/CI probe it frequently).
+// Pool counters give free load visibility during the event, but they leak
+// backend saturation to anyone, so they're only returned to an authenticated
+// admin — the operator curls this with the admin token during the event.
 app.get("/api/health", (req, res) => {
-  res.json({
-    status: "ok",
-    timestamp: new Date().toISOString(),
-    pool: { total: pool.totalCount, idle: pool.idleCount, waiting: pool.waitingCount },
-  });
+  const body = { status: "ok", timestamp: new Date().toISOString() };
+  if (isAdminRequest(req)) {
+    body.pool = { total: pool.totalCount, idle: pool.idleCount, waiting: pool.waitingCount };
+  }
+  res.json(body);
 });
 
 // Admin routes (with rate limiting)

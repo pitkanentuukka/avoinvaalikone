@@ -5,22 +5,31 @@ const db = require("../db/pool");
  * Admin auth via Bearer token (timing-safe comparison).
  * Header: Authorization: Bearer <ADMIN_SECRET>
  */
+/**
+ * Returns true iff the request carries a valid admin Bearer token. Does not
+ * send a response — for handlers that only want to *vary* on admin-ness
+ * (e.g. /api/health exposing pool internals) rather than gate access.
+ */
+function isAdminRequest(req) {
+  const auth = req.headers.authorization;
+  if (!auth || !auth.startsWith("Bearer ") || !process.env.ADMIN_SECRET) {
+    return false;
+  }
+  // Hash both values to a fixed length before comparing so the secret's
+  // length cannot be inferred from timing (timingSafeEqual requires equal lengths).
+  const tokenHash  = crypto.createHash("sha256").update(Buffer.from(auth.slice(7))).digest();
+  const secretHash = crypto.createHash("sha256").update(Buffer.from(process.env.ADMIN_SECRET)).digest();
+  return crypto.timingSafeEqual(tokenHash, secretHash);
+}
+
 function requireAdmin(req, res, next) {
   const auth = req.headers.authorization;
   if (!auth || !auth.startsWith("Bearer ")) {
     return res.status(401).json({ error: "Tunnistautuminen vaaditaan" });
   }
-  const token = auth.slice(7);
-  const adminSecret = process.env.ADMIN_SECRET;
-  
-  // Hash both values to a fixed length before comparing so the secret's
-  // length cannot be inferred from timing (timingSafeEqual requires equal lengths).
-  const tokenHash  = crypto.createHash("sha256").update(Buffer.from(token)).digest();
-  const secretHash = crypto.createHash("sha256").update(Buffer.from(adminSecret)).digest();
-  if (!crypto.timingSafeEqual(tokenHash, secretHash)) {
+  if (!isAdminRequest(req)) {
     return res.status(403).json({ error: "Virheellinen ylläpitotunniste" });
   }
-  
   next();
 }
 
@@ -49,4 +58,4 @@ async function requirePartyToken(req, res, next) {
   }
 }
 
-module.exports = { requireAdmin, requirePartyToken };
+module.exports = { requireAdmin, requirePartyToken, isAdminRequest };
