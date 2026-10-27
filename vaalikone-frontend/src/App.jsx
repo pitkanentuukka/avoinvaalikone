@@ -81,17 +81,26 @@ const api = {
   submitQuestionSet: (data) => apiFetch("/question-sets", { method: "POST", body: data }),
   voterMatch: (data) => apiFetch("/voter/match", { method: "POST", body: data }),
 
-  // Party-token gated
-  getPartyCandidates: (token) => apiFetch(`/candidates/party/${token}`),
-  createCandidate: (token, data) =>
-    apiFetch(`/candidates/party/${token}`, { method: "POST", body: data }),
-  updateCandidate: (token, id, data) =>
-    apiFetch(`/candidates/party/${token}/candidates/${id}`, { method: "PUT", body: data }),
-  saveAnswers: (token, id, answers) =>
-    apiFetch(`/candidates/party/${token}/candidates/${id}/answers`, {
-      method: "PUT",
-      body: { answers },
-    }),
+  // Party-token gated (secretary's management access)
+  getPartyOverview: (token) => apiFetch(`/candidates/party/${token}`),
+  rotateRegistrationLink: (token) =>
+    apiFetch(`/candidates/party/${token}/registration-token`, { method: "POST" }),
+  sendCandidateLink: (token, id) =>
+    apiFetch(`/candidates/party/${token}/candidates/${id}/send-link`, { method: "POST" }),
+  removeCandidate: (token, id) =>
+    apiFetch(`/candidates/party/${token}/candidates/${id}`, { method: "DELETE" }),
+
+  // Registration-link gated
+  getRegistration: (token) => apiFetch(`/candidates/register/${token}`),
+  register: (token, data) =>
+    apiFetch(`/candidates/register/${token}`, { method: "POST", body: data }),
+
+  // Candidate-token gated (the candidate's personal link)
+  getOwnProfile: (token) => apiFetch(`/candidates/me/${token}`),
+  updateOwnProfile: (token, data) =>
+    apiFetch(`/candidates/me/${token}`, { method: "PUT", body: data }),
+  saveOwnAnswers: (token, answers) =>
+    apiFetch(`/candidates/me/${token}/answers`, { method: "PUT", body: { answers } }),
 
   // Admin
   getParties: (secret) => apiFetch("/admin/parties", { adminSecret: secret }),
@@ -439,19 +448,19 @@ function CandidateProfile({ candidate, onClose, activeQuestions, voterAnswers })
 }
 
 // ─── Header ───
-function Header({ view, setView, setPartyToken }) {
+function Header({ view, navigate }) {
   const { t } = useTranslation();
   return (
     <header style={{ background: palette.surface, borderBottom: `1px solid ${palette.border}`, padding: "0 16px", position: "sticky", top: 0, zIndex: 100 }}>
       <div style={{ maxWidth: 1100, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", height: "56px", gap: "8px" }}>
-        <div onClick={() => { setView("home"); setPartyToken(null); }} style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 }}>
+        <div onClick={() => navigate("home")} style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 }}>
           <div style={{ width: 28, height: 28, borderRadius: "6px", background: palette.accent, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 800, fontSize: "15px", fontFamily: "'Source Serif 4', Georgia, serif" }}>V</div>
           <span style={{ fontFamily: "'Source Serif 4', Georgia, serif", fontWeight: 700, fontSize: "17px", color: palette.text, letterSpacing: "-0.02em" }}>{t.appName}</span>
           <span style={{ fontSize: "11px", color: palette.textLight, fontWeight: 500, marginLeft: "-4px" }}>{t.appYear}</span>
         </div>
         <nav className="app-nav" style={{ display: "flex", gap: "2px", alignItems: "center", overflowX: "auto", scrollbarWidth: "none", minWidth: 0 }}>
           {[{ key: "home", label: t.navHome }, { key: "voter", label: t.navVoter }, { key: "ngo", label: t.navNgo }, { key: "admin", label: t.navAdmin }, { key: "about", label: t.navAbout }].map((item) => (
-            <button key={item.key} onClick={() => { setView(item.key); if (item.key !== "candidate") setPartyToken(null); }}
+            <button key={item.key} onClick={() => navigate(item.key)}
               style={{
                 padding: "6px 10px", borderRadius: "5px", border: "none", cursor: "pointer", whiteSpace: "nowrap",
                 background: view === item.key ? palette.accentLight : "transparent",
@@ -468,9 +477,13 @@ function Header({ view, setView, setPartyToken }) {
 }
 
 // ─── Home ───
-function HomeView({ setView, setPartyToken }) {
+function HomeView({ navigate, openLink }) {
   const { t } = useTranslation();
   const [tokenInput, setTokenInput] = useState("");
+  const go = () => {
+    const link = tokenLinkFromInput(tokenInput);
+    if (link) openLink(link);
+  };
   return (
     <div style={{ maxWidth: 680, margin: "0 auto", padding: "60px 24px", textAlign: "center" }}>
       <h1 style={{ fontSize: "42px", fontWeight: 800, letterSpacing: "-0.03em", marginBottom: "16px", lineHeight: 1.1 }}>{t.homeTitle}</h1>
@@ -478,12 +491,12 @@ function HomeView({ setView, setPartyToken }) {
         {t.homeSubtitle}
       </p>
       <div style={{ display: "flex", flexDirection: "column", gap: "16px", maxWidth: 400, margin: "0 auto" }}>
-        <Card style={{ cursor: "pointer", textAlign: "left" }} onClick={() => setView("voter")}>
+        <Card style={{ cursor: "pointer", textAlign: "left" }} onClick={() => navigate("voter")}>
           <div style={{ fontSize: "11px", fontWeight: 700, color: palette.accent, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "6px" }}>{t.homeVoterLabel}</div>
           <div style={{ fontWeight: 700, fontSize: "16px", marginBottom: "4px" }}>{t.homeVoterTitle}</div>
           <div style={{ fontSize: "13px", color: palette.textMuted }}>{t.homeVoterDesc}</div>
         </Card>
-        <Card style={{ cursor: "pointer", textAlign: "left" }} onClick={() => setView("ngo")}>
+        <Card style={{ cursor: "pointer", textAlign: "left" }} onClick={() => navigate("ngo")}>
           <div style={{ fontSize: "11px", fontWeight: 700, color: palette.warn, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "6px" }}>{t.homeNgoLabel}</div>
           <div style={{ fontWeight: 700, fontSize: "16px", marginBottom: "4px" }}>{t.homeNgoTitle}</div>
           <div style={{ fontSize: "13px", color: palette.textMuted }}>{t.homeNgoDesc}</div>
@@ -494,7 +507,7 @@ function HomeView({ setView, setPartyToken }) {
           <div style={{ fontSize: "13px", color: palette.textMuted, marginBottom: "12px" }}>{t.homeCandidateDesc}</div>
           <div style={{ display: "flex", gap: "8px" }}>
             <Input value={tokenInput} onChange={setTokenInput} placeholder={t.homeCandidatePlaceholder} />
-            <Button onClick={() => { if (tokenInput.trim()) { setPartyToken(tokenInput.trim()); setView("candidate"); } }} disabled={!tokenInput.trim()} style={{ flexShrink: 0 }}>{t.homeGo}</Button>
+            <Button onClick={go} disabled={!tokenInput.trim()} style={{ flexShrink: 0 }}>{t.homeGo}</Button>
           </div>
         </Card>
       </div>
@@ -1257,91 +1270,299 @@ function NgoView() {
   );
 }
 
-// ─── Candidate ───
-function CandidateView({ partyToken, initialCandidateId }) {
+// ─── Candidate & party portals ───
+
+const selectStyle = {
+  width: "100%", padding: "10px 14px", borderRadius: "6px", border: `1px solid ${palette.border}`,
+  fontFamily: "'Source Serif 4', Georgia, serif", fontSize: "14px",
+  background: palette.surface, color: palette.text, outline: "none", boxSizing: "border-box",
+};
+const labelStyle = { fontSize: "13px", fontWeight: 600, display: "block", marginBottom: "6px" };
+
+const candidateLink = (token) => `${window.location.origin}/?candidateToken=${token}`;
+const registrationLink = (token) => `${window.location.origin}/?register=${token}`;
+
+// Distinct questions across approved sets (a question may be shared by several sets).
+function distinctQuestions(questionSets) {
+  const approved = questionSets.filter((s) => s.status === "approved");
+  return [...new Map(approved.flatMap((s) => s.questions || []).map((q) => [q.id, q])).values()];
+}
+
+function confirmAction(message) {
+  return import.meta.env.VITE_NODE_ENV === "development" || window.confirm(message);
+}
+
+function InvalidLink() {
   const { t } = useTranslation();
-  const [partyData, setPartyData] = useState(null);
+  return (
+    <div style={{ maxWidth: 500, margin: "0 auto", padding: "80px 24px", textAlign: "center" }}>
+      <h2 style={{ fontSize: "24px", fontWeight: 800, marginBottom: "8px" }}>{t.candidateInvalidToken}</h2>
+      <p style={{ color: palette.textMuted }}>{t.candidateInvalidTokenDesc}</p>
+    </div>
+  );
+}
+
+function CopyField({ value }) {
+  const { t } = useTranslation();
+  const [copied, setCopied] = useState(false);
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch { /* clipboard unavailable — the field is still selectable */ }
+  }
+  return (
+    <div style={{ display: "flex", gap: "8px" }}>
+      <input readOnly value={value} onFocus={(e) => e.target.select()} style={{ ...selectStyle, fontFamily: "monospace", fontSize: "12px" }} />
+      <Button variant="secondary" size="sm" onClick={copy} style={{ flexShrink: 0 }}>{copied ? t.copied : t.copy}</Button>
+    </div>
+  );
+}
+
+// Profile fields shared by self-registration and the candidate's own page.
+function ProfileFields({ profile, setField }) {
+  const { t } = useTranslation();
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+      <div>
+        <label style={labelStyle}>{t.candidateFullName} *</label>
+        <Input value={profile.name} onChange={(v) => setField("name", v)} placeholder={t.candidateFullNamePlaceholder} />
+      </div>
+      <div>
+        <label style={labelStyle}>{t.candidateEmailLabel} *</label>
+        <Input value={profile.email} onChange={(v) => setField("email", v)} placeholder={t.candidateEmailPlaceholder} type="email" />
+      </div>
+      <div>
+        <label style={labelStyle}>{t.candidateConstituencyLabel} *</label>
+        <select value={profile.constituency} onChange={(e) => setField("constituency", e.target.value)} style={selectStyle}>
+          <option value="">{t.candidateConstituencyPlaceholder}</option>
+          {FI_CONSTITUENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+      </div>
+      <div>
+        <label style={labelStyle}>{t.candidatePhotoUrl}</label>
+        <Input value={profile.photoUrl} onChange={(v) => setField("photoUrl", v)} placeholder={t.candidatePhotoUrlPlaceholder} />
+        {profile.photoUrl && (
+          <div style={{ marginTop: "8px", display: "flex", alignItems: "center", gap: "10px" }}>
+            <Avatar src={profile.photoUrl} name={profile.name} size={48} />
+            <span style={{ fontSize: "12px", color: palette.textLight }}>{t.preview}</span>
+          </div>
+        )}
+      </div>
+      <div>
+        <label style={labelStyle}>{t.candidateBio}</label>
+        <TextArea value={profile.bio} onChange={(v) => setField("bio", v)} placeholder={t.candidateBioPlaceholder} rows={4} />
+      </div>
+    </div>
+  );
+}
+
+const EMPTY_PROFILE = { name: "", email: "", constituency: "", photoUrl: "", bio: "" };
+const profileComplete = (p) => p.name.trim() && p.email.trim() && p.constituency;
+const profilePayload = (p) => ({
+  name: p.name.trim(),
+  email: p.email.trim(),
+  constituency: p.constituency,
+  photoUrl: p.photoUrl.trim() || null,
+  bio: p.bio.trim() || null,
+});
+
+// Party secretary's portal: share the registration link, follow progress,
+// re-send personal links and remove sign-ups. Cannot edit candidates' answers.
+function PartyView({ partyToken }) {
+  const { t } = useTranslation();
+  const [data, setData] = useState(null);
+  const [questionCount, setQuestionCount] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [invalid, setInvalid] = useState(false);
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(null);
+  const [sent, setSent] = useState({});
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      try {
+        const [overview, qs] = await Promise.all([api.getPartyOverview(partyToken), api.getQuestionSets()]);
+        setData(overview);
+        setQuestionCount(distinctQuestions(qs).length);
+      } catch {
+        setInvalid(true);
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+  }, [partyToken]);
+
+  async function run(key, fn) {
+    setBusy(key);
+    setError(null);
+    try {
+      await fn();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const rotate = () => {
+    if (!confirmAction(t.partyRotateConfirm)) return;
+    run("rotate", async () => {
+      const { registrationToken } = await api.rotateRegistrationLink(partyToken);
+      setData((d) => ({ ...d, party: { ...d.party, registrationToken } }));
+    });
+  };
+
+  const sendLink = (c) => run(`send-${c.id}`, async () => {
+    await api.sendCandidateLink(partyToken, c.id);
+    setSent((s) => ({ ...s, [c.id]: true }));
+  });
+
+  const remove = (c) => {
+    if (!confirmAction(t.partyRemoveConfirm(c.name))) return;
+    run(`remove-${c.id}`, async () => {
+      await api.removeCandidate(partyToken, c.id);
+      setData((d) => ({ ...d, candidates: d.candidates.filter((x) => x.id !== c.id) }));
+    });
+  };
+
+  if (loading) return <LoadingState />;
+  if (invalid) return <InvalidLink />;
+
+  return (
+    <div style={{ maxWidth: 680, margin: "0 auto", padding: "40px 24px" }}>
+      <Badge color="blue">{data.party.name}</Badge>
+      <h2 style={{ fontSize: "28px", fontWeight: 800, letterSpacing: "-0.02em", margin: "12px 0 8px" }}>{t.partyPortalTitle}</h2>
+      <p style={{ color: palette.textMuted, marginBottom: "24px" }}>{t.partyPortalDesc}</p>
+      {error && <ErrorBanner message={error} />}
+
+      <Card style={{ marginBottom: "24px" }}>
+        <div style={{ fontSize: "14px", fontWeight: 700, marginBottom: "6px" }}>{t.partyRegistrationLinkTitle}</div>
+        <p style={{ fontSize: "13px", color: palette.textMuted, margin: "0 0 12px", lineHeight: 1.6 }}>{t.partyRegistrationLinkDesc}</p>
+        <CopyField value={registrationLink(data.party.registrationToken)} />
+        <div style={{ marginTop: "12px" }}>
+          <Button variant="ghost" size="sm" onClick={rotate} loading={busy === "rotate"}>{t.partyRotateLink}</Button>
+        </div>
+      </Card>
+
+      <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "12px" }}>{t.partyCandidatesTitle} ({data.candidates.length})</h3>
+      {data.candidates.length === 0 && <p style={{ color: palette.textMuted, fontSize: "14px" }}>{t.partyNoCandidates}</p>}
+      {data.candidates.map((c) => (
+        <Card key={c.id} style={{ marginBottom: "8px", padding: "14px 20px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "12px", minWidth: 0 }}>
+              <Avatar src={c.photoUrl} name={c.name} size={36} />
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontWeight: 600 }}>{c.name}</div>
+                <div style={{ fontSize: "12px", color: palette.textMuted, overflowWrap: "anywhere" }}>
+                  {c.constituency} · {c.email || t.partyNoEmail} · {c.answerCount}/{questionCount} {t.candidateAnswered}
+                </div>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: "8px" }}>
+              <Button variant="secondary" size="sm" onClick={() => sendLink(c)} disabled={!c.email || sent[c.id]} loading={busy === `send-${c.id}`}>
+                {sent[c.id] ? t.partyLinkSent : t.partySendLink}
+              </Button>
+              <Button variant="danger" size="sm" onClick={() => remove(c)} loading={busy === `remove-${c.id}`}>{t.partyRemoveCandidate}</Button>
+            </div>
+          </div>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+// Self-registration through the party's shared link. On success the candidate
+// continues straight to their own page with their personal token.
+function RegisterView({ registrationToken, onRegistered }) {
+  const { t } = useTranslation();
+  const [partyName, setPartyName] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [invalid, setInvalid] = useState(false);
+  const [profile, setProfile] = useState(EMPTY_PROFILE);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    api.getRegistration(registrationToken)
+      .then((r) => setPartyName(r.party.name))
+      .catch(() => setInvalid(true))
+      .finally(() => setLoading(false));
+  }, [registrationToken]);
+
+  async function submit() {
+    setSaving(true);
+    setError(null);
+    try {
+      const created = await api.register(registrationToken, profilePayload(profile));
+      onRegistered(created.token);
+    } catch (e) {
+      setError(e.message);
+      setSaving(false);
+    }
+  }
+
+  if (loading) return <LoadingState />;
+  if (invalid) return <InvalidLink />;
+
+  return (
+    <div style={{ maxWidth: 600, margin: "0 auto", padding: "40px 24px" }}>
+      <Badge color="blue">{partyName}</Badge>
+      <h2 style={{ fontSize: "28px", fontWeight: 800, letterSpacing: "-0.02em", margin: "12px 0 8px" }}>{t.registerTitle}</h2>
+      <p style={{ color: palette.textMuted, marginBottom: "16px" }}>{t.registerDesc(partyName)}</p>
+      <MarkdownGuide content={candidateGuideContent} label="Ohje vastaamiseen" />
+      {error && <ErrorBanner message={error} />}
+      <Card style={{ marginBottom: "16px" }}>
+        <ProfileFields profile={profile} setField={(k, v) => setProfile((p) => ({ ...p, [k]: v }))} />
+      </Card>
+      <Button onClick={submit} loading={saving} disabled={!profileComplete(profile)}>{t.registerSubmit}</Button>
+    </div>
+  );
+}
+
+// The candidate's own page, reached only through their personal link.
+function CandidateView({ candidateToken, justRegistered }) {
+  const { t } = useTranslation();
+  const [partyName, setPartyName] = useState("");
   const [questionSets, setQuestionSets] = useState([]);
-  const [selectedCandidate, setSelectedCandidate] = useState(null);
-  const [candidateName, setCandidateName] = useState("");
-  const [candidatePhoto, setCandidatePhoto] = useState("");
-  const [candidateBio, setCandidateBio] = useState("");
-  const [candidateEmail, setCandidateEmail] = useState("");
-  const [candidateConstituency, setCandidateConstituency] = useState("");
+  const [profile, setProfile] = useState(EMPTY_PROFILE);
   const [answers, setAnswers] = useState({});
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [invalid, setInvalid] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     async function load() {
       setLoading(true);
-      setError(null);
       try {
-        const [pd, qs] = await Promise.all([
-          api.getPartyCandidates(partyToken),
-          api.getQuestionSets(),
-        ]);
-        setPartyData(pd);
+        const [me, qs] = await Promise.all([api.getOwnProfile(candidateToken), api.getQuestionSets()]);
+        setPartyName(me.party.name);
         setQuestionSets(qs);
-        if (initialCandidateId && pd.candidates) {
-          const match = pd.candidates.find((c) => c.id === initialCandidateId);
-          if (match) {
-            const full = await api.getCandidate(match.id);
-            setSelectedCandidate(full);
-            setCandidateName(full.name);
-            setCandidatePhoto(full.photoUrl || "");
-            setCandidateBio(full.bio || "");
-            setCandidateEmail(full.email || "");
-            setCandidateConstituency(full.constituency || "");
-            setAnswers(
-              Object.fromEntries(
-                Object.entries(full.answers || {}).map(([k, v]) => [k, { value: v.value, text: v.explanation || "" }])
-              )
-            );
-          }
-        }
-      } catch (e) {
-        setError(e.message);
+        setProfile({
+          name: me.name, email: me.email || "", constituency: me.constituency || "",
+          photoUrl: me.photoUrl || "", bio: me.bio || "",
+        });
+        setAnswers(
+          Object.fromEntries(
+            Object.entries(me.answers || {}).map(([k, v]) => [k, { value: v.value, text: v.explanation || "" }])
+          )
+        );
+      } catch {
+        setInvalid(true);
       } finally {
         setLoading(false);
       }
     }
     load();
-  }, [partyToken, initialCandidateId]);
+  }, [candidateToken]);
 
   const approvedSets = questionSets.filter((s) => s.status === "approved");
-  // Dedup shared questions by id so the answered-count denominator is the number of
-  // distinct questions. Questions are still rendered under each NGO section below;
-  // answering a shared question once fills it everywhere (answers are keyed by id).
-  const allQuestions = [...new Map(approvedSets.flatMap((s) => s.questions || []).map((q) => [q.id, q])).values()];
-
-  async function selectExisting(c) {
-    setError(null);
-    try {
-      const full = await api.getCandidate(c.id);
-      setSelectedCandidate(full);
-      setCandidateName(full.name);
-      setCandidatePhoto(full.photoUrl || "");
-      setCandidateBio(full.bio || "");
-      setCandidateEmail(full.email || "");
-      setCandidateConstituency(full.constituency || "");
-      setAnswers(
-        Object.fromEntries(
-          Object.entries(full.answers || {}).map(([k, v]) => [k, { value: v.value, text: v.explanation || "" }])
-        )
-      );
-    } catch (e) {
-      setError(e.message);
-    }
-  }
-
-  function startNew() {
-    setSelectedCandidate("new");
-    setCandidateEmail("");
-    setAnswers({});
-  }
+  const allQuestions = distinctQuestions(questionSets);
 
   function setAnswer(qId, field, val) {
     setAnswers((a) => ({ ...a, [qId]: { ...a[qId], [field]: val } }));
@@ -1351,33 +1572,14 @@ function CandidateView({ partyToken, initialCandidateId }) {
     setSaving(true);
     setError(null);
     try {
-      let candidateId;
-      if (selectedCandidate === "new") {
-        const created = await api.createCandidate(partyToken, {
-          name: candidateName.trim(),
-          photoUrl: candidatePhoto.trim() || null,
-          bio: candidateBio.trim() || null,
-          email: candidateEmail.trim() || null,
-          constituency: candidateConstituency.trim() || null,
-        });
-        candidateId = created.id;
-      } else {
-        candidateId = selectedCandidate.id;
-        await api.updateCandidate(partyToken, candidateId, {
-          name: candidateName.trim(),
-          photoUrl: candidatePhoto.trim() || null,
-          bio: candidateBio.trim() || null,
-          constituency: candidateConstituency.trim() || null,
-        });
-      }
-
+      await api.updateOwnProfile(candidateToken, profilePayload(profile));
       const apiAnswers = {};
       for (const [qId, a] of Object.entries(answers)) {
         if (a.value !== undefined) {
           apiAnswers[qId] = { value: a.value, explanation: a.text || "" };
         }
       }
-      await api.saveAnswers(partyToken, candidateId, apiAnswers);
+      await api.saveOwnAnswers(candidateToken, apiAnswers);
       setSaved(true);
     } catch (e) {
       setError(e.message);
@@ -1387,105 +1589,45 @@ function CandidateView({ partyToken, initialCandidateId }) {
   }
 
   if (loading) return <LoadingState />;
-
-  if (error && !partyData) {
-    return (
-      <div style={{ maxWidth: 500, margin: "0 auto", padding: "80px 24px", textAlign: "center" }}>
-        <h2 style={{ fontSize: "24px", fontWeight: 800, marginBottom: "8px" }}>{t.candidateInvalidToken}</h2>
-        <p style={{ color: palette.textMuted }}>{t.candidateInvalidTokenDesc(partyToken)}</p>
-      </div>
-    );
-  }
+  if (invalid) return <InvalidLink />;
 
   if (saved) {
     return (
       <div style={{ maxWidth: 500, margin: "0 auto", padding: "80px 24px", textAlign: "center" }}>
         <div style={{ width: 64, height: 64, borderRadius: "50%", background: palette.accentLight, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px", fontSize: "28px" }}>✓</div>
         <h2 style={{ fontSize: "24px", fontWeight: 800, marginBottom: "8px" }}>{t.candidateSavedTitle}</h2>
-        <p style={{ color: palette.textMuted }}>{t.candidateSavedDesc(candidateName, partyData?.party?.name)}</p>
-      </div>
-    );
-  }
-
-  if (!selectedCandidate) {
-    return (
-      <div style={{ maxWidth: 600, margin: "0 auto", padding: "40px 24px" }}>
-        <Badge color="blue">{partyData?.party?.name}</Badge>
-        <h2 style={{ fontSize: "28px", fontWeight: 800, letterSpacing: "-0.02em", margin: "12px 0 8px" }}>{t.candidatePortalTitle}</h2>
-        <p style={{ color: palette.textMuted, marginBottom: "16px" }}>{t.candidatePortalDesc}</p>
-        <MarkdownGuide content={candidateGuideContent} label="Ohje vastaamiseen" />
-        {partyData?.candidates?.length > 0 && (
-          <div style={{ marginBottom: "16px" }}>
-            <div style={{ fontSize: "13px", fontWeight: 600, marginBottom: "10px" }}>{t.candidateExisting}</div>
-            {partyData.candidates.map((c) => (
-              <Card key={c.id} onClick={() => selectExisting(c)} style={{ marginBottom: "8px", padding: "14px 20px", cursor: "pointer" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                    <Avatar src={c.photoUrl} name={c.name} size={36} />
-                    <span style={{ fontWeight: 600 }}>{c.name}</span>
-                  </div>
-                  <span style={{ fontSize: "13px", color: palette.textMuted }}>{c.answerCount}/{allQuestions.length} {t.candidateAnswered}</span>
-                </div>
-              </Card>
-            ))}
-          </div>
-        )}
-        <Button variant="secondary" onClick={startNew}>{t.candidateRegister}</Button>
+        <p style={{ color: palette.textMuted, marginBottom: "24px" }}>{t.candidateSavedDesc(profile.name, partyName)}</p>
+        <Button variant="secondary" onClick={() => setSaved(false)}>{t.candidateContinueEditing}</Button>
       </div>
     );
   }
 
   const answeredCount = Object.values(answers).filter((a) => a.value !== undefined).length;
+  const canSave = profileComplete(profile) && answeredCount > 0;
 
   return (
     <div style={{ maxWidth: 740, margin: "0 auto", padding: "40px 24px" }}>
+      {justRegistered && (
+        <div style={{ padding: "16px 20px", borderRadius: "8px", background: palette.accentLight, border: "1px solid #C5D9CC", marginBottom: "24px" }}>
+          <div style={{ fontSize: "14px", fontWeight: 700, marginBottom: "6px" }}>{t.candidateLinkTitle}</div>
+          <p style={{ fontSize: "13px", color: palette.text, margin: "0 0 12px", lineHeight: 1.6 }}>{t.candidateLinkDesc}</p>
+          <CopyField value={candidateLink(candidateToken)} />
+        </div>
+      )}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", marginBottom: "24px", flexWrap: "wrap", gap: "12px" }}>
         <div>
-          <Badge color="blue">{partyData?.party?.name}</Badge>
+          <Badge color="blue">{partyName}</Badge>
           <h2 style={{ fontSize: "24px", fontWeight: 800, margin: "8px 0 4px" }}>{t.candidateAnswerTitle}</h2>
           <p style={{ color: palette.textMuted, fontSize: "14px" }}>{answeredCount} / {allQuestions.length} {t.candidateAnsweredCount}</p>
         </div>
-        <Button onClick={save} loading={saving} disabled={!candidateName.trim() || !candidateConstituency || answeredCount === 0}>{t.candidateSaveAnswers}</Button>
+        <Button onClick={save} loading={saving} disabled={!canSave}>{t.candidateSaveAnswers}</Button>
       </div>
+      <MarkdownGuide content={candidateGuideContent} label="Ohje vastaamiseen" />
       {error && <ErrorBanner message={error} />}
 
       <Card style={{ marginBottom: "24px" }}>
         <div style={{ fontSize: "14px", fontWeight: 700, marginBottom: "16px" }}>{t.candidateProfile}</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-          <div>
-            <label style={{ fontSize: "13px", fontWeight: 600, display: "block", marginBottom: "6px" }}>{t.candidateFullName} {selectedCandidate === "new" && "*"}</label>
-            <Input value={candidateName} onChange={setCandidateName} placeholder={t.candidateFullNamePlaceholder} />
-          </div>
-          <div>
-            <label style={{ fontSize: "13px", fontWeight: 600, display: "block", marginBottom: "6px" }}>{t.candidatePhotoUrl}</label>
-            <Input value={candidatePhoto} onChange={setCandidatePhoto} placeholder={t.candidatePhotoUrlPlaceholder} />
-            {candidatePhoto && (
-              <div style={{ marginTop: "8px", display: "flex", alignItems: "center", gap: "10px" }}>
-                <Avatar src={candidatePhoto} name={candidateName} size={48} />
-                <span style={{ fontSize: "12px", color: palette.textLight }}>{t.preview}</span>
-              </div>
-            )}
-          </div>
-          <div>
-            <label style={{ fontSize: "13px", fontWeight: 600, display: "block", marginBottom: "6px" }}>{t.candidateBio}</label>
-            <TextArea value={candidateBio} onChange={setCandidateBio} placeholder={t.candidateBioPlaceholder} rows={4} />
-          </div>
-          <div>
-            <label style={{ fontSize: "13px", fontWeight: 600, display: "block", marginBottom: "6px" }}>{t.candidateEmailLabel}</label>
-            <Input value={candidateEmail} onChange={setCandidateEmail} placeholder={t.candidateEmailPlaceholder} type="email" />
-          </div>
-          <div>
-            <label style={{ fontSize: "13px", fontWeight: 600, display: "block", marginBottom: "6px" }}>{t.candidateConstituencyLabel} *</label>
-            <select value={candidateConstituency} onChange={(e) => setCandidateConstituency(e.target.value)} style={{
-              width: "100%", padding: "10px 14px", borderRadius: "6px", border: `1px solid ${palette.border}`,
-              fontFamily: "'Source Serif 4', Georgia, serif", fontSize: "14px",
-              background: palette.surface, color: palette.text, outline: "none", boxSizing: "border-box",
-            }}>
-              <option value="">{t.candidateConstituencyPlaceholder}</option>
-              {FI_CONSTITUENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
-          </div>
-        </div>
+        <ProfileFields profile={profile} setField={(k, v) => setProfile((p) => ({ ...p, [k]: v }))} />
       </Card>
 
       {approvedSets.map((qs) => (
@@ -1510,7 +1652,7 @@ function CandidateView({ partyToken, initialCandidateId }) {
       ))}
 
       <div style={{ textAlign: "center", paddingBottom: "40px" }}>
-        <Button size="lg" onClick={save} loading={saving} disabled={!candidateName.trim() || !candidateConstituency || answeredCount === 0}>
+        <Button size="lg" onClick={save} loading={saving} disabled={!canSave}>
           {t.candidateSaveAnswers} ({answeredCount}/{allQuestions.length})
         </Button>
       </div>
@@ -1978,21 +2120,59 @@ function VoterView() {
 }
 
 // ─── App ───
+
+// Map magic-link query params to the view they open. Candidate links win over
+// the others so an old link carrying several params lands somewhere sensible.
+function tokenLinkFromParams(params) {
+  const candidateToken = params.get("candidateToken");
+  if (candidateToken) return { view: "candidate", token: candidateToken };
+  const registrationToken = params.get("register");
+  if (registrationToken) return { view: "register", token: registrationToken };
+  const partyToken = params.get("partyToken");
+  if (partyToken) return { view: "party", token: partyToken };
+  return null;
+}
+
+// The home page accepts either a pasted link (any of the above) or a bare
+// party token, which is what party secretaries have historically been given.
+function tokenLinkFromInput(value) {
+  const text = value.trim();
+  if (!text) return null;
+  if (text.includes("?")) {
+    try {
+      const link = tokenLinkFromParams(new URL(text, window.location.origin).searchParams);
+      if (link) return link;
+    } catch { /* not a URL — fall through to a bare token */ }
+  }
+  return { view: "party", token: text };
+}
+
 export default function App() {
-  const _urlParams = new URLSearchParams(window.location.search);
-  const _urlPartyToken = _urlParams.get("partyToken") || null;
-  const _urlCandidateId = _urlParams.get("candidateId") || null;
-  // The party token is a bearer secret delivered as a magic link. Scrub it
-  // from the address bar once read so it doesn't linger in browser history,
-  // bookmarks, or anything else that copies the URL.
-  if (_urlPartyToken || _urlCandidateId) {
-    window.history.replaceState({}, "", window.location.pathname);
+  const [initialLink] = useState(() => {
+    const link = tokenLinkFromParams(new URLSearchParams(window.location.search));
+    // Tokens are bearer secrets delivered as magic links. Scrub them from the
+    // address bar once read so they don't linger in browser history,
+    // bookmarks, or anything else that copies the URL.
+    if (link) window.history.replaceState({}, "", window.location.pathname);
+    return link;
+  });
+
+  const [view, setView] = useState(initialLink?.view || "home");
+  const [token, setToken] = useState(initialLink?.token || null);
+  const [justRegistered, setJustRegistered] = useState(false);
+  const [lang, setLang] = useState(DEFAULT_LANG);
+
+  function openLink(link) {
+    setToken(link.token);
+    setJustRegistered(false);
+    setView(link.view);
   }
 
-  const [view, setView] = useState(_urlPartyToken ? "candidate" : "home");
-  const [partyToken, setPartyToken] = useState(_urlPartyToken);
-  const [initialCandidateId] = useState(_urlCandidateId);
-  const [lang, setLang] = useState(DEFAULT_LANG);
+  function navigate(next) {
+    setToken(null);
+    setJustRegistered(false);
+    setView(next);
+  }
 
   const t = translations[lang] || translations.fi;
   const langValue = useMemo(() => ({ lang, t, setLang }), [lang, t]);
@@ -2002,12 +2182,19 @@ export default function App() {
       <div style={{ minHeight: "100vh", background: palette.bg, fontFamily: "'Source Serif 4', Georgia, serif", color: palette.text }}>
         <style>{`@keyframes spin { to { transform: rotate(360deg); } } .app-nav::-webkit-scrollbar { display: none; }`}</style>
         <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&display=swap" rel="stylesheet" />
-        <Header view={view} setView={setView} setPartyToken={setPartyToken} />
-        {view === "home" && <HomeView setView={setView} setPartyToken={setPartyToken} />}
+        <Header view={view} navigate={navigate} />
+        {view === "home" && <HomeView navigate={navigate} openLink={openLink} />}
         {view === "about" && <AboutView />}
         {view === "admin" && <AdminView />}
         {view === "ngo" && <NgoView />}
-        {view === "candidate" && <CandidateView partyToken={partyToken} initialCandidateId={initialCandidateId} />}
+        {view === "party" && <PartyView partyToken={token} />}
+        {view === "register" && (
+          <RegisterView
+            registrationToken={token}
+            onRegistered={(candidateToken) => { openLink({ view: "candidate", token: candidateToken }); setJustRegistered(true); }}
+          />
+        )}
+        {view === "candidate" && <CandidateView key={token} candidateToken={token} justRegistered={justRegistered} />}
         {view === "voter" && <VoterView />}
       </div>
     </LanguageContext.Provider>

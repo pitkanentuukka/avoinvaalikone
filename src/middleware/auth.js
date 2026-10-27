@@ -34,9 +34,9 @@ function requireAdmin(req, res, next) {
 }
 
 /**
- * Party token auth.
+ * Party token auth — the party secretary's management access.
  * Looks up the party by token from the URL param :partyToken
- * and attaches req.party = { id, name, token, email }.
+ * and attaches req.party = { id, name, token, email, registration_token }.
  */
 async function requirePartyToken(req, res, next) {
   const { partyToken } = req.params;
@@ -45,7 +45,7 @@ async function requirePartyToken(req, res, next) {
   }
   try {
     const { rows } = await db.query(
-      "SELECT id, name, token, email FROM parties WHERE token = $1",
+      "SELECT id, name, token, email, registration_token FROM parties WHERE token = $1",
       [partyToken]
     );
     if (rows.length === 0) {
@@ -58,4 +58,63 @@ async function requirePartyToken(req, res, next) {
   }
 }
 
-module.exports = { requireAdmin, requirePartyToken, isAdminRequest };
+/**
+ * Candidate token auth — the candidate's personal link.
+ * Looks up the candidate by URL param :candidateToken and attaches
+ * req.candidate = { id, party_id, party_name }.
+ */
+async function requireCandidateToken(req, res, next) {
+  const { candidateToken } = req.params;
+  if (!candidateToken) {
+    return res.status(400).json({ error: "Ehdokastunniste puuttuu" });
+  }
+  try {
+    const { rows } = await db.query(
+      `SELECT c.id, c.party_id, p.name AS party_name
+       FROM candidates c
+       JOIN parties p ON p.id = c.party_id
+       WHERE c.token = $1`,
+      [candidateToken]
+    );
+    if (rows.length === 0) {
+      return res.status(404).json({ error: "Virheellinen ehdokastunniste" });
+    }
+    req.candidate = rows[0];
+    next();
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Registration link auth — the party's shareable sign-up link.
+ * Looks up the party by URL param :registrationToken and attaches
+ * req.party = { id, name }. Grants nothing beyond creating a candidate.
+ */
+async function requireRegistrationToken(req, res, next) {
+  const { registrationToken } = req.params;
+  if (!registrationToken) {
+    return res.status(400).json({ error: "Rekisteröitymistunniste puuttuu" });
+  }
+  try {
+    const { rows } = await db.query(
+      "SELECT id, name FROM parties WHERE registration_token = $1",
+      [registrationToken]
+    );
+    if (rows.length === 0) {
+      return res.status(404).json({ error: "Virheellinen rekisteröitymislinkki" });
+    }
+    req.party = rows[0];
+    next();
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = {
+  requireAdmin,
+  requirePartyToken,
+  requireCandidateToken,
+  requireRegistrationToken,
+  isAdminRequest,
+};

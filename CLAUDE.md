@@ -47,12 +47,14 @@ docker compose down                       # Stop all services
 - **Database:** `src/db/pool.js` — PostgreSQL connection pool via `pg`
 - **Auth middleware:** `src/middleware/auth.js`
   - `requireAdmin` — timing-safe comparison against `ADMIN_SECRET` env var
-  - `requirePartyToken` — looks up party by URL param `:partyToken`, attaches `req.party`
+  - `requirePartyToken` — looks up party by URL param `:partyToken`, attaches `req.party` (secretary's management access)
+  - `requireRegistrationToken` — looks up party by `:registrationToken` (shareable sign-up link), attaches `req.party`
+  - `requireCandidateToken` — looks up candidate by `:candidateToken` (personal link), attaches `req.candidate`
 - **Validation middleware:** `src/middleware/validation.js` — UUID validation, field length checks, range validation
 - **Routes:**
   - `src/routes/parties.js` — admin CRUD for political parties; party creation returns a secret `token`
   - `src/routes/questionSets.js` — NGO question set submissions (public), approval workflow (admin), and duplicate-question merging. A question is canonical and may belong to **several** sets via the `question_set_questions` join table; `mergeQuestions()` moves a duplicate's set links onto a canonical question and reconciles candidate answers (the canonical question's own answer is authoritative — its wording is what voters see; a duplicate's answer is carried over only for candidates who never answered the canonical question). Inline merge happens per-question during `/review` (a `duplicateOf` field on each review item); after publish, `POST /admin/question-sets/merge-questions` (`{ keepId, dropIds }`) merges retroactively.
-  - `src/routes/candidates.js` — public reads + party-token-gated writes for candidate profiles and answers
+  - `src/routes/candidates.js` — public reads plus three token tiers. **Party token** (`/party/:partyToken`): overview, rotate the registration link, re-send a candidate's link, remove candidates — it never sees candidate tokens, so it cannot edit profiles or answers. **Registration token** (`/register/:registrationToken`): candidate self-registration; candidates are visible to voters immediately; same name + email again re-sends the existing link instead of creating a duplicate. **Candidate token** (`/me/:candidateToken`): the only credential that can edit a candidate's own profile and answers.
   - `src/routes/voter.js` — match computation: weighted similarity scoring (answers 0–4 scale, weights 0–3)
 
 **Rate limiting** (skipped in development for admin endpoints):
@@ -88,5 +90,6 @@ Copy `.env.example` to `.env`. Required: `DATABASE_URL`, `ADMIN_SECRET`. Optiona
 
 - Error messages and UI text are in **Finnish**
 - All DB queries use parameterized statements (`$1`, `$2`, …) — no string interpolation
-- Admin endpoints are mounted at `/api/admin/*`; party-gated endpoints use `/api/candidates/party/:partyToken/...`
+- Admin endpoints are mounted at `/api/admin/*`; token-gated endpoints use `/api/candidates/party/:partyToken/...`, `/api/candidates/register/:registrationToken`, and `/api/candidates/me/:candidateToken/...`
+- Tokens are 24 random bytes from pgcrypto (`encode(gen_random_bytes(24), 'hex')` column defaults; rotate with `SET col = DEFAULT`)
 - Migrations run as a single SQL transaction (`migrations/001_initial.sql`); new migrations should follow the same versioned pattern and update `schema_migrations`

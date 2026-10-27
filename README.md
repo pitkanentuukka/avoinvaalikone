@@ -20,7 +20,7 @@ The whole system is shaped around this idea. Three groups of people interact wit
 - **🛡️ The administrator** is the neutral moderator. They review every incoming set and approve, edit, or reject it. The admin does **not** author the questions — their job is curation and quality control across all the organizations' submissions. Only approved sets become visible to candidates and voters.
 - **🗳️ Voters** don't get one monolithic questionnaire. On starting the compass they see **every approved set listed by theme and by the organization behind it**, and they freely **mix and match** which sets to answer — all of them, or just the themes they care about, drawn from whichever organizations they like. Their match is computed only over the questions they actually chose.
 
-Candidates, in turn, answer the pooled approved questions (via a per-party link) so that whatever combination a voter picks, there are candidate answers to match against.
+Candidates, in turn, answer the pooled approved questions (each through a personal link, after signing up via their party's registration link) so that whatever combination a voter picks, there are candidate answers to match against.
 
 ```
       Many NGOs                Admin                      Voter
@@ -86,7 +86,7 @@ vaalikone/
 │   ├── db/pool.js            # PostgreSQL connection pool
 │   ├── email.js              # Nodemailer SMTP notifications
 │   ├── middleware/
-│   │   ├── auth.js           # requireAdmin (timing-safe Bearer), requirePartyToken
+│   │   ├── auth.js           # requireAdmin (timing-safe Bearer), party/registration/candidate token lookups
 │   │   └── validation.js     # UUID, field length, range validators
 │   └── routes/
 │       ├── parties.js        # Admin CRUD for political parties
@@ -118,8 +118,8 @@ vaalikone/
 
 | Table | Key Columns | Notes |
 |-------|-------------|-------|
-| **parties** | id, name, token, email | `token` is shared with party secretaries |
-| **candidates** | id, party_id, name, photo_url, bio, email | Linked to a party |
+| **parties** | id, name, token, registration_token, email | `token`: secretary's management access; `registration_token`: shareable sign-up link (rotatable) |
+| **candidates** | id, party_id, name, photo_url, bio, email, token | `token`: the candidate's personal link — the only credential that can edit their profile and answers |
 | **candidate_answers** | candidate_id, question_id, value (0–4), explanation | Unique per candidate+question |
 | **question_sets** | id, ngo_name, ngo_email, title, status, hidden | `status`: `pending \| approved \| rejected` |
 | **questions** | id, statement | Canonical question; may belong to several sets |
@@ -137,7 +137,9 @@ All primary keys are UUIDs (`gen_random_uuid()`). New migrations should follow t
 | Type | Mechanism |
 |------|-----------|
 | Admin | `Authorization: Bearer <ADMIN_SECRET>` header |
-| Party writes | Party token in URL: `/api/candidates/party/:partyToken/...` |
+| Party secretary | Party token in URL: `/api/candidates/party/:partyToken/...` (overview, re-send links, remove candidates — cannot edit answers) |
+| Candidate sign-up | Registration token in URL: `/api/candidates/register/:registrationToken` |
+| Candidate | Personal token in URL: `/api/candidates/me/:candidateToken/...` |
 | Public | No auth required |
 
 ---
@@ -155,7 +157,7 @@ All primary keys are UUIDs (`gen_random_uuid()`). New migrations should follow t
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/admin/parties` | List all parties |
-| POST | `/api/admin/parties` | Create party — response includes the secret `token` |
+| POST | `/api/admin/parties` | Create party — response includes the secret `token` and `registration_token` |
 | DELETE | `/api/admin/parties/:id` | Delete party |
 
 ```json
@@ -201,18 +203,33 @@ A *question set* is one organization's themed bundle of statements — the core 
 | GET | `/api/candidates` | All candidates + party info |
 | GET | `/api/candidates/:id` | Single candidate + all answers |
 
-**Party-token gated:**
+**Party-token gated** (party secretary):
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/candidates/party/:partyToken` | Party's candidates |
-| POST | `/api/candidates/party/:partyToken` | Register new candidate |
-| PUT | `/api/candidates/party/:partyToken/candidates/:id` | Update profile |
-| PUT | `/api/candidates/party/:partyToken/candidates/:id/answers` | Save answers (upsert) |
+| GET | `/api/candidates/party/:partyToken` | Party info incl. `registrationToken`, candidates with answer counts (never their tokens) |
+| POST | `/api/candidates/party/:partyToken/registration-token` | Rotate the registration link |
+| POST | `/api/candidates/party/:partyToken/candidates/:id/send-link` | Email the candidate their personal link (to their own address) |
+| DELETE | `/api/candidates/party/:partyToken/candidates/:id` | Remove a candidate |
+
+**Registration-token gated** (self-registration; candidates are visible to voters immediately):
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/candidates/register/:registrationToken` | Party name |
+| POST | `/api/candidates/register/:registrationToken` | Register — returns the candidate incl. personal `token`, also emailed. Same name + email again → 409 and the existing link is re-sent |
+
+**Candidate-token gated** (the candidate's personal link):
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/candidates/me/:candidateToken` | Own profile, party and answers |
+| PUT | `/api/candidates/me/:candidateToken` | Update own profile (full replace) |
+| PUT | `/api/candidates/me/:candidateToken/answers` | Save own answers (upsert) |
 
 ```json
-// POST body (new candidate)
-{ "name": "Matti Meikäläinen", "email": "matti@example.fi", "photoUrl": "...", "bio": "..." }
+// POST/PUT body (profile) — name, email and constituency required
+{ "name": "Matti Meikäläinen", "email": "matti@example.fi", "constituency": "Helsingin vaalipiiri", "photoUrl": "...", "bio": "..." }
 
 // PUT body (answers)
 {
@@ -265,7 +282,9 @@ The entire React SPA lives in [vaalikone-frontend/src/App.jsx](vaalikone-fronten
 | Results | (within voter flow) | Candidate match results with comparison |
 | Admin | `?view=admin` | Manage parties, approve/reject question sets |
 | NGO | `?view=ngo` | Submit a new question set |
-| Candidate | `?view=candidate&partyToken=…` | Register/edit profile and submit answers |
+| Party portal | `?partyToken=…` | Share registration link, follow progress, re-send links, remove candidates |
+| Registration | `?register=…` | Candidate self-registration |
+| Candidate | `?candidateToken=…` | Candidate edits own profile and answers |
 
 **API client:** All calls go through `apiFetch()` with automatic snake_case ↔ camelCase conversion. The `API_BASE` constant at the top of `App.jsx` points to `http://localhost:3000/api` — update this for non-local deployments.
 

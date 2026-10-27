@@ -101,15 +101,19 @@ async function mergeQuestions(request, keepId, dropIds) {
   );
 }
 
-/**
- * Register a candidate via party token. Returns candidate object (snake_case keys).
+let emailCounter = 0;
 
-* Backend expects camelCase body: { name, photoUrl, bio, email, constituency }
+/**
+ * Self-register a candidate through the party's registration link.
+ * Returns the candidate object (snake_case keys) including its personal `token`.
+ * Backend expects camelCase body: { name, photoUrl, bio, email, constituency }
  */
-async function createCandidate(request, partyToken, { name, email, photoUrl, bio, constituency }) {
-  const { body } = await post(request, `/candidates/party/${partyToken}`, {
+async function createCandidate(request, party, { name, email, photoUrl, bio, constituency }) {
+  const { body } = await post(request, `/candidates/register/${party.registration_token}`, {
     name,
-    email: email || null,
+    // Email is required; make the default unique so repeated names in one
+    // party aren't treated as "lost my link" re-registrations.
+    email: email || `cand-${Date.now()}-${++emailCounter}@test.fi`,
     photoUrl: photoUrl || null,
     bio: bio || null,
     constituency: constituency || "Helsingin vaalipiiri",
@@ -117,13 +121,9 @@ async function createCandidate(request, partyToken, { name, email, photoUrl, bio
   return body;
 }
 
-/** Save candidate answers via party token. */
-async function saveAnswers(request, partyToken, candidateId, answers) {
-  const { body } = await put(
-    request,
-    `/candidates/party/${partyToken}/candidates/${candidateId}/answers`,
-    { answers }
-  );
+/** Save answers with the candidate's own token (from createCandidate). */
+async function saveAnswers(request, candidate, answers) {
+  const { body } = await put(request, `/candidates/me/${candidate.token}/answers`, { answers });
   return body;
 }
 
@@ -164,7 +164,7 @@ async function fullSetup(request, opts = {}) {
 
   const questions = qs.questions;
   const candidateName = opts.candidateName || "Testi Ehdokas";
-  const candidate = await createCandidate(request, party.token, {
+  const candidate = await createCandidate(request, party, {
     name: candidateName,
     email: "candidate@test.fi",
   });
@@ -174,7 +174,7 @@ async function fullSetup(request, opts = {}) {
   questions.forEach((q, i) => {
     answerMap[q.id] = { value: answerValues[i % answerValues.length], explanation: "" };
   });
-  await saveAnswers(request, party.token, candidate.id, answerMap);
+  await saveAnswers(request, candidate, answerMap);
 
   return { party, questionSet: qs, candidate, questions };
 }

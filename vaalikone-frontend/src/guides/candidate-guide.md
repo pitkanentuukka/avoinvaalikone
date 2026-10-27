@@ -1,43 +1,38 @@
 # Ohje ehdokkaalle — näin vastaat vaalikoneessa
 
-Tämä ohje neuvoo askel askeleelta, miten kirjaudut ehdokasportaaliin, täytät profiilisi ja vastaat kysymyksiin.
+Tämä ohje neuvoo askel askeleelta, miten rekisteröidyt ehdokkaaksi, täytät profiilisi ja vastaat kysymyksiin.
 
 ---
 
 ## Mitä tarvitset ennen kuin aloitat
 
-Tarvitset **puoluesihteeriltä saamasi tunnisteen**. Se on lyhyt merkkijono (esim. `abc123`), joka on yksilöllinen puolueellesi. Ilman sitä et pääse kirjautumaan. Jos sinulla ei ole tunnistetta, pyydä se puolueesi sihteeriltä tai yhteyshenkilöltä.
+Tarvitset **puolueesi rekisteröitymislinkin**. Puolueesi yhteyshenkilö jakaa sen ehdokkaille esimerkiksi puolueen sisäisissä kanavissa. Jos sinulla ei ole linkkiä, pyydä se puolueesi sihteeriltä tai yhteyshenkilöltä.
 
 ---
 
-## Portaaliin kirjautuminen
+## Ensimmäinen kerta: rekisteröidy ehdokkaaksi
 
-1. Avaa vaalikone selaimessa
-2. Klikkaa etusivulla **Ehdokas**-kohtaa
-3. Kirjoita puoluesihteeriltä saamasi tunniste kenttään
-4. Klikkaa **Siirry**
+1. Avaa puolueeltasi saamasi rekisteröitymislinkki
+2. Tarkista, että sivun yläosassa näkyy oikean puolueen nimi
+3. Täytä profiilitietosi (ks. alla) ja klikkaa **Rekisteröidy**
 
-Voit myös saada suoran linkin puolueeltasi — siinä tapauksessa tunniste on jo mukana eikä sinun tarvitse syöttää sitä erikseen.
+Rekisteröitymisen jälkeen saat **henkilökohtaisen linkin**. Se näytetään heti sivun yläosassa, ja lähetämme sen myös sähköpostiisi. Tallenna linkki: sillä pääset myöhemmin muokkaamaan profiiliasi ja vastauksiasi.
 
-Jos tunniste ei toimi, tarkista kirjoitusasu huolella tai pyydä puoluesihteeriltä uusi.
+> **Pidä henkilökohtainen linkkisi omana tietonasi.** Kuka tahansa linkin haltija voi muuttaa vastauksiasi. Älä jaa sitä, äläkä käytä rekisteröitymislinkkiä uudelleen palatessasi.
 
----
-
-## Ensimmäinen kerta: rekisteröidy uutena ehdokkaana
-
-Jos olet portaalissa ensimmäistä kertaa, klikkaa **+ Rekisteröidy uutena ehdokkaana**.
+Näyt äänestäjille heti rekisteröitymisen jälkeen.
 
 ### Profiilitietosi
 
 | Kenttä | Pakollinen | Kuvaus |
 |--------|-----------|--------|
 | Koko nimi | Kyllä | Täysi nimesi, niin kuin se näkyy äänestäjille |
-| Vaalipiiri | Suositeltava | Vaalipiiri, jossa olet ehdolla |
-| Sähköpostiosoite | Suositeltava | Saat ilmoituksen, jos vaalikoneeseeen lisätään uusia kysymyksiä |
+| Sähköpostiosoite | Kyllä | Saat henkilökohtaisen linkkisi ja ilmoituksen, kun vaalikoneeseen lisätään uusia kysymyksiä |
+| Vaalipiiri | Kyllä | Vaalipiiri, jossa olet ehdolla |
 | Esittelyteksti | Vapaaehtoinen | Lyhyt kuvaus itsestäsi, taustastasi ja tärkeimmistä tavoitteistasi |
 | Profiilikuvan URL | Vapaaehtoinen | Linkki verkkoon ladattuun kuvaasi (esim. puolueen sivuilla) |
 
-> **Vinkki sähköpostista:** Antamalla sähköpostiosoitteesi saat ilmoituksen, kun vaalikoneeseen tulee uusia kysymyssarjoja. Näin sinulla on parempi mahdollisuus vastata kaikkiin kysymyksiin ennen vaaleja.
+> **Vinkki sähköpostista:** Käytä osoitetta, jota luet. Saat sinne henkilökohtaisen linkkisi sekä ilmoituksen, kun vaalikoneeseen tulee uusia kysymyssarjoja.
 
 ---
 
@@ -74,7 +69,7 @@ Sivun yläosassa näet laskurin, esim. **12 / 30 vastattu**. Sinun ei tarvitse v
 Kun olet valmis, klikkaa sivun alaosassa olevaa **Tallenna vastaukset** -nappia.
 
 - Napin vieressä näkyy vastattujen kysymysten määrä, esim. `Tallenna vastaukset (18/30)`
-- Tallentaminen onnistuu, kun olet kirjoittanut nimesi ja vastannut vähintään yhteen kysymykseen
+- Tallentaminen onnistuu, kun nimi, sähköpostiosoite ja vaalipiiri on täytetty ja olet vastannut vähintään yhteen kysymykseen
 - Tallentamisen jälkeen näet vahvistusviestin
 
 ---
@@ -83,11 +78,12 @@ Kun olet valmis, klikkaa sivun alaosassa olevaa **Tallenna vastaukset** -nappia.
 
 Voit tallentaa vastaukset vaikka olisit vastannut vain osaan kysymyksistä ja palata jatkamaan myöhemmin.
 
-Kun palaat portaaliin:
-1. Syötä sama tunniste kuin ennenkin
-2. Näet listan puolueesi ehdokkaista — klikkaa omaa nimeäsi
-3. Aiemmat vastauksesi ja profiilitietosi latautuvat valmiiksi
-4. Muokkaa haluamiasi kohtia ja tallenna uudelleen
+Kun palaat:
+1. Avaa **henkilökohtainen linkkisi** (rekisteröitymisen yhteydessä saamasi tai sähköpostiin tullut)
+2. Aiemmat vastauksesi ja profiilitietosi latautuvat valmiiksi
+3. Muokkaa haluamiasi kohtia ja tallenna uudelleen
+
+Voit myös liittää henkilökohtaisen linkkisi vaalikoneen etusivun **Ehdokkaat ja puolueet** -kenttään.
 
 Vastaukset **päivittyvät** — aikaisemmat vastauksesi eivät jää näkyviin, vaan uusin tallennus korvaa ne.
 
@@ -95,7 +91,7 @@ Vastaukset **päivittyvät** — aikaisemmat vastauksesi eivät jää näkyviin,
 
 ## Jos vaalikoneeseeen tulee uusia kysymyksiä
 
-Jos olet antanut sähköpostiosoitteesi, saat automaattisen ilmoituksen kun uusi kysymyssarja julkaistaan. Palaa tuolloin portaaliin ja vastaa uusiin kysymyksiin samalla tavalla kuin ensikerralla.
+Saat sähköpostiisi automaattisen ilmoituksen, kun uusi kysymyssarja julkaistaan. Viestissä on henkilökohtainen linkkisi — avaa se ja vastaa uusiin kysymyksiin samalla tavalla kuin ensikerralla.
 
 ---
 
@@ -113,8 +109,8 @@ Sähköpostiosoitettasi **ei näytetä** äänestäjille.
 
 ## Ongelmatilanteissa
 
-**Tunniste ei toimi** — tarkista kirjoitusvirheet. Tunniste on kirjainkoosta riippuvainen. Jos ongelma jatkuu, pyydä puolueelta uusi tunniste.
+**Linkki ei kelpaa** — tarkista, että kopioit linkin kokonaan. Jos rekisteröitymislinkki ei toimi, puolueesi on ehkä luonut uuden: pyydä se yhteyshenkilöltäsi.
 
-**Nimi ei näy listassa** — jos olet rekisteröitynyt ennemmin mutta nimesi ei näy, varmista että käytät samaa tunnistetta kuin aiemmin. Eri tunniste tarkoittaa eri puolueen portaalia.
+**Henkilökohtainen linkki on kadonnut** — etsi sähköpostistasi viesti "Henkilökohtainen vastauslinkkisi". Jos et löydä sitä, pyydä puolueesi yhteyshenkilöä lähettämään linkki uudelleen, tai rekisteröidy uudelleen **samalla nimellä ja sähköpostiosoitteella**: uutta profiilia ei luoda, vaan linkki lähetetään sähköpostiisi.
 
 **Muut ongelmat** — ota yhteyttä puolueesi yhteyshenkilöön tai vaalikoneemme ylläpitoon.

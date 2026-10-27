@@ -321,9 +321,8 @@ adminRouter.patch("/:id/approve", requireAdmin, validateUUIDParam("id"), async (
         const frontendBaseUrl = process.env.CORS_ORIGIN || "http://localhost:5173";
 
         const { rows: candidates } = await db.query(
-          `SELECT DISTINCT c.id, c.name, c.email, p.token AS party_token
+          `SELECT c.id, c.name, c.email, c.token
            FROM candidates c
-           JOIN parties p ON c.party_id = p.id
            WHERE c.email IS NOT NULL
              AND EXISTS (SELECT 1 FROM candidate_answers ca WHERE ca.candidate_id = c.id)`
         );
@@ -546,9 +545,8 @@ adminRouter.patch("/:id/unhide", requireAdmin, validateUUIDParam("id"), async (r
         );
 
         const { rows: candidates } = await db.query(
-          `SELECT DISTINCT c.id, c.name, c.email, p.token AS party_token
+          `SELECT c.id, c.name, c.email, c.token
            FROM candidates c
-           JOIN parties p ON c.party_id = p.id
            WHERE c.email IS NOT NULL
              AND EXISTS (SELECT 1 FROM candidate_answers ca WHERE ca.candidate_id = c.id)`
         );

@@ -35,7 +35,7 @@ test.describe("E2E-1: Full lifecycle", () => {
     expect(approved.status).toBe("approved");
 
     // 4. Candidate registers
-    const candidate = await createCandidate(request, party.token, {
+    const candidate = await createCandidate(request, party, {
       name: "Lifecycle Candidate",
       email: "lifecycle@test.fi",
     });
@@ -46,7 +46,7 @@ test.describe("E2E-1: Full lifecycle", () => {
     qs.questions.forEach((q, i) => {
       answers[q.id] = { value: i === 0 ? 4 : 1, explanation: `Perustelu ${i + 1}` };
     });
-    const saved = await saveAnswers(request, party.token, candidate.id, answers);
+    const saved = await saveAnswers(request, candidate, answers);
     expect(saved.saved).toBe(2);
 
     // 6. Voter views approved question sets
@@ -90,8 +90,8 @@ test.describe("E2E-2: Multiple parties and candidates", () => {
     const partyA = await createParty(request, `PartyA ${ts}`);
     const partyB = await createParty(request, `PartyB ${ts}`);
 
-    const candA = await createCandidate(request, partyA.token, { name: "Candidate A" });
-    const candB = await createCandidate(request, partyB.token, { name: "Candidate B" });
+    const candA = await createCandidate(request, partyA, { name: "Candidate A" });
+    const candB = await createCandidate(request, partyB, { name: "Candidate B" });
 
     // Candidate A answers [4, 4], Candidate B answers [0, 0]
     const answersA = {};
@@ -100,8 +100,8 @@ test.describe("E2E-2: Multiple parties and candidates", () => {
       answersA[q.id] = { value: 4, explanation: "" };
       answersB[q.id] = { value: 0, explanation: "" };
     });
-    await saveAnswers(request, partyA.token, candA.id, answersA);
-    await saveAnswers(request, partyB.token, candB.id, answersB);
+    await saveAnswers(request, candA, answersA);
+    await saveAnswers(request, candB, answersB);
 
     // Voter answers all 4 — should match A better than B
     const voterAnswers = {};
@@ -166,12 +166,12 @@ test.describe("E2E-4: Candidate answer update flow", () => {
       questions: ["Q1"],
     });
     await approveQuestionSet(request, qs.id);
-    const candidate = await createCandidate(request, party.token, { name: "Updater" });
+    const candidate = await createCandidate(request, party, { name: "Updater" });
 
     // Initial answer: value 0
     const initial = {};
     initial[qs.questions[0].id] = { value: 0, explanation: "" };
-    await saveAnswers(request, party.token, candidate.id, initial);
+    await saveAnswers(request, candidate, initial);
 
     // Voter answers 4 — should get 0% match
     const voterAnswers = { [qs.questions[0].id]: 4 };
@@ -182,7 +182,7 @@ test.describe("E2E-4: Candidate answer update flow", () => {
     // Update answer to value 4
     const updated = {};
     updated[qs.questions[0].id] = { value: 4, explanation: "Changed" };
-    await saveAnswers(request, party.token, candidate.id, updated);
+    await saveAnswers(request, candidate, updated);
 
     // Now should get 100% match
     result = await voterMatch(request, { answers: voterAnswers });
@@ -201,10 +201,10 @@ test.describe("E2E-5: Party deletion cascade", () => {
       questions: ["CascadeQ"],
     });
     await approveQuestionSet(request, qs.id);
-    const candidate = await createCandidate(request, party.token, { name: "Cascade Cand" });
+    const candidate = await createCandidate(request, party, { name: "Cascade Cand" });
     const answers = {};
     answers[qs.questions[0].id] = { value: 2, explanation: "" };
-    await saveAnswers(request, party.token, candidate.id, answers);
+    await saveAnswers(request, candidate, answers);
 
     // Verify candidate appears in match
     let result = await voterMatch(request, {
@@ -241,19 +241,19 @@ test.describe("E2E-6: Weight impact on match results", () => {
 
     const partyA = await createParty(request, `WeightA ${ts}`);
     const partyB = await createParty(request, `WeightB ${ts}`);
-    const candA = await createCandidate(request, partyA.token, { name: "Weight A" });
-    const candB = await createCandidate(request, partyB.token, { name: "Weight B" });
+    const candA = await createCandidate(request, partyA, { name: "Weight A" });
+    const candB = await createCandidate(request, partyB, { name: "Weight B" });
 
     // Candidate A: [4, 0], Candidate B: [0, 4]
     const aAnswers = {};
     aAnswers[qs.questions[0].id] = { value: 4, explanation: "" };
     aAnswers[qs.questions[1].id] = { value: 0, explanation: "" };
-    await saveAnswers(request, partyA.token, candA.id, aAnswers);
+    await saveAnswers(request, candA, aAnswers);
 
     const bAnswers = {};
     bAnswers[qs.questions[0].id] = { value: 0, explanation: "" };
     bAnswers[qs.questions[1].id] = { value: 4, explanation: "" };
-    await saveAnswers(request, partyB.token, candB.id, bAnswers);
+    await saveAnswers(request, candB, bAnswers);
 
     // Voter answers [4, 4] with default weights — both should be 50%
     const voterAnswers = {};

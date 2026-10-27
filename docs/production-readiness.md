@@ -160,9 +160,10 @@ introduces.
   scripts), `style-src 'self' 'unsafe-inline'` (the app styles inline),
   `img-src 'self' https: data:` (candidate `photo_url` is an arbitrary
   user-supplied URL), `connect-src 'self' https://*.sentry.io`.
-- **Referrer-Policy: no-referrer** — party tokens arrive as `?partyToken=` magic
-  links and must never leak via `Referer`.
-- **Party-token scrubbing** (`App.jsx`) — the token is read once, then removed
+- **Referrer-Policy: no-referrer** — party, registration and candidate tokens
+  arrive as `?partyToken=` / `?register=` / `?candidateToken=` magic links and
+  must never leak via `Referer`.
+- **Token scrubbing** (`App.jsx`) — the token is read once, then removed
   from the address bar via `history.replaceState` so it doesn't linger in
   history, bookmarks, or copied URLs.
 - **Admin auth refactor** (`src/middleware/auth.js`) — `isAdminRequest(req)`

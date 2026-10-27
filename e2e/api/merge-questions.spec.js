@@ -61,9 +61,9 @@ test.describe("UC-MERGE: many-to-many question deduplication", () => {
     const keepId = setA.questions[0].id;
     const dropId = setB.questions[0].id;
 
-    const candidate = await createCandidate(request, party.token, { name: "Ehdokas", email: "c@test.fi" });
+    const candidate = await createCandidate(request, party, { name: "Ehdokas", email: "c@test.fi" });
     // Candidate answered the canonical (set A) question only.
-    await saveAnswers(request, party.token, candidate.id, { [keepId]: { value: 4, explanation: "" } });
+    await saveAnswers(request, candidate, { [keepId]: { value: 4, explanation: "" } });
 
     await mergeQuestions(request, keepId, [dropId]);
 
@@ -92,13 +92,13 @@ test.describe("UC-MERGE: many-to-many question deduplication", () => {
 
     const keepId = setA.questions[0].id;
     const dropId = setB.questions[0].id;
-    const candidate = await createCandidate(request, party.token, { name: "Ehdokas", email: "c@test.fi" });
+    const candidate = await createCandidate(request, party, { name: "Ehdokas", email: "c@test.fi" });
 
     // Answer the kept question first, then the duplicate LATER with a different value.
     // Even though the duplicate's answer is newer, the kept question's own answer
     // must survive — its wording is what the voter sees.
-    await saveAnswers(request, party.token, candidate.id, { [keepId]: { value: 0, explanation: "säilytettävän sanamuoto" } });
-    await saveAnswers(request, party.token, candidate.id, { [dropId]: { value: 4, explanation: "kaksoiskappaleen sanamuoto" } });
+    await saveAnswers(request, candidate, { [keepId]: { value: 0, explanation: "säilytettävän sanamuoto" } });
+    await saveAnswers(request, candidate, { [dropId]: { value: 4, explanation: "kaksoiskappaleen sanamuoto" } });
 
     await mergeQuestions(request, keepId, [dropId]);
 
@@ -122,10 +122,10 @@ test.describe("UC-MERGE: many-to-many question deduplication", () => {
 
     const keepId = setA.questions[0].id;
     const dropId = setB.questions[0].id;
-    const candidate = await createCandidate(request, party.token, { name: "Ehdokas", email: "c@test.fi" });
+    const candidate = await createCandidate(request, party, { name: "Ehdokas", email: "c@test.fi" });
 
     // Candidate answered ONLY the duplicate; the kept question has no answer to defend.
-    await saveAnswers(request, party.token, candidate.id, { [dropId]: { value: 3, explanation: "vain dup" } });
+    await saveAnswers(request, candidate, { [dropId]: { value: 3, explanation: "vain dup" } });
 
     await mergeQuestions(request, keepId, [dropId]);
 

@@ -153,7 +153,7 @@ async function sendApprovedQuestionSetNotificationToCandidate(questionSet, quest
   if (!process.env.SMTP_HOST) return;
 
   const transporter = createTransport();
-  const answerLink = `${frontendBaseUrl}/?view=candidate&partyToken=${candidate.party_token}&candidateId=${candidate.id}`;
+  const answerLink = `${frontendBaseUrl}/?candidateToken=${candidate.token}`;
 
   await transporter.sendMail({
     from: process.env.SMTP_FROM || "noreply@vaalikone.fi",
@@ -178,7 +178,7 @@ async function sendApprovedQuestionSetNotificationToParty(questionSet, questionC
   if (!process.env.SMTP_HOST) return;
 
   const transporter = createTransport();
-  const portalLink = `${frontendBaseUrl}/?view=candidate&partyToken=${party.token}`;
+  const portalLink = `${frontendBaseUrl}/?partyToken=${party.token}`;
 
   await transporter.sendMail({
     from: process.env.SMTP_FROM || "noreply@vaalikone.fi",
@@ -188,7 +188,7 @@ async function sendApprovedQuestionSetNotificationToParty(questionSet, questionC
       `Hei ${party.name},`,
       "",
       "Vaalikone 2026 -järjestelmään on hyväksytty uusi kysymyssarja.",
-      "Muistuttakaa ehdokkaitanne kirjautumaan puoluepuolueellenne ja vastaamaan uusiin kysymyksiin.",
+      "Ehdokkaat, jotka ovat antaneet sähköpostiosoitteensa, saavat oman vastauslinkkinsä sähköpostitse. Muistuttakaa ehdokkaitanne vastaamaan uusiin kysymyksiin.",
       "",
       `Järjestö: ${questionSet.ngo_name}`,
       `Kysymyssarja: ${questionSet.title}`,
@@ -200,7 +200,39 @@ async function sendApprovedQuestionSetNotificationToParty(questionSet, questionC
   });
 }
 
+/**
+ * Send a candidate their personal answering link. Unlike the notifications
+ * above, callers await this: when a party secretary asks to (re)send a link,
+ * they need to know whether it actually went out.
+ */
+async function sendCandidateLinkEmail(candidate, partyName, frontendBaseUrl) {
+  if (!process.env.SMTP_HOST) {
+    throw new Error("SMTP is not configured");
+  }
+
+  const transporter = createTransport();
+  const answerLink = `${frontendBaseUrl}/?candidateToken=${candidate.token}`;
+
+  await transporter.sendMail({
+    from: process.env.SMTP_FROM || "noreply@vaalikone.fi",
+    to: candidate.email,
+    subject: "Henkilökohtainen vastauslinkkisi Vaalikone 2026 -järjestelmään",
+    text: [
+      `Hei ${candidate.name},`,
+      "",
+      `Olet ehdokkaana listalla: ${partyName}.`,
+      "",
+      "Tällä henkilökohtaisella linkillä voit muokata profiiliasi ja vastata kysymyksiin:",
+      answerLink,
+      "",
+      "Säilytä linkki itselläsi äläkä jaa sitä: kuka tahansa linkin haltija voi muuttaa vastauksiasi.",
+      "Jos linkki katoaa, puolueesi yhteyshenkilö voi lähettää sen uudelleen.",
+    ].join("\n"),
+  });
+}
+
 module.exports = {
+  sendCandidateLinkEmail,
   sendNewQuestionSetNotification,
   sendQuestionSetReviewedNotification,
   sendQuestionSetPartialReviewNotification,

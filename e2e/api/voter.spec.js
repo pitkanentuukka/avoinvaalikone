@@ -92,13 +92,13 @@ test.describe("UC-VOTER-1: Voter match", () => {
     // Create a second candidate with different answers
     const { createParty, createCandidate, saveAnswers, approveQuestionSet, submitQuestionSet } = require("../helpers");
     const party2 = await createParty(request, `VoterSort ${Date.now()}`);
-    const cand2 = await createCandidate(request, party2.token, { name: "Candidate 2" });
+    const cand2 = await createCandidate(request, party2, { name: "Candidate 2" });
 
     const answerMap = {};
     setup.questions.forEach((q) => {
       answerMap[q.id] = { value: 2, explanation: "" };
     });
-    await saveAnswers(request, party2.token, cand2.id, answerMap);
+    await saveAnswers(request, cand2, answerMap);
 
     // Voter answers all 2 — cand2 should match better than setup.candidate
     const voterAnswers = {};

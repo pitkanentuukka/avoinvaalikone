@@ -4,6 +4,7 @@ const {
   get,
   post,
   put,
+  del,
   createParty,
   createCandidate,
   submitQuestionSet,
@@ -11,103 +12,153 @@ const {
   saveAnswers,
 } = require("../helpers");
 
-test.describe("UC-CAND: Candidate management (party-token gated)", () => {
+const PROFILE = {
+  name: "Matti Meikäläinen",
+  bio: "Kokenut kunnallispoliitikko",
+  photoUrl: "https://example.com/photo.jpg",
+  email: "matti@example.fi",
+  constituency: "Helsingin vaalipiiri",
+};
+
+test.describe("UC-CAND-REG: Candidate self-registration (registration link)", () => {
   let party;
 
   test.beforeAll(async ({ request }) => {
-    party = await createParty(request, `CandParty ${Date.now()}`);
+    party = await createParty(request, `RegParty ${Date.now()}`);
   });
 
-  test("UC-CAND-1: view party's candidates (empty)", async ({ request }) => {
-    const { res, body } = await get(
-      request,
-      `/candidates/party/${party.token}`
-    );
+  test("admin party creation returns a registration token", async () => {
+    expect(party.registration_token).toMatch(/^[0-9a-f]{48}$/);
+    expect(party.registration_token).not.toBe(party.token);
+  });
+
+  test("registration link shows the party name only", async ({ request }) => {
+    const { res, body } = await get(request, `/candidates/register/${party.registration_token}`);
     expect(res.status()).toBe(200);
-    expect(body.party.name).toBe(party.name);
+    expect(body).toEqual({ party: { name: party.name } });
+  });
+
+  test("invalid registration link returns 404", async ({ request }) => {
+    const { res } = await get(request, "/candidates/register/nonexistent");
+    expect(res.status()).toBe(404);
+  });
+
+  test("register → 201 with a personal token, visible to voters immediately", async ({ request }) => {
+    const { res, body } = await post(request, `/candidates/register/${party.registration_token}`, PROFILE);
+    expect(res.status()).toBe(201);
+    expect(body.name).toBe(PROFILE.name);
+    expect(body.token).toMatch(/^[0-9a-f]{48}$/);
+
+    const { body: pub } = await get(request, `/candidates/${body.id}`);
+    expect(pub.name).toBe(PROFILE.name);
+    expect(pub.party_name).toBe(party.name);
+    expect(pub).not.toHaveProperty("token");
+    expect(pub).not.toHaveProperty("email");
+  });
+
+  test("same name + email again → 409, no duplicate, no token leaked", async ({ request }) => {
+    const { res, body } = await post(request, `/candidates/register/${party.registration_token}`, {
+      ...PROFILE,
+      email: PROFILE.email.toUpperCase(),
+    });
+    expect(res.status()).toBe(409);
+    expect(body).not.toHaveProperty("token");
+
+    const { body: overview } = await get(request, `/candidates/party/${party.token}`);
+    expect(overview.candidates.filter((c) => c.name === PROFILE.name)).toHaveLength(1);
+  });
+
+  test("same email, different name → allowed (shared office address)", async ({ request }) => {
+    const { res } = await post(request, `/candidates/register/${party.registration_token}`, {
+      ...PROFILE,
+      name: "Maija Meikäläinen",
+    });
+    expect(res.status()).toBe(201);
+  });
+
+  for (const [label, body] of [
+    ["missing name", { ...PROFILE, name: "" }],
+    ["too-long name", { ...PROFILE, name: "A".repeat(256) }],
+    ["missing constituency", { ...PROFILE, constituency: undefined }],
+    ["invalid constituency", { ...PROFILE, name: "Narnia Ehdokas", constituency: "Narnian vaalipiiri" }],
+    ["missing email", { ...PROFILE, email: undefined }],
+    ["invalid email", { ...PROFILE, email: "bad-email" }],
+    ["invalid photo URL", { ...PROFILE, photoUrl: "not-a-url" }],
+    ["too-long bio", { ...PROFILE, bio: "A".repeat(1001) }],
+  ]) {
+    test(`${label} → 400`, async ({ request }) => {
+      const { res } = await post(request, `/candidates/register/${party.registration_token}`, body);
+      expect(res.status()).toBe(400);
+    });
+  }
+});
+
+test.describe("UC-CAND-PARTY: Party portal (party token)", () => {
+  let party, candidate;
+
+  test.beforeAll(async ({ request }) => {
+    party = await createParty(request, `PortalParty ${Date.now()}`);
+  });
+
+  test("overview (empty) includes the registration token", async ({ request }) => {
+    const { res, body } = await get(request, `/candidates/party/${party.token}`);
+    expect(res.status()).toBe(200);
+    expect(body.party).toEqual({ id: party.id, name: party.name, registrationToken: party.registration_token });
     expect(body.candidates).toHaveLength(0);
   });
 
-  test("UC-CAND-2: register a new candidate", async ({ request }) => {
-    const { res, body } = await post(
-      request,
-      `/candidates/party/${party.token}`,
-      {
-        name: "Matti Meikäläinen",
-        bio: "Kokenut kunnallispoliitikko",
-        photoUrl: "https://example.com/photo.jpg",
-        email: "matti@example.fi",
-        constituency: "Helsingin vaalipiiri",
-      }
-    );
-    expect(res.status()).toBe(201);
-    expect(body.name).toBe("Matti Meikäläinen");
-    expect(body.id).toBeTruthy();
-    expect(body.email).toBe("matti@example.fi");
-    expect(body.constituency).toBe("Helsingin vaalipiiri");
-  });
-
-  test("register candidate without constituency returns 400", async ({ request }) => {
-    const { res } = await post(
-      request,
-      `/candidates/party/${party.token}`,
-      { name: "Test" }
-    );
-    expect(res.status()).toBe(400);
-  });
-
-  test("UC-CAND-1: view party's candidates (with candidates)", async ({ request }) => {
-    const { body } = await get(
-      request,
-      `/candidates/party/${party.token}`
-    );
-    expect(body.candidates.length).toBeGreaterThan(0);
+  test("overview lists candidates with progress but never their tokens", async ({ request }) => {
+    candidate = await createCandidate(request, party, { name: "Portal Candidate", email: "portal@test.fi" });
+    const { body } = await get(request, `/candidates/party/${party.token}`);
+    expect(body.candidates).toHaveLength(1);
     expect(body.candidates[0].answer_count).toBeDefined();
+    expect(body.candidates[0].email).toBe("portal@test.fi");
+    expect(body.candidates[0]).not.toHaveProperty("token");
   });
 
-  test("register candidate without name returns 400", async ({ request }) => {
-    const { res } = await post(
-      request,
-      `/candidates/party/${party.token}`,
-      { name: "" }
-    );
-    expect(res.status()).toBe(400);
+  test("party token can no longer create or edit candidates", async ({ request }) => {
+    const create = await post(request, `/candidates/party/${party.token}`, PROFILE);
+    expect(create.res.status()).toBe(404);
+    const profile = await put(request, `/candidates/party/${party.token}/candidates/${candidate.id}`, PROFILE);
+    expect(profile.res.status()).toBe(404);
+    const answers = await put(request, `/candidates/party/${party.token}/candidates/${candidate.id}/answers`, { answers: {} });
+    expect(answers.res.status()).toBe(404);
   });
 
-  test("register candidate with too-long name returns 400", async ({ request }) => {
-    const { res } = await post(
-      request,
-      `/candidates/party/${party.token}`,
-      { name: "A".repeat(256) }
-    );
-    expect(res.status()).toBe(400);
+  test("send-link to a candidate of another party → 404", async ({ request }) => {
+    const other = await createParty(request, `OtherPortal ${Date.now()}`);
+    const { res } = await post(request, `/candidates/party/${other.token}/candidates/${candidate.id}/send-link`, {});
+    expect(res.status()).toBe(404);
   });
 
-  test("register candidate with invalid photo URL returns 400", async ({ request }) => {
-    const { res } = await post(
-      request,
-      `/candidates/party/${party.token}`,
-      { name: "Test", photoUrl: "not-a-url" }
-    );
-    expect(res.status()).toBe(400);
+  test("remove a candidate of another party → 404", async ({ request }) => {
+    const other = await createParty(request, `OtherRemove ${Date.now()}`);
+    const { res } = await del(request, `/candidates/party/${other.token}/candidates/${candidate.id}`);
+    expect(res.status()).toBe(404);
   });
 
-  test("register candidate with too-long bio returns 400", async ({ request }) => {
-    const { res } = await post(
-      request,
-      `/candidates/party/${party.token}`,
-      { name: "Test", bio: "A".repeat(1001) }
-    );
-    expect(res.status()).toBe(400);
+  test("rotating the registration link invalidates the old one only", async ({ request }) => {
+    const oldToken = party.registration_token;
+    const { res, body } = await post(request, `/candidates/party/${party.token}/registration-token`, {});
+    expect(res.status()).toBe(200);
+    expect(body.registrationToken).not.toBe(oldToken);
+
+    const old = await get(request, `/candidates/register/${oldToken}`);
+    expect(old.res.status()).toBe(404);
+    const fresh = await get(request, `/candidates/register/${body.registrationToken}`);
+    expect(fresh.res.status()).toBe(200);
+    // Existing candidates keep working.
+    const me = await get(request, `/candidates/me/${candidate.token}`);
+    expect(me.res.status()).toBe(200);
   });
 
-  test("register candidate with invalid email returns 400", async ({ request }) => {
-    const { res } = await post(
-      request,
-      `/candidates/party/${party.token}`,
-      { name: "Test", email: "bad-email" }
-    );
-    expect(res.status()).toBe(400);
+  test("remove own candidate → gone, personal link stops working", async ({ request }) => {
+    const { res } = await del(request, `/candidates/party/${party.token}/candidates/${candidate.id}`);
+    expect(res.status()).toBe(200);
+    const { res: pub } = await get(request, `/candidates/${candidate.id}`);
+    expect(pub.status()).toBe(404);
+    const { res: me } = await get(request, `/candidates/me/${candidate.token}`);
+    expect(me.status()).toBe(404);
   });
 
   test("invalid party token returns 404", async ({ request }) => {
@@ -116,65 +167,58 @@ test.describe("UC-CAND: Candidate management (party-token gated)", () => {
   });
 });
 
-test.describe("UC-CAND-3: Update candidate profile", () => {
+test.describe("UC-CAND-3: Candidate edits own profile (candidate token)", () => {
   let party, candidate;
 
   test.beforeAll(async ({ request }) => {
     party = await createParty(request, `UpdateParty ${Date.now()}`);
-    candidate = await createCandidate(request, party.token, {
-      name: "Original Name",
-    });
+    candidate = await createCandidate(request, party, { name: "Original Name", email: "orig@test.fi" });
   });
 
-  test("update candidate name and bio", async ({ request }) => {
-    const { res, body } = await put(
-      request,
-      `/candidates/party/${party.token}/candidates/${candidate.id}`,
-      { name: "Updated Name", bio: "New bio" }
-    );
+  test("get own profile includes email and party", async ({ request }) => {
+    const { res, body } = await get(request, `/candidates/me/${candidate.token}`);
+    expect(res.status()).toBe(200);
+    expect(body.name).toBe("Original Name");
+    expect(body.email).toBe("orig@test.fi");
+    expect(body.party).toEqual({ id: party.id, name: party.name });
+  });
+
+  test("update name, bio and email", async ({ request }) => {
+    const { res, body } = await put(request, `/candidates/me/${candidate.token}`, {
+      ...PROFILE,
+      name: "Updated Name",
+      bio: "New bio",
+      email: "new@test.fi",
+    });
     expect(res.status()).toBe(200);
     expect(body.name).toBe("Updated Name");
     expect(body.bio).toBe("New bio");
+    expect(body.email).toBe("new@test.fi");
   });
 
   test("null photoUrl clears the field", async ({ request }) => {
-    const { res, body } = await put(
-      request,
-      `/candidates/party/${party.token}/candidates/${candidate.id}`,
-      { photoUrl: null }
-    );
+    const { res, body } = await put(request, `/candidates/me/${candidate.token}`, { ...PROFILE, photoUrl: null });
     expect(res.status()).toBe(200);
     expect(body.photo_url).toBeNull();
   });
 
-  test("update candidate from wrong party returns 404", async ({ request }) => {
-    const otherParty = await createParty(request, `OtherParty ${Date.now()}`);
-    const { res } = await put(
-      request,
-      `/candidates/party/${otherParty.token}/candidates/${candidate.id}`,
-      { name: "Hacker" }
-    );
-    expect(res.status()).toBe(404);
+  test("too-long name returns 400", async ({ request }) => {
+    const { res } = await put(request, `/candidates/me/${candidate.token}`, { ...PROFILE, name: "A".repeat(256) });
+    expect(res.status()).toBe(400);
   });
 
-  test("update with too-long name returns 400", async ({ request }) => {
-    const { res } = await put(
-      request,
-      `/candidates/party/${party.token}/candidates/${candidate.id}`,
-      { name: "A".repeat(256) }
-    );
-    expect(res.status()).toBe(400);
+  test("invalid candidate token returns 404", async ({ request }) => {
+    const { res } = await put(request, "/candidates/me/nonexistent", PROFILE);
+    expect(res.status()).toBe(404);
   });
 });
 
-test.describe("UC-CAND-4: Save candidate answers", () => {
+test.describe("UC-CAND-4: Candidate saves own answers (candidate token)", () => {
   let party, candidate, questions;
 
   test.beforeAll(async ({ request }) => {
     party = await createParty(request, `AnswerParty ${Date.now()}`);
-    candidate = await createCandidate(request, party.token, {
-      name: "Answer Candidate",
-    });
+    candidate = await createCandidate(request, party, { name: "Answer Candidate" });
     const qs = await submitQuestionSet(request, {
       ngoName: "AnswerNGO",
       title: `Answers ${Date.now()}`,
@@ -185,29 +229,17 @@ test.describe("UC-CAND-4: Save candidate answers", () => {
   });
 
   test("save answers (initial)", async ({ request }) => {
-    const answers = {};
-    answers[questions[0].id] = { value: 4, explanation: "Täysin samaa mieltä" };
-    answers[questions[1].id] = { value: 1, explanation: "" };
-
-    const { res, body } = await put(
-      request,
-      `/candidates/party/${party.token}/candidates/${candidate.id}/answers`,
-      { answers }
-    );
-    expect(res.status()).toBe(200);
+    const body = await saveAnswers(request, candidate, {
+      [questions[0].id]: { value: 4, explanation: "Täysin samaa mieltä" },
+      [questions[1].id]: { value: 1, explanation: "" },
+    });
     expect(body.saved).toBe(2);
   });
 
   test("upsert answers (update existing)", async ({ request }) => {
-    const answers = {};
-    answers[questions[0].id] = { value: 0, explanation: "Changed my mind" };
-
-    const { res, body } = await put(
-      request,
-      `/candidates/party/${party.token}/candidates/${candidate.id}/answers`,
-      { answers }
-    );
-    expect(res.status()).toBe(200);
+    const body = await saveAnswers(request, candidate, {
+      [questions[0].id]: { value: 0, explanation: "Changed my mind" },
+    });
     expect(body.saved).toBe(1);
 
     // Verify via public endpoint
@@ -216,45 +248,30 @@ test.describe("UC-CAND-4: Save candidate answers", () => {
     expect(full.answers[questions[0].id].explanation).toBe("Changed my mind");
   });
 
-  test("answers from wrong party returns 404", async ({ request }) => {
-    const otherParty = await createParty(request, `WrongParty ${Date.now()}`);
-    const { res } = await put(
-      request,
-      `/candidates/party/${otherParty.token}/candidates/${candidate.id}/answers`,
-      { answers: {} }
-    );
-    expect(res.status()).toBe(404);
+  test("another candidate's token cannot write to this candidate", async ({ request }) => {
+    const other = await createCandidate(request, party, { name: "Other Candidate" });
+    await saveAnswers(request, other, { [questions[0].id]: { value: 4, explanation: "" } });
+
+    const { body: full } = await get(request, `/candidates/${candidate.id}`);
+    expect(full.answers[questions[0].id].value).toBe(0);
   });
 
   test("missing answers object returns 400", async ({ request }) => {
-    const { res } = await put(
-      request,
-      `/candidates/party/${party.token}/candidates/${candidate.id}/answers`,
-      {}
-    );
+    const { res } = await put(request, `/candidates/me/${candidate.token}/answers`, {});
     expect(res.status()).toBe(400);
   });
 
   test("invalid answer values are silently skipped", async ({ request }) => {
-    const answers = {};
-    answers[questions[0].id] = { value: 99, explanation: "" };
-
-    const { res, body } = await put(
-      request,
-      `/candidates/party/${party.token}/candidates/${candidate.id}/answers`,
-      { answers }
-    );
-    expect(res.status()).toBe(200);
+    const body = await saveAnswers(request, candidate, { [questions[0].id]: { value: 99, explanation: "" } });
     expect(body.saved).toBe(0);
   });
 
-  test("invalid UUID question IDs are silently skipped", async ({ request }) => {
-    const { res, body } = await put(
-      request,
-      `/candidates/party/${party.token}/candidates/${candidate.id}/answers`,
-      { answers: { "not-a-uuid": { value: 2, explanation: "" } } }
-    );
-    expect(res.status()).toBe(200);
+  test("invalid UUIDs, unknown questions and null answers are skipped", async ({ request }) => {
+    const body = await saveAnswers(request, candidate, {
+      "not-a-uuid": { value: 2, explanation: "" },
+      "00000000-0000-0000-0000-000000000099": { value: 2, explanation: "" },
+      [questions[1].id]: null,
+    });
     expect(body.saved).toBe(0);
   });
 });
@@ -268,7 +285,7 @@ test.describe("Public candidate endpoints", () => {
 
   test("UC-VOTER-3: get single candidate with answers", async ({ request }) => {
     const party = await createParty(request, `SingleParty ${Date.now()}`);
-    const candidate = await createCandidate(request, party.token, {
+    const candidate = await createCandidate(request, party, {
       name: "Solo Candidate",
       bio: "Bio text",
     });

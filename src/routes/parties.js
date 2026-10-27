@@ -10,7 +10,7 @@ const router = Router();
 router.get("/", requireAdmin, async (req, res, next) => {
   try {
     const { rows } = await db.query(
-      "SELECT id, name, token, email, created_at FROM parties ORDER BY created_at"
+      "SELECT id, name, token, registration_token, email, created_at FROM parties ORDER BY created_at"
     );
     res.json(rows);
   } catch (err) {
@@ -51,7 +51,7 @@ router.post("/", requireAdmin, async (req, res, next) => {
     const { rows } = await db.query(
       `INSERT INTO parties (name, token, email)
        VALUES ($1, $2, $3)
-       RETURNING id, name, token, email, created_at`,
+       RETURNING id, name, token, registration_token, email, created_at`,
       [name.trim(), token, email?.trim() || null]
     );
     res.status(201).json(rows[0]);
