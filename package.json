@@ -26,15 +26,14 @@
     "@sentry/node": "^10.66.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
-    "express": "^4.21.0",
+    "express": "^4.22.3",
     "express-rate-limit": "^7.4.0",
     "helmet": "^8.0.0",
     "morgan": "^1.10.0",
-    "nodemailer": "^8.0.1",
+    "nodemailer": "^10.2.1",
     "pg": "^8.13.0",
     "rate-limit-redis": "^4.3.1",
-    "redis": "^6.0.0",
-    "uuid": "^10.0.0"
+    "redis": "^6.0.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",
