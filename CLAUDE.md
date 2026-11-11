@@ -80,6 +80,8 @@ Tables: `parties` → `candidates` → `candidate_answers`; `question_sets` ↔ 
 
 When a set or a per-set link is removed, the route layer deletes any question that is no longer linked to **any** set (`deleteOrphanQuestions()`); deleting a question cascades to its `candidate_answers` and `voter_responses`.
 
+**Email:** `src/email.js` sends everything through one pooled nodemailer transport (`SMTP_MAX_CONNECTIONS`, default 3), so bulk fire-and-forget sends queue instead of opening a connection per message. Every attempt is recorded in `email_log` (`sent | failed`, with the error); rows addressed to a candidate or party cascade on its deletion. The admin's per-party candidate list shows each candidate's latest outcome.
+
 **Constituency constraint:** `candidates.constituency` has a CHECK constraint (`candidates_constituency_valid`) that allows only the 13 Finnish parliamentary constituencies (eduskuntavaalit). The same list is hardcoded in `FI_CONSTITUENCIES` in `vaalikone-frontend/src/App.jsx`. **If repurposing for other elections** (municipal elections, other countries), both must be updated: drop/replace the constraint in a new migration and update the frontend constant.
 
 ### Environment Variables

@@ -91,12 +91,21 @@ router.post("/:id/token", requireAdmin, validateUUIDParam("id"), async (req, res
 // GET /api/admin/parties/:id/candidates — the party's candidates with their
 // personal tokens. Unlike the party portal, admin sees the tokens, so it can
 // hand a link over by hand to a candidate who has no email address on file.
+// last_email_* is the latest email_log row for the candidate, so the admin can
+// see whose link actually went out.
 router.get("/:id/candidates", requireAdmin, validateUUIDParam("id"), async (req, res, next) => {
   try {
     const { rows } = await db.query(
       `SELECT c.id, c.name, c.email, c.constituency, c.token,
-              (SELECT COUNT(*) FROM candidate_answers ca WHERE ca.candidate_id = c.id) AS answer_count
+              (SELECT COUNT(*) FROM candidate_answers ca WHERE ca.candidate_id = c.id) AS answer_count,
+              e.status AS last_email_status, e.error AS last_email_error, e.created_at AS last_email_at
        FROM candidates c
+       LEFT JOIN LATERAL (
+         SELECT status, error, created_at FROM email_log
+         WHERE candidate_id = c.id
+         ORDER BY created_at DESC
+         LIMIT 1
+       ) e ON true
        WHERE c.party_id = $1
        ORDER BY c.name`,
       [req.params.id]
@@ -109,7 +118,8 @@ router.get("/:id/candidates", requireAdmin, validateUUIDParam("id"), async (req,
 
 // POST /api/admin/parties/:id/send-candidate-links — email every candidate of
 // the party their personal link, e.g. once after migration 011 gave existing
-// candidates tokens nobody had seen yet. Sends in the background.
+// candidates tokens nobody had seen yet. Sends in the background; each outcome
+// lands in email_log and shows up in the candidate list above.
 router.post("/:id/send-candidate-links", requireAdmin, validateUUIDParam("id"), async (req, res, next) => {
   try {
     if (!process.env.SMTP_HOST) {
@@ -127,10 +137,14 @@ router.post("/:id/send-candidate-links", requireAdmin, validateUUIDParam("id"), 
     res.status(202).json({ queued: withEmail.length, withoutEmail: candidates.length - withEmail.length });
 
     const frontendBaseUrl = process.env.CORS_ORIGIN || "http://localhost:5173";
-    for (const c of withEmail) {
-      sendCandidateLinkEmail(c, parties[0].name, frontendBaseUrl)
-        .catch((err) => console.error("Ehdokaslinkin lähetys epäonnistui:", err));
-    }
+    const results = await Promise.allSettled(
+      withEmail.map((c) => sendCandidateLinkEmail(c, parties[0].name, frontendBaseUrl))
+    );
+    const failed = results.filter((r) => r.status === "rejected");
+    for (const r of failed) console.error("Ehdokaslinkin lähetys epäonnistui:", r.reason);
+    console.log(
+      `Ehdokaslinkit (${parties[0].name}): ${results.length - failed.length} lähetetty, ${failed.length} epäonnistui`
+    );
   } catch (err) {
     next(err);
   }

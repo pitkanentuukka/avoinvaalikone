@@ -293,4 +293,27 @@ describe("POST /api/admin/parties/:id/send-candidate-links", () => {
     expect(sendCandidateLinkEmail).toHaveBeenCalledTimes(1);
     expect(sendCandidateLinkEmail).toHaveBeenCalledWith(withEmail, "Vihreät", expect.any(String));
   });
+
+  test("one failed send does not stop the rest", async () => {
+    process.env.SMTP_HOST = "smtp.example.fi";
+    const a = { id: "c1", name: "Maija", email: "maija@example.fi", token: "t1" };
+    const b = { id: "c2", name: "Matti", email: "matti@example.fi", token: "t2" };
+    db.query
+      .mockResolvedValueOnce({ rows: [{ name: "Vihreät" }] })
+      .mockResolvedValueOnce({ rows: [a, b] });
+    sendCandidateLinkEmail.mockRejectedValueOnce(new Error("421"));
+    const errSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+
+    const res = await request(app)
+      .post(`/api/admin/parties/${VALID_UUID}/send-candidate-links`)
+      .set("Authorization", authHeader);
+
+    expect(res.status).toBe(202);
+    expect(sendCandidateLinkEmail).toHaveBeenCalledTimes(2);
+    await new Promise((r) => setImmediate(r));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("1 lähetetty, 1 epäonnistui"));
+    errSpy.mockRestore();
+    logSpy.mockRestore();
+  });
 });

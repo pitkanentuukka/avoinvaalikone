@@ -584,7 +584,7 @@ function AboutView() {
 
 // ─── Admin ───
 function AdminView() {
-  const { t } = useTranslation();
+  const { t, lang } = useTranslation();
   const [adminSecret, setAdminSecret] = useState("");
   const [authed, setAuthed] = useState(false);
   const [parties, setParties] = useState([]);
@@ -815,7 +815,16 @@ function AdminView() {
     finally { setActionLoading(null); }
   }
 
-  async function togglePartyCandidates(id) {
+  async function loadPartyCandidates(id) {
+    setActionLoading(`candidates-${id}`);
+    try {
+      const candidates = await api.getPartyCandidatesAdmin(adminSecret, id);
+      setPartyCandidates((prev) => ({ ...prev, [id]: candidates }));
+    } catch (e) { setError(e.message); }
+    finally { setActionLoading(null); }
+  }
+
+  function togglePartyCandidates(id) {
     if (partyCandidates[id]) {
       setPartyCandidates((prev) => {
         const next = { ...prev };
@@ -824,12 +833,15 @@ function AdminView() {
       });
       return;
     }
-    setActionLoading(`candidates-${id}`);
-    try {
-      const candidates = await api.getPartyCandidatesAdmin(adminSecret, id);
-      setPartyCandidates((prev) => ({ ...prev, [id]: candidates }));
-    } catch (e) { setError(e.message); }
-    finally { setActionLoading(null); }
+    loadPartyCandidates(id);
+  }
+
+  function emailStatus(c) {
+    if (!c.lastEmailStatus) return <span style={{ color: palette.textMuted }}>{t.adminEmailNone}</span>;
+    const at = new Date(c.lastEmailAt).toLocaleString(lang === "fi" ? "fi-FI" : "en-GB", { dateStyle: "short", timeStyle: "short" });
+    return c.lastEmailStatus === "sent"
+      ? <span style={{ color: palette.textMuted }}>{t.adminEmailSent(at)}</span>
+      : <span style={{ color: palette.danger }}>{t.adminEmailFailed(at, c.lastEmailError)}</span>;
   }
 
   async function sendPartyCandidateLinks(id) {
@@ -1159,6 +1171,7 @@ function AdminView() {
                     <div style={{ fontSize: "13px", marginBottom: "6px", overflowWrap: "anywhere" }}>
                       <span style={{ fontWeight: 600 }}>{c.name}</span>
                       <span style={{ color: palette.textMuted }}> · {c.constituency} · {c.email || t.partyNoEmail} · {c.answerCount} {t.candidateAnswered}</span>
+                      {c.email && <div style={{ fontSize: "12px", marginTop: "2px" }}>{emailStatus(c)}</div>}
                     </div>
                     <CopyField value={candidateLink(c.token)} />
                   </div>
@@ -1169,7 +1182,10 @@ function AdminView() {
                       {t.adminSendLinks}
                     </Button>
                     {linksQueued[p.id] && (
-                      <span style={{ fontSize: "13px", color: palette.textMuted }}>{t.adminLinksQueued(linksQueued[p.id].queued, linksQueued[p.id].withoutEmail)}</span>
+                      <>
+                        <span style={{ fontSize: "13px", color: palette.textMuted }}>{t.adminLinksQueued(linksQueued[p.id].queued, linksQueued[p.id].withoutEmail)}</span>
+                        <Button variant="ghost" size="sm" onClick={() => loadPartyCandidates(p.id)} loading={actionLoading === `candidates-${p.id}`}>{t.adminRefreshEmailStatus}</Button>
+                      </>
                     )}
                   </div>
                 )}
