@@ -108,6 +108,12 @@ const api = {
     apiFetch("/admin/parties", { method: "POST", body: data, adminSecret: secret }),
   deleteParty: (secret, id) =>
     apiFetch(`/admin/parties/${id}`, { method: "DELETE", adminSecret: secret }),
+  rotatePartyToken: (secret, id) =>
+    apiFetch(`/admin/parties/${id}/token`, { method: "POST", adminSecret: secret }),
+  getPartyCandidatesAdmin: (secret, id) =>
+    apiFetch(`/admin/parties/${id}/candidates`, { adminSecret: secret }),
+  sendPartyCandidateLinks: (secret, id) =>
+    apiFetch(`/admin/parties/${id}/send-candidate-links`, { method: "POST", adminSecret: secret }),
   getAllQuestionSets: (secret) => apiFetch("/admin/question-sets", { adminSecret: secret }),
   approveQuestionSet: (secret, id) =>
     apiFetch(`/admin/question-sets/${id}/approve`, { method: "PATCH", adminSecret: secret }),
@@ -587,6 +593,8 @@ function AdminView() {
   const [error, setError] = useState(null);
   const [newPartyName, setNewPartyName] = useState("");
   const [newPartyEmail, setNewPartyEmail] = useState("");
+  const [partyCandidates, setPartyCandidates] = useState({}); // { [partyId]: candidates } for expanded parties
+  const [linksQueued, setLinksQueued] = useState({});         // { [partyId]: { queued, withoutEmail } }
   const [actionLoading, setActionLoading] = useState(null);
   const [reviewState, setReviewState] = useState({}); // { [setId]: { [questionId]: { rejected, reason, duplicateOf } } }
   const [newQuestionText, setNewQuestionText] = useState({}); // { [setId]: string }
@@ -793,6 +801,43 @@ function AdminView() {
     try {
       await api.deleteParty(adminSecret, id);
       await refresh();
+    } catch (e) { setError(e.message); }
+    finally { setActionLoading(null); }
+  }
+
+  async function rotatePartyToken(id) {
+    if (import.meta.env.VITE_NODE_ENV !== "development" && !window.confirm(t.adminRotatePartyTokenConfirm)) return;
+    setActionLoading(`rotate-${id}`);
+    try {
+      await api.rotatePartyToken(adminSecret, id);
+      await refresh();
+    } catch (e) { setError(e.message); }
+    finally { setActionLoading(null); }
+  }
+
+  async function togglePartyCandidates(id) {
+    if (partyCandidates[id]) {
+      setPartyCandidates((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+      return;
+    }
+    setActionLoading(`candidates-${id}`);
+    try {
+      const candidates = await api.getPartyCandidatesAdmin(adminSecret, id);
+      setPartyCandidates((prev) => ({ ...prev, [id]: candidates }));
+    } catch (e) { setError(e.message); }
+    finally { setActionLoading(null); }
+  }
+
+  async function sendPartyCandidateLinks(id) {
+    if (import.meta.env.VITE_NODE_ENV !== "development" && !window.confirm(t.adminSendLinksConfirm)) return;
+    setActionLoading(`links-${id}`);
+    try {
+      const result = await api.sendPartyCandidateLinks(adminSecret, id);
+      setLinksQueued((prev) => ({ ...prev, [id]: result }));
     } catch (e) { setError(e.message); }
     finally { setActionLoading(null); }
   }
@@ -1100,6 +1145,36 @@ function AdminView() {
                 <Button variant="danger" size="sm" onClick={() => removeParty(p.id)} loading={actionLoading === p.id}>{t.adminDelete}</Button>
               </div>
             </div>
+            <div style={{ display: "flex", gap: "8px", marginTop: "10px", flexWrap: "wrap" }}>
+              <Button variant="ghost" size="sm" onClick={() => togglePartyCandidates(p.id)} loading={actionLoading === `candidates-${p.id}`}>
+                {partyCandidates[p.id] ? t.adminHideCandidates : t.adminShowCandidates}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => rotatePartyToken(p.id)} loading={actionLoading === `rotate-${p.id}`}>{t.adminRotatePartyToken}</Button>
+            </div>
+            {partyCandidates[p.id] && (
+              <div style={{ marginTop: "12px", borderTop: `1px solid ${palette.border}`, paddingTop: "12px" }}>
+                {partyCandidates[p.id].length === 0 && <p style={{ color: palette.textMuted, fontSize: "13px", margin: 0 }}>{t.partyNoCandidates}</p>}
+                {partyCandidates[p.id].map((c) => (
+                  <div key={c.id} style={{ marginBottom: "12px" }}>
+                    <div style={{ fontSize: "13px", marginBottom: "6px", overflowWrap: "anywhere" }}>
+                      <span style={{ fontWeight: 600 }}>{c.name}</span>
+                      <span style={{ color: palette.textMuted }}> · {c.constituency} · {c.email || t.partyNoEmail} · {c.answerCount} {t.candidateAnswered}</span>
+                    </div>
+                    <CopyField value={candidateLink(c.token)} />
+                  </div>
+                ))}
+                {partyCandidates[p.id].length > 0 && (
+                  <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+                    <Button variant="secondary" size="sm" onClick={() => sendPartyCandidateLinks(p.id)} loading={actionLoading === `links-${p.id}`} disabled={!!linksQueued[p.id]}>
+                      {t.adminSendLinks}
+                    </Button>
+                    {linksQueued[p.id] && (
+                      <span style={{ fontSize: "13px", color: palette.textMuted }}>{t.adminLinksQueued(linksQueued[p.id].queued, linksQueued[p.id].withoutEmail)}</span>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </Card>
         ))}
         <Card style={{ marginTop: "16px" }}>
@@ -1292,12 +1367,12 @@ function confirmAction(message) {
   return import.meta.env.VITE_NODE_ENV === "development" || window.confirm(message);
 }
 
-function InvalidLink() {
+function InvalidLink({ legacy = false }) {
   const { t } = useTranslation();
   return (
     <div style={{ maxWidth: 500, margin: "0 auto", padding: "80px 24px", textAlign: "center" }}>
-      <h2 style={{ fontSize: "24px", fontWeight: 800, marginBottom: "8px" }}>{t.candidateInvalidToken}</h2>
-      <p style={{ color: palette.textMuted }}>{t.candidateInvalidTokenDesc}</p>
+      <h2 style={{ fontSize: "24px", fontWeight: 800, marginBottom: "8px" }}>{legacy ? t.candidateLegacyLink : t.candidateInvalidToken}</h2>
+      <p style={{ color: palette.textMuted }}>{legacy ? t.candidateLegacyLinkDesc : t.candidateInvalidTokenDesc}</p>
     </div>
   );
 }
@@ -1579,7 +1654,9 @@ function CandidateView({ candidateToken, justRegistered }) {
           apiAnswers[qId] = { value: a.value, explanation: a.text || "" };
         }
       }
-      await api.saveOwnAnswers(candidateToken, apiAnswers);
+      if (Object.keys(apiAnswers).length > 0) {
+        await api.saveOwnAnswers(candidateToken, apiAnswers);
+      }
       setSaved(true);
     } catch (e) {
       setError(e.message);
@@ -1603,7 +1680,7 @@ function CandidateView({ candidateToken, justRegistered }) {
   }
 
   const answeredCount = Object.values(answers).filter((a) => a.value !== undefined).length;
-  const canSave = profileComplete(profile) && answeredCount > 0;
+  const canSave = profileComplete(profile);
 
   return (
     <div style={{ maxWidth: 740, margin: "0 auto", padding: "40px 24px" }}>
@@ -2126,6 +2203,10 @@ function VoterView() {
 function tokenLinkFromParams(params) {
   const candidateToken = params.get("candidateToken");
   if (candidateToken) return { view: "candidate", token: candidateToken };
+  // Answering links sent before personal links existed
+  // (?view=candidate&partyToken=…&candidateId=…). They carry the party token,
+  // which now opens the secretary's portal — never open it from one of these.
+  if (params.get("candidateId")) return { view: "legacy", token: null };
   const registrationToken = params.get("register");
   if (registrationToken) return { view: "register", token: registrationToken };
   const partyToken = params.get("partyToken");
@@ -2188,6 +2269,7 @@ export default function App() {
         {view === "admin" && <AdminView />}
         {view === "ngo" && <NgoView />}
         {view === "party" && <PartyView partyToken={token} />}
+        {view === "legacy" && <InvalidLink legacy />}
         {view === "register" && (
           <RegisterView
             registrationToken={token}

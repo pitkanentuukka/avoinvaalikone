@@ -1,8 +1,10 @@
 jest.mock("../../src/db/pool");
+jest.mock("../../src/email");
 
 const request = require("supertest");
 const app = require("../../src/index");
 const db = require("../../src/db/pool");
+const { sendCandidateLinkEmail } = require("../../src/email");
 
 const ADMIN_SECRET = "test-admin-secret";
 const VALID_UUID = "550e8400-e29b-41d4-a716-446655440000";
@@ -14,6 +16,8 @@ beforeAll(() => {
 
 beforeEach(() => {
   db.query.mockReset();
+  sendCandidateLinkEmail.mockReset();
+  sendCandidateLinkEmail.mockResolvedValue();
 });
 
 // ─── Auth checks ──────────────────────────────────────────────────────────────
@@ -178,5 +182,115 @@ describe("POST /api/admin/parties — email validation", () => {
       .set("Authorization", authHeader)
       .send({ name: "Vihreät" });
     expect(res.status).toBe(500);
+  });
+});
+
+// ─── POST /:id/token ──────────────────────────────────────────────────────────
+
+describe("POST /api/admin/parties/:id/token", () => {
+  test("without auth → 401", async () => {
+    const res = await request(app).post(`/api/admin/parties/${VALID_UUID}/token`);
+    expect(res.status).toBe(401);
+  });
+
+  test("not found → 404", async () => {
+    db.query.mockResolvedValueOnce({ rows: [] });
+
+    const res = await request(app)
+      .post(`/api/admin/parties/${VALID_UUID}/token`)
+      .set("Authorization", authHeader);
+
+    expect(res.status).toBe(404);
+  });
+
+  test("happy path → 200 with a fresh token in the party's slug format", async () => {
+    db.query
+      .mockResolvedValueOnce({ rows: [{ name: "Vihreät" }] })
+      .mockImplementationOnce((sql, [token]) => Promise.resolve({ rows: [{ id: VALID_UUID, name: "Vihreät", token }] }));
+
+    const res = await request(app)
+      .post(`/api/admin/parties/${VALID_UUID}/token`)
+      .set("Authorization", authHeader);
+
+    expect(res.status).toBe(200);
+    expect(res.body.token).toMatch(/^vihreat-[A-Za-z0-9_-]{32}$/);
+    expect(db.query.mock.calls[1][0]).toMatch(/UPDATE parties SET token/);
+  });
+});
+
+// ─── GET /:id/candidates ──────────────────────────────────────────────────────
+
+describe("GET /api/admin/parties/:id/candidates", () => {
+  test("without auth → 401", async () => {
+    const res = await request(app).get(`/api/admin/parties/${VALID_UUID}/candidates`);
+    expect(res.status).toBe(401);
+  });
+
+  test("returns the party's candidates including their personal tokens", async () => {
+    const candidates = [{ id: VALID_UUID, name: "Maija", email: null, constituency: "Helsingin vaalipiiri", token: "abc", answer_count: "3" }];
+    db.query.mockResolvedValueOnce({ rows: candidates });
+
+    const res = await request(app)
+      .get(`/api/admin/parties/${VALID_UUID}/candidates`)
+      .set("Authorization", authHeader);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual(candidates);
+    expect(db.query.mock.calls[0][1]).toEqual([VALID_UUID]);
+  });
+});
+
+// ─── POST /:id/send-candidate-links ───────────────────────────────────────────
+
+describe("POST /api/admin/parties/:id/send-candidate-links", () => {
+  const originalSmtp = process.env.SMTP_HOST;
+  afterEach(() => {
+    if (originalSmtp === undefined) delete process.env.SMTP_HOST;
+    else process.env.SMTP_HOST = originalSmtp;
+  });
+
+  test("without auth → 401", async () => {
+    const res = await request(app).post(`/api/admin/parties/${VALID_UUID}/send-candidate-links`);
+    expect(res.status).toBe(401);
+  });
+
+  test("SMTP not configured → 503, nothing sent", async () => {
+    delete process.env.SMTP_HOST;
+
+    const res = await request(app)
+      .post(`/api/admin/parties/${VALID_UUID}/send-candidate-links`)
+      .set("Authorization", authHeader);
+
+    expect(res.status).toBe(503);
+    expect(sendCandidateLinkEmail).not.toHaveBeenCalled();
+  });
+
+  test("party not found → 404", async () => {
+    process.env.SMTP_HOST = "smtp.example.fi";
+    db.query.mockResolvedValueOnce({ rows: [] });
+
+    const res = await request(app)
+      .post(`/api/admin/parties/${VALID_UUID}/send-candidate-links`)
+      .set("Authorization", authHeader);
+
+    expect(res.status).toBe(404);
+  });
+
+  test("emails every candidate with an address and reports the rest", async () => {
+    process.env.SMTP_HOST = "smtp.example.fi";
+    const withEmail = { id: "c1", name: "Maija", email: "maija@example.fi", token: "t1" };
+    const withoutEmail = { id: "c2", name: "Matti", email: null, token: "t2" };
+    db.query
+      .mockResolvedValueOnce({ rows: [{ name: "Vihreät" }] })
+      .mockResolvedValueOnce({ rows: [withEmail, withoutEmail] });
+
+    const res = await request(app)
+      .post(`/api/admin/parties/${VALID_UUID}/send-candidate-links`)
+      .set("Authorization", authHeader);
+
+    expect(res.status).toBe(202);
+    expect(res.body).toEqual({ queued: 1, withoutEmail: 1 });
+    expect(sendCandidateLinkEmail).toHaveBeenCalledTimes(1);
+    expect(sendCandidateLinkEmail).toHaveBeenCalledWith(withEmail, "Vihreät", expect.any(String));
   });
 });

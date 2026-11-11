@@ -323,16 +323,14 @@ adminRouter.patch("/:id/approve", requireAdmin, validateUUIDParam("id"), async (
         const { rows: candidates } = await db.query(
           `SELECT c.id, c.name, c.email, c.token
            FROM candidates c
-           WHERE c.email IS NOT NULL
-             AND EXISTS (SELECT 1 FROM candidate_answers ca WHERE ca.candidate_id = c.id)`
+           WHERE c.email IS NOT NULL`
         );
 
         const { rows: parties } = await db.query(
           `SELECT DISTINCT p.id, p.name, p.email, p.token
            FROM parties p
            JOIN candidates c ON c.party_id = p.id
-           WHERE p.email IS NOT NULL
-             AND EXISTS (SELECT 1 FROM candidate_answers ca WHERE ca.candidate_id = c.id)`
+           WHERE p.email IS NOT NULL`
         );
 
         for (const c of candidates) {
@@ -547,15 +545,13 @@ adminRouter.patch("/:id/unhide", requireAdmin, validateUUIDParam("id"), async (r
         const { rows: candidates } = await db.query(
           `SELECT c.id, c.name, c.email, c.token
            FROM candidates c
-           WHERE c.email IS NOT NULL
-             AND EXISTS (SELECT 1 FROM candidate_answers ca WHERE ca.candidate_id = c.id)`
+           WHERE c.email IS NOT NULL`
         );
         const { rows: parties } = await db.query(
           `SELECT DISTINCT p.id, p.name, p.email, p.token
            FROM parties p
            JOIN candidates c ON c.party_id = p.id
-           WHERE p.email IS NOT NULL
-             AND EXISTS (SELECT 1 FROM candidate_answers ca WHERE ca.candidate_id = c.id)`
+           WHERE p.email IS NOT NULL`
         );
         for (const c of candidates) {
           sendApprovedQuestionSetNotificationToCandidate(publishedSet, questionCount, c, frontendBaseUrl)

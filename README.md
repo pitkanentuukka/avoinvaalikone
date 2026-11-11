@@ -158,6 +158,9 @@ All primary keys are UUIDs (`gen_random_uuid()`). New migrations should follow t
 |--------|------|-------------|
 | GET | `/api/admin/parties` | List all parties |
 | POST | `/api/admin/parties` | Create party — response includes the secret `token` and `registration_token` |
+| POST | `/api/admin/parties/:id/token` | Rotate the party token (old party portal link stops working) |
+| GET | `/api/admin/parties/:id/candidates` | Party's candidates **with** their personal tokens — for handing a link over by hand |
+| POST | `/api/admin/parties/:id/send-candidate-links` | Email every candidate of the party their personal link (202, sent in the background; 503 without SMTP) |
 | DELETE | `/api/admin/parties/:id` | Delete party |
 
 ```json
@@ -283,6 +286,7 @@ The entire React SPA lives in [vaalikone-frontend/src/App.jsx](vaalikone-fronten
 | Admin | `?view=admin` | Manage parties, approve/reject question sets |
 | NGO | `?view=ngo` | Submit a new question set |
 | Party portal | `?partyToken=…` | Share registration link, follow progress, re-send links, remove candidates |
+| Legacy answer link | `?view=candidate&partyToken=…&candidateId=…` | "Link out of date" page — never opens the party portal |
 | Registration | `?register=…` | Candidate self-registration |
 | Candidate | `?candidateToken=…` | Candidate edits own profile and answers |
 

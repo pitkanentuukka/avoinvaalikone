@@ -188,7 +188,7 @@ async function sendApprovedQuestionSetNotificationToParty(questionSet, questionC
       `Hei ${party.name},`,
       "",
       "Vaalikone 2026 -järjestelmään on hyväksytty uusi kysymyssarja.",
-      "Ehdokkaat, jotka ovat antaneet sähköpostiosoitteensa, saavat oman vastauslinkkinsä sähköpostitse. Muistuttakaa ehdokkaitanne vastaamaan uusiin kysymyksiin.",
+      "Ehdokkaanne saavat ilmoituksen ja oman vastauslinkkinsä sähköpostitse. Muistuttakaa heitä vastaamaan uusiin kysymyksiin.",
       "",
       `Järjestö: ${questionSet.ngo_name}`,
       `Kysymyssarja: ${questionSet.title}`,
