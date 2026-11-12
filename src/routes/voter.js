@@ -2,17 +2,9 @@ const { Router } = require("express");
 const { randomUUID } = require("crypto");
 const db = require("../db/pool");
 const { isValidUUID, validateUUIDArray, isValidRange } = require("../middleware/validation");
+const { weightFor, scoreCandidate, compareResults } = require("../match");
 
 const router = Router();
-
-// Weight used for a question the voter didn't weight. The weighting UI shows
-// "somewhat important" (1) as selected until the voter picks something else and
-// sends only the weights the voter clicked, so a missing weight means 1.
-const DEFAULT_WEIGHT = 1;
-
-function weightFor(weights, qId) {
-  return weights[qId] === undefined ? DEFAULT_WEIGHT : parseInt(weights[qId], 10);
-}
 
 /**
  * POST /api/voter/match
@@ -145,24 +137,7 @@ router.post("/match", async (req, res, next) => {
     // Compute match scores
     const results = candidates.map((c) => {
       const cAnswers = answersByCandidate[c.id] || {};
-      let totalWeight = 0;
-      let weightedScore = 0;
-      let answeredCount = 0;
-
-      for (const qId of voterQuestionIds) {
-        const voterValue = parseInt(answers[qId], 10);
-        if (isNaN(voterValue) || !cAnswers[qId]) continue;
-
-        const w = weightFor(weights, qId) + 1; // weight 0 → factor 1; weight 3 → factor 4
-        const diff = Math.abs(voterValue - cAnswers[qId].value);
-        const similarity = 1 - diff / 4;
-
-        weightedScore += similarity * w;
-        totalWeight += w;
-        answeredCount++;
-      }
-
-      const match = totalWeight > 0 ? Math.round((weightedScore / totalWeight) * 100) : 0;
+      const { match, answeredCount } = scoreCandidate(answers, weights, voterQuestionIds, cAnswers);
 
       return {
         id: c.id,
@@ -178,8 +153,7 @@ router.post("/match", async (req, res, next) => {
       };
     });
 
-    // Sort by match descending
-    results.sort((a, b) => b.match - a.match);
+    results.sort(compareResults);
 
     let sessionId = null;
     if (includeInResearch !== false && voterQuestionIds.length > 0) {
