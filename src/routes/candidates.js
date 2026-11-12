@@ -429,8 +429,8 @@ router.put("/me/:candidateToken", requireCandidateToken, async (req, res, next) 
     }
     // Profile before the answers, so a candidate removed by their party since
     // the token lookup gets a 404 here rather than an FK violation on the
-    // upsert. Questions are still locked before the candidate row, as on
-    // every other save path.
+    // upsert. Lock order is questions → candidate row → answers, the same as
+    // PUT .../answers; the admin delete/merge paths lock questions first too.
     const { rows } = await client.query(UPDATE_PROFILE_SQL, params);
     if (!rows.length) {
       await client.query("ROLLBACK");
@@ -466,11 +466,18 @@ router.put("/me/:candidateToken/answers", requireCandidateToken, async (req, res
       await client.query("ROLLBACK");
       return res.status(400).json({ error: result.error });
     }
-    await upsertAnswers(client, req.candidate.id, result.toSave);
-    await client.query(
+    // Candidate row before the answers, the same order as PUT /me with
+    // answers, so concurrent saves through the two routes can't deadlock.
+    const { rowCount } = await client.query(
       "UPDATE candidates SET updated_at = now() WHERE id = $1",
       [req.candidate.id]
     );
+    if (!rowCount) {
+      // Removed by their party since the token lookup.
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Virheellinen ehdokastunniste" });
+    }
+    await upsertAnswers(client, req.candidate.id, result.toSave);
     await client.query("COMMIT");
     res.json({ saved: result.toSave.length, skipped: result.skipped });
   } catch (err) {

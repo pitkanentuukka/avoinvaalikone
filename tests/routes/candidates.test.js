@@ -394,6 +394,14 @@ describe("PUT /api/candidates/me/:candidateToken", () => {
       const sqls = client.query.mock.calls.map(([sql]) => sql);
       expect(sqls[0]).toBe("BEGIN");
       expect(sqls[sqls.length - 1]).toBe("COMMIT");
+      // Lock order: questions, then the candidate row, then the answers. The
+      // admin delete/merge paths and PUT .../answers lock in the same order.
+      const lockAt = sqls.findIndex((sql) => /FROM questions[\s\S]*FOR KEY SHARE/.test(sql));
+      const profileAt = sqls.findIndex((sql) => /UPDATE candidates\s+SET name/.test(sql));
+      const upsertAt = sqls.findIndex((sql) => /INSERT INTO candidate_answers/.test(sql));
+      expect(lockAt).toBeGreaterThan(0);
+      expect(profileAt).toBeGreaterThan(lockAt);
+      expect(upsertAt).toBeGreaterThan(profileAt);
       const profileUpdate = client.query.mock.calls.find(isProfileUpdate);
       expect(profileUpdate[1][profileUpdate[1].length - 1]).toBe(CANDIDATE_ID);
       const upsert = client.query.mock.calls.find(([sql]) => /INSERT INTO candidate_answers/.test(sql));
@@ -491,9 +499,9 @@ describe("PUT /api/candidates/me/:candidateToken/answers", () => {
     client.query
       .mockResolvedValueOnce({}) // BEGIN
       .mockResolvedValueOnce({ rows: [{ id: QUESTION_ID }, { id: QUESTION_ID2 }] }) // existing questions
+      .mockResolvedValueOnce({ rowCount: 1 }) // UPDATE timestamp
       .mockResolvedValueOnce({}) // UPSERT answer 1
       .mockResolvedValueOnce({}) // UPSERT answer 2
-      .mockResolvedValueOnce({}) // UPDATE timestamp
       .mockResolvedValueOnce({}); // COMMIT
 
     const res = await request(app)
@@ -506,7 +514,7 @@ describe("PUT /api/candidates/me/:candidateToken/answers", () => {
       });
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ saved: 2, skipped: [] });
-    expect(client.query.mock.calls[2][1][0]).toBe(CANDIDATE_ID);
+    expect(client.query.mock.calls[3][1][0]).toBe(CANDIDATE_ID);
     expect(client.release).toHaveBeenCalled();
   });
 
@@ -516,7 +524,7 @@ describe("PUT /api/candidates/me/:candidateToken/answers", () => {
     client.query
       .mockResolvedValueOnce({}) // BEGIN
       .mockResolvedValueOnce({ rows: [{ id: QUESTION_ID }] }) // QUESTION_ID2 no longer exists
-      .mockResolvedValueOnce({}) // UPDATE timestamp
+      .mockResolvedValueOnce({ rowCount: 1 }) // UPDATE timestamp
       .mockResolvedValueOnce({}); // COMMIT
 
     const res = await request(app)
@@ -560,8 +568,8 @@ describe("PUT /api/candidates/me/:candidateToken/answers", () => {
     client.query
       .mockResolvedValueOnce({}) // BEGIN
       .mockResolvedValueOnce({ rows: [{ id: QUESTION_ID, statement: "Ydinvoimaa on lisättävä" }] })
+      .mockResolvedValueOnce({ rowCount: 1 }) // UPDATE timestamp
       .mockResolvedValueOnce({}) // UPSERT
-      .mockResolvedValueOnce({}) // UPDATE timestamp
       .mockResolvedValueOnce({}); // COMMIT
 
     const res = await request(app)
@@ -569,7 +577,7 @@ describe("PUT /api/candidates/me/:candidateToken/answers", () => {
       .send({ answers: { [QUESTION_ID]: { value: 2, explanation: "a".repeat(500) } } });
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ saved: 1, skipped: [] });
-    expect(client.query.mock.calls[2][1]).toEqual([CANDIDATE_ID, QUESTION_ID, 2, "a".repeat(500)]);
+    expect(client.query.mock.calls[3][1]).toEqual([CANDIDATE_ID, QUESTION_ID, 2, "a".repeat(500)]);
   });
 
   test("length is measured after trimming surrounding whitespace", async () => {
@@ -578,15 +586,15 @@ describe("PUT /api/candidates/me/:candidateToken/answers", () => {
     client.query
       .mockResolvedValueOnce({}) // BEGIN
       .mockResolvedValueOnce({ rows: [{ id: QUESTION_ID, statement: "Ydinvoimaa on lisättävä" }] })
+      .mockResolvedValueOnce({ rowCount: 1 }) // UPDATE timestamp
       .mockResolvedValueOnce({}) // UPSERT
-      .mockResolvedValueOnce({}) // UPDATE timestamp
       .mockResolvedValueOnce({}); // COMMIT
 
     const res = await request(app)
       .put(url)
       .send({ answers: { [QUESTION_ID]: { value: 2, explanation: `  ${"a".repeat(500)}  ` } } });
     expect(res.status).toBe(200);
-    expect(client.query.mock.calls[2][1][3]).toBe("a".repeat(500));
+    expect(client.query.mock.calls[3][1][3]).toBe("a".repeat(500));
   });
 
   test("numeric string value is accepted", async () => {
@@ -595,13 +603,13 @@ describe("PUT /api/candidates/me/:candidateToken/answers", () => {
     client.query
       .mockResolvedValueOnce({}) // BEGIN
       .mockResolvedValueOnce({ rows: [{ id: QUESTION_ID, statement: "Ydinvoimaa on lisättävä" }] })
+      .mockResolvedValueOnce({ rowCount: 1 }) // UPDATE timestamp
       .mockResolvedValueOnce({}) // UPSERT
-      .mockResolvedValueOnce({}) // UPDATE timestamp
       .mockResolvedValueOnce({}); // COMMIT
 
     const res = await request(app).put(url).send({ answers: { [QUESTION_ID]: { value: "2" } } });
     expect(res.status).toBe(200);
-    expect(client.query.mock.calls[2][1]).toEqual([CANDIDATE_ID, QUESTION_ID, 2, ""]);
+    expect(client.query.mock.calls[3][1]).toEqual([CANDIDATE_ID, QUESTION_ID, 2, ""]);
   });
 
   test.each([5, false, ["x"]])("non-string explanation %p → 400, nothing saved", async (explanation) => {
@@ -684,7 +692,7 @@ describe("PUT /api/candidates/me/:candidateToken/answers", () => {
     client.query
       .mockResolvedValueOnce({}) // BEGIN
       .mockResolvedValueOnce({ rows: [] }) // QUESTION_ID no longer exists
-      .mockResolvedValueOnce({}) // UPDATE timestamp
+      .mockResolvedValueOnce({ rowCount: 1 }) // UPDATE timestamp
       .mockResolvedValueOnce({}); // COMMIT
 
     const res = await request(app).put(url).send({ answers: { [QUESTION_ID]: null } });
@@ -749,8 +757,8 @@ describe("PUT /api/candidates/me/:candidateToken/answers", () => {
     client.query
       .mockResolvedValueOnce({}) // BEGIN
       .mockResolvedValueOnce({ rows: [{ id: QUESTION_ID }] }) // existing questions
+      .mockResolvedValueOnce({ rowCount: 1 }) // UPDATE timestamp
       .mockResolvedValueOnce({}) // UPSERT
-      .mockResolvedValueOnce({}) // UPDATE timestamp
       .mockResolvedValueOnce({}); // COMMIT
 
     const res = await request(app).put(url).send({ answers: { [QUESTION_ID]: { value: 2 } } });
@@ -758,7 +766,27 @@ describe("PUT /api/candidates/me/:candidateToken/answers", () => {
     const sqls = client.query.mock.calls.map(([sql]) => sql);
     expect(sqls[0]).toBe("BEGIN");
     expect(sqls[1]).toMatch(/FROM questions\b[\s\S]*ORDER BY id\s+FOR KEY SHARE/);
-    expect(sqls[2]).toMatch(/INSERT INTO candidate_answers/);
+    // Candidate row before the answers, as in PUT /me with answers, so the two
+    // routes can't deadlock against each other (#17 review round 3).
+    expect(sqls[2]).toMatch(/UPDATE candidates SET updated_at/);
+    expect(sqls[3]).toMatch(/INSERT INTO candidate_answers/);
+  });
+
+  test("candidate gone since the token lookup → 404, nothing written", async () => {
+    db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
+    const client = buildMockClient();
+    client.query
+      .mockResolvedValueOnce({}) // BEGIN
+      .mockResolvedValueOnce({ rows: [{ id: QUESTION_ID }] }) // existing questions
+      .mockResolvedValueOnce({ rowCount: 0 }) // UPDATE timestamp: candidate removed
+      .mockResolvedValueOnce({}); // ROLLBACK
+
+    const res = await request(app).put(url).send({ answers: { [QUESTION_ID]: { value: 2 } } });
+    expect(res.status).toBe(404);
+    const sqls = client.query.mock.calls.map(([sql]) => sql);
+    expect(sqls.some((sql) => /INSERT INTO candidate_answers/.test(sql))).toBe(false);
+    expect(sqls).toContain("ROLLBACK");
+    expect(client.release).toHaveBeenCalled();
   });
 
   test("validation failure after the lock → ROLLBACK, 400, client released", async () => {
