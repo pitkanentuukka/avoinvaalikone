@@ -317,6 +317,170 @@ describe("PUT /api/candidates/me/:candidateToken", () => {
     const params = db.query.mock.calls[1][1];
     expect(params[params.length - 1]).toBe(CANDIDATE_ID);
   });
+
+  // #17: profile and answers are saved together, so a rejected answer
+  // doesn't leave the profile change stored behind an error message.
+  describe("with answers", () => {
+    const isProfileUpdate = ([sql]) => /UPDATE candidates\s+SET name/.test(sql);
+
+    test("invalid answer → 400, profile not updated", async () => {
+      db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
+      // Answered if the route updates the profile outside the transaction.
+      db.query.mockResolvedValueOnce({ rows: [{ id: CANDIDATE_ID, ...PROFILE, bio: "Uusi bio" }] });
+      const client = buildMockClient();
+      client.query
+        .mockResolvedValueOnce({}) // BEGIN
+        .mockResolvedValueOnce({ rows: [{ id: QUESTION_ID, statement: "Ydinvoimaa on lisättävä" }] })
+        .mockResolvedValue({});
+
+      const res = await request(app)
+        .put(url)
+        .send({ ...PROFILE, bio: "Uusi bio", answers: { [QUESTION_ID]: { value: 7 } } });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain("Ydinvoimaa on lisättävä");
+      expect([...db.query.mock.calls, ...client.query.mock.calls].filter(isProfileUpdate)).toHaveLength(0);
+      expect(client.query.mock.calls.map(([sql]) => sql)).toContain("ROLLBACK");
+      expect(client.release).toHaveBeenCalled();
+    });
+
+    test("profile validation error → 400 before any answer is touched", async () => {
+      db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
+      const client = buildMockClient();
+
+      const res = await request(app)
+        .put(url)
+        .send({ ...PROFILE, email: "ei-osoite", answers: { [QUESTION_ID]: { value: 2 } } });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/sähköposti/i);
+      expect(client.query).not.toHaveBeenCalled();
+    });
+
+    test("invalid constituency → 400, answers rolled back", async () => {
+      db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
+      const client = buildMockClient();
+      const checkViolation = Object.assign(new Error("check"), { code: "23514" });
+      client.query.mockImplementation(async (sql) => {
+        if (/^SELECT id, statement FROM questions/.test(sql)) return { rows: [{ id: QUESTION_ID, statement: "S" }] };
+        if (/UPDATE candidates\s+SET name/.test(sql)) throw checkViolation;
+        return {};
+      });
+
+      const res = await request(app)
+        .put(url)
+        .send({ ...PROFILE, constituency: "Atlantis", answers: { [QUESTION_ID]: { value: 2 } } });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/vaalipiiri/i);
+      const sqls = client.query.mock.calls.map(([sql]) => sql);
+      expect(sqls).toContain("ROLLBACK");
+      expect(sqls).not.toContain("COMMIT");
+      expect(client.release).toHaveBeenCalled();
+    });
+
+    test("happy path → profile and answers committed in one transaction", async () => {
+      db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
+      const client = buildMockClient();
+      client.query.mockImplementation(async (sql) => {
+        if (/^SELECT id, statement FROM questions/.test(sql)) return { rows: [{ id: QUESTION_ID, statement: "S" }] };
+        if (/UPDATE candidates\s+SET name/.test(sql)) return { rows: [{ id: CANDIDATE_ID, ...PROFILE, bio: "Bio" }] };
+        return {};
+      });
+
+      const res = await request(app)
+        .put(url)
+        .send({ ...PROFILE, bio: "Bio", answers: { [QUESTION_ID]: { value: 3, explanation: "Koska" }, [QUESTION_ID2]: { value: 1 } } });
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ bio: "Bio", saved: 1, skipped: [QUESTION_ID2] });
+
+      const sqls = client.query.mock.calls.map(([sql]) => sql);
+      expect(sqls[0]).toBe("BEGIN");
+      expect(sqls[sqls.length - 1]).toBe("COMMIT");
+      // Lock order: questions, then the candidate row, then the answers. The
+      // admin delete/merge paths and PUT .../answers lock in the same order.
+      const lockAt = sqls.findIndex((sql) => /FROM questions[\s\S]*FOR KEY SHARE/.test(sql));
+      const profileAt = sqls.findIndex((sql) => /UPDATE candidates\s+SET name/.test(sql));
+      const upsertAt = sqls.findIndex((sql) => /INSERT INTO candidate_answers/.test(sql));
+      expect(lockAt).toBeGreaterThan(0);
+      expect(profileAt).toBeGreaterThan(lockAt);
+      expect(upsertAt).toBeGreaterThan(profileAt);
+      const profileUpdate = client.query.mock.calls.find(isProfileUpdate);
+      expect(profileUpdate[1][profileUpdate[1].length - 1]).toBe(CANDIDATE_ID);
+      const upsert = client.query.mock.calls.find(([sql]) => /INSERT INTO candidate_answers/.test(sql));
+      expect(upsert[1]).toEqual([CANDIDATE_ID, QUESTION_ID, 3, "Koska"]);
+      // The profile update goes through the transaction, not the pool.
+      expect(db.query.mock.calls.filter(isProfileUpdate)).toHaveLength(0);
+      expect(client.release).toHaveBeenCalled();
+    });
+
+    test("nothing rated (answers: {}) → profile saved in the transaction", async () => {
+      db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
+      const client = buildMockClient();
+      client.query.mockImplementation(async (sql) =>
+        /UPDATE candidates\s+SET name/.test(sql) ? { rows: [{ id: CANDIDATE_ID, ...PROFILE }] } : {}
+      );
+
+      const res = await request(app).put(url).send({ ...PROFILE, answers: {} });
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ name: PROFILE.name, saved: 0, skipped: [] });
+      const sqls = client.query.mock.calls.map(([sql]) => sql);
+      expect(sqls[0]).toBe("BEGIN");
+      expect(sqls[sqls.length - 1]).toBe("COMMIT");
+      expect(sqls.some((sql) => /candidate_answers/.test(sql))).toBe(false);
+    });
+
+    test("answers: null → plain profile update", async () => {
+      db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
+      db.query.mockResolvedValueOnce({ rows: [{ id: CANDIDATE_ID, ...PROFILE }] });
+      const client = buildMockClient();
+
+      const res = await request(app).put(url).send({ ...PROFILE, answers: null });
+      expect(res.status).toBe(200);
+      expect(res.body.name).toBe(PROFILE.name);
+      expect(res.body).not.toHaveProperty("saved");
+      expect(client.query).not.toHaveBeenCalled();
+    });
+
+    // A candidate removed by their party between the token lookup and the save.
+    test("candidate gone by the time of the update → 404, rolled back", async () => {
+      db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
+      const client = buildMockClient();
+      client.query.mockImplementation(async (sql) => (/UPDATE candidates\s+SET name/.test(sql) ? { rows: [] } : {}));
+
+      const res = await request(app).put(url).send({ ...PROFILE, answers: {} });
+      expect(res.status).toBe(404);
+      const sqls = client.query.mock.calls.map(([sql]) => sql);
+      expect(sqls).toContain("ROLLBACK");
+      expect(sqls).not.toContain("COMMIT");
+      expect(client.release).toHaveBeenCalled();
+    });
+
+    test("candidate gone, with answers rated → 404 before any answer is written", async () => {
+      db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
+      const client = buildMockClient();
+      const fkViolation = Object.assign(new Error("fk"), { code: "23503" });
+      client.query.mockImplementation(async (sql) => {
+        if (/^SELECT id, statement FROM questions/.test(sql)) return { rows: [{ id: QUESTION_ID, statement: "S" }] };
+        if (/UPDATE candidates\s+SET name/.test(sql)) return { rows: [] };
+        if (/INSERT INTO candidate_answers/.test(sql)) throw fkViolation;
+        return {};
+      });
+
+      const res = await request(app).put(url).send({ ...PROFILE, answers: { [QUESTION_ID]: { value: 2 } } });
+      expect(res.status).toBe(404);
+      const sqls = client.query.mock.calls.map(([sql]) => sql);
+      expect(sqls.some((sql) => /INSERT INTO candidate_answers/.test(sql))).toBe(false);
+      expect(sqls).toContain("ROLLBACK");
+    });
+
+    test.each([["a string", "x"], ["a number", 3], ["an array", []]])("answers as %s → 400", async (_, answers) => {
+      db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
+      const client = buildMockClient();
+      const res = await request(app).put(url).send({ ...PROFILE, answers });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/Vastaukset/);
+      expect(client.query).not.toHaveBeenCalled();
+      expect(db.query.mock.calls.filter(isProfileUpdate)).toHaveLength(0);
+    });
+  });
 });
 
 describe("PUT /api/candidates/me/:candidateToken/answers", () => {
@@ -335,9 +499,9 @@ describe("PUT /api/candidates/me/:candidateToken/answers", () => {
     client.query
       .mockResolvedValueOnce({}) // BEGIN
       .mockResolvedValueOnce({ rows: [{ id: QUESTION_ID }, { id: QUESTION_ID2 }] }) // existing questions
+      .mockResolvedValueOnce({ rowCount: 1 }) // UPDATE timestamp
       .mockResolvedValueOnce({}) // UPSERT answer 1
       .mockResolvedValueOnce({}) // UPSERT answer 2
-      .mockResolvedValueOnce({}) // UPDATE timestamp
       .mockResolvedValueOnce({}); // COMMIT
 
     const res = await request(app)
@@ -350,7 +514,7 @@ describe("PUT /api/candidates/me/:candidateToken/answers", () => {
       });
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ saved: 2, skipped: [] });
-    expect(client.query.mock.calls[2][1][0]).toBe(CANDIDATE_ID);
+    expect(client.query.mock.calls[3][1][0]).toBe(CANDIDATE_ID);
     expect(client.release).toHaveBeenCalled();
   });
 
@@ -360,7 +524,7 @@ describe("PUT /api/candidates/me/:candidateToken/answers", () => {
     client.query
       .mockResolvedValueOnce({}) // BEGIN
       .mockResolvedValueOnce({ rows: [{ id: QUESTION_ID }] }) // QUESTION_ID2 no longer exists
-      .mockResolvedValueOnce({}) // UPDATE timestamp
+      .mockResolvedValueOnce({ rowCount: 1 }) // UPDATE timestamp
       .mockResolvedValueOnce({}); // COMMIT
 
     const res = await request(app)
@@ -404,8 +568,8 @@ describe("PUT /api/candidates/me/:candidateToken/answers", () => {
     client.query
       .mockResolvedValueOnce({}) // BEGIN
       .mockResolvedValueOnce({ rows: [{ id: QUESTION_ID, statement: "Ydinvoimaa on lisättävä" }] })
+      .mockResolvedValueOnce({ rowCount: 1 }) // UPDATE timestamp
       .mockResolvedValueOnce({}) // UPSERT
-      .mockResolvedValueOnce({}) // UPDATE timestamp
       .mockResolvedValueOnce({}); // COMMIT
 
     const res = await request(app)
@@ -413,7 +577,7 @@ describe("PUT /api/candidates/me/:candidateToken/answers", () => {
       .send({ answers: { [QUESTION_ID]: { value: 2, explanation: "a".repeat(500) } } });
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ saved: 1, skipped: [] });
-    expect(client.query.mock.calls[2][1]).toEqual([CANDIDATE_ID, QUESTION_ID, 2, "a".repeat(500)]);
+    expect(client.query.mock.calls[3][1]).toEqual([CANDIDATE_ID, QUESTION_ID, 2, "a".repeat(500)]);
   });
 
   test("length is measured after trimming surrounding whitespace", async () => {
@@ -422,15 +586,15 @@ describe("PUT /api/candidates/me/:candidateToken/answers", () => {
     client.query
       .mockResolvedValueOnce({}) // BEGIN
       .mockResolvedValueOnce({ rows: [{ id: QUESTION_ID, statement: "Ydinvoimaa on lisättävä" }] })
+      .mockResolvedValueOnce({ rowCount: 1 }) // UPDATE timestamp
       .mockResolvedValueOnce({}) // UPSERT
-      .mockResolvedValueOnce({}) // UPDATE timestamp
       .mockResolvedValueOnce({}); // COMMIT
 
     const res = await request(app)
       .put(url)
       .send({ answers: { [QUESTION_ID]: { value: 2, explanation: `  ${"a".repeat(500)}  ` } } });
     expect(res.status).toBe(200);
-    expect(client.query.mock.calls[2][1][3]).toBe("a".repeat(500));
+    expect(client.query.mock.calls[3][1][3]).toBe("a".repeat(500));
   });
 
   test("numeric string value is accepted", async () => {
@@ -439,13 +603,13 @@ describe("PUT /api/candidates/me/:candidateToken/answers", () => {
     client.query
       .mockResolvedValueOnce({}) // BEGIN
       .mockResolvedValueOnce({ rows: [{ id: QUESTION_ID, statement: "Ydinvoimaa on lisättävä" }] })
+      .mockResolvedValueOnce({ rowCount: 1 }) // UPDATE timestamp
       .mockResolvedValueOnce({}) // UPSERT
-      .mockResolvedValueOnce({}) // UPDATE timestamp
       .mockResolvedValueOnce({}); // COMMIT
 
     const res = await request(app).put(url).send({ answers: { [QUESTION_ID]: { value: "2" } } });
     expect(res.status).toBe(200);
-    expect(client.query.mock.calls[2][1]).toEqual([CANDIDATE_ID, QUESTION_ID, 2, ""]);
+    expect(client.query.mock.calls[3][1]).toEqual([CANDIDATE_ID, QUESTION_ID, 2, ""]);
   });
 
   test.each([5, false, ["x"]])("non-string explanation %p → 400, nothing saved", async (explanation) => {
@@ -528,7 +692,7 @@ describe("PUT /api/candidates/me/:candidateToken/answers", () => {
     client.query
       .mockResolvedValueOnce({}) // BEGIN
       .mockResolvedValueOnce({ rows: [] }) // QUESTION_ID no longer exists
-      .mockResolvedValueOnce({}) // UPDATE timestamp
+      .mockResolvedValueOnce({ rowCount: 1 }) // UPDATE timestamp
       .mockResolvedValueOnce({}); // COMMIT
 
     const res = await request(app).put(url).send({ answers: { [QUESTION_ID]: null } });
@@ -593,8 +757,8 @@ describe("PUT /api/candidates/me/:candidateToken/answers", () => {
     client.query
       .mockResolvedValueOnce({}) // BEGIN
       .mockResolvedValueOnce({ rows: [{ id: QUESTION_ID }] }) // existing questions
+      .mockResolvedValueOnce({ rowCount: 1 }) // UPDATE timestamp
       .mockResolvedValueOnce({}) // UPSERT
-      .mockResolvedValueOnce({}) // UPDATE timestamp
       .mockResolvedValueOnce({}); // COMMIT
 
     const res = await request(app).put(url).send({ answers: { [QUESTION_ID]: { value: 2 } } });
@@ -602,7 +766,27 @@ describe("PUT /api/candidates/me/:candidateToken/answers", () => {
     const sqls = client.query.mock.calls.map(([sql]) => sql);
     expect(sqls[0]).toBe("BEGIN");
     expect(sqls[1]).toMatch(/FROM questions\b[\s\S]*ORDER BY id\s+FOR KEY SHARE/);
-    expect(sqls[2]).toMatch(/INSERT INTO candidate_answers/);
+    // Candidate row before the answers, as in PUT /me with answers, so the two
+    // routes can't deadlock against each other (#17 review round 3).
+    expect(sqls[2]).toMatch(/UPDATE candidates SET updated_at/);
+    expect(sqls[3]).toMatch(/INSERT INTO candidate_answers/);
+  });
+
+  test("candidate gone since the token lookup → 404, nothing written", async () => {
+    db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
+    const client = buildMockClient();
+    client.query
+      .mockResolvedValueOnce({}) // BEGIN
+      .mockResolvedValueOnce({ rows: [{ id: QUESTION_ID }] }) // existing questions
+      .mockResolvedValueOnce({ rowCount: 0 }) // UPDATE timestamp: candidate removed
+      .mockResolvedValueOnce({}); // ROLLBACK
+
+    const res = await request(app).put(url).send({ answers: { [QUESTION_ID]: { value: 2 } } });
+    expect(res.status).toBe(404);
+    const sqls = client.query.mock.calls.map(([sql]) => sql);
+    expect(sqls.some((sql) => /INSERT INTO candidate_answers/.test(sql))).toBe(false);
+    expect(sqls).toContain("ROLLBACK");
+    expect(client.release).toHaveBeenCalled();
   });
 
   test("validation failure after the lock → ROLLBACK, 400, client released", async () => {

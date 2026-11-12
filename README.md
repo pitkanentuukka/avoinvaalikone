@@ -230,7 +230,7 @@ Each entry in `questions` is a string or `{ "statement": "..." }`, at most 50 en
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/candidates/me/:candidateToken` | Own profile, party and answers |
-| PUT | `/api/candidates/me/:candidateToken` | Update own profile (full replace) |
+| PUT | `/api/candidates/me/:candidateToken` | Update own profile (full replace); an optional `answers` field (same shape as below) is saved in the same transaction, and the response then also carries `saved` and `skipped` |
 | PUT | `/api/candidates/me/:candidateToken/answers` | Save own answers (upsert) |
 
 ```json

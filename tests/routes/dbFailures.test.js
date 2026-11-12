@@ -37,6 +37,17 @@ const routes = [
         .send({ answers: { [QUESTION_ID]: { value: 2 } } }),
   },
   {
+    name: "PUT /api/candidates/me/:candidateToken (with answers)",
+    setup: () => db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] }),
+    send: () =>
+      request(app)
+        .put(`/api/candidates/me/${CANDIDATE_TOKEN}`)
+        .send({
+          name: "Eeva Ehdokas", email: "eeva@example.fi", constituency: "Helsingin vaalipiiri",
+          answers: { [QUESTION_ID]: { value: 2 } },
+        }),
+  },
+  {
     name: "POST /api/question-sets",
     send: () =>
       request(app)

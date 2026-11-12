@@ -57,7 +57,7 @@ describe("apiFetch retries", () => {
     ["NGO submission", (api) => api.submitQuestionSet({ title: "T" })],
     ["sending every candidate their link", (api) => api.sendPartyCandidateLinks("secret", "id")],
     ["candidate registration", (api) => api.register("token", { name: "N" })],
-    ["saving candidate answers", (api) => api.saveOwnAnswers("token", {})],
+    ["saving a candidate's profile and answers", (api) => api.saveOwnProfile("token", { name: "N" }, {})],
     ["approving a question set", (api) => api.approveQuestionSet("secret", "id")],
     ["deleting a party", (api) => api.deleteParty("secret", "id")],
   ])("%s is not retried on a transient upstream error", async (_, call) => {
@@ -70,6 +70,30 @@ describe("apiFetch retries", () => {
     const { api, fetch } = apiWith(networkError(), jsonResponse(201, {}));
     await expect(api.submitQuestionSet({ title: "T" })).rejects.toThrow("Failed to fetch");
     expect(fetch).toHaveBeenCalledTimes(1);
+  });
+});
+
+// #17: one request, so the server can save both or neither.
+describe("saveOwnProfile", () => {
+  test("sends the profile and the answers in a single PUT", async () => {
+    const { api, fetch } = apiWith(jsonResponse(200, { saved: 1, skipped: [] }));
+    const qId = "660e8400-e29b-41d4-a716-446655440000";
+    await api.saveOwnProfile("tok", { name: "Eeva", photoUrl: "" }, { [qId]: { value: 2, explanation: "" } });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const [url, opts] = fetch.mock.calls[0];
+    expect(url).toBe("/api/candidates/me/tok");
+    expect(opts.method).toBe("PUT");
+    expect(JSON.parse(opts.body)).toEqual({ name: "Eeva", photoUrl: "", answers: { [qId]: { value: 2, explanation: "" } } });
+  });
+
+  test("a reply without saved (a backend that ignores answers) is an error", async () => {
+    const { api } = apiWith(jsonResponse(200, { id: "c", name: "Eeva" }));
+    await expect(api.saveOwnProfile("tok", { name: "Eeva" }, {})).rejects.toMatchObject({ answersIgnored: true });
+  });
+
+  test("a reply with saved resolves with saved and skipped", async () => {
+    const { api } = apiWith(jsonResponse(200, { name: "Eeva", saved: 0, skipped: ["x"] }));
+    await expect(api.saveOwnProfile("tok", { name: "Eeva" }, {})).resolves.toMatchObject({ saved: 0, skipped: ["x"] });
   });
 });
 

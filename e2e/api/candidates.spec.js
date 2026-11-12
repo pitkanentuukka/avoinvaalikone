@@ -296,6 +296,70 @@ test.describe("UC-CAND-4: Candidate saves own answers (candidate token)", () => 
   });
 });
 
+// #17: the candidate page saves profile and answers in one request, all or nothing.
+test.describe("Candidate saves profile and answers together (candidate token)", () => {
+  let party, candidate, questions;
+  const ownProfile = async (request) => (await get(request, `/candidates/me/${candidate.token}`)).body;
+
+  test.beforeAll(async ({ request }) => {
+    party = await createParty(request, `CombinedParty ${Date.now()}`);
+    candidate = await createCandidate(request, party, { name: "Combined Candidate", bio: "Alkuperäinen" });
+    const qs = await submitQuestionSet(request, {
+      ngoName: "CombinedNGO",
+      title: `Combined ${Date.now()}`,
+      questions: ["Yhdistetty 1", "Yhdistetty 2"],
+    });
+    await approveQuestionSet(request, qs.id);
+    questions = qs.questions;
+    await saveAnswers(request, candidate, { [questions[0].id]: { value: 1, explanation: "" } });
+  });
+
+  const profile = () => ({ ...PROFILE, name: candidate.name, email: candidate.email });
+
+  test("an invalid answer leaves the profile unchanged", async ({ request }) => {
+    const { res, body } = await put(request, `/candidates/me/${candidate.token}`, {
+      ...profile(),
+      bio: "Muutettu",
+      answers: { [questions[0].id]: { value: 3, explanation: "" }, [questions[1].id]: { value: 99, explanation: "" } },
+    });
+    expect(res.status()).toBe(400);
+    expect(body.error).toContain(questions[1].statement);
+
+    const me = await ownProfile(request);
+    expect(me.bio).toBe("Alkuperäinen");
+    expect(me.answers[questions[0].id].value).toBe(1);
+    expect(me.answers[questions[1].id]).toBeUndefined();
+  });
+
+  test("an invalid constituency leaves the answers unchanged", async ({ request }) => {
+    const { res } = await put(request, `/candidates/me/${candidate.token}`, {
+      ...profile(),
+      constituency: "Atlantis",
+      answers: { [questions[0].id]: { value: 4, explanation: "" } },
+    });
+    expect(res.status()).toBe(400);
+
+    const me = await ownProfile(request);
+    expect(me.constituency).toBe("Helsingin vaalipiiri");
+    expect(me.answers[questions[0].id].value).toBe(1);
+  });
+
+  test("a valid save stores both", async ({ request }) => {
+    const { res, body } = await put(request, `/candidates/me/${candidate.token}`, {
+      ...profile(),
+      bio: "Muutettu",
+      answers: { [questions[0].id]: { value: 3, explanation: "Perustelu" }, [questions[1].id]: { value: 0, explanation: "" } },
+    });
+    expect(res.status()).toBe(200);
+    expect(body).toMatchObject({ bio: "Muutettu", saved: 2, skipped: [] });
+
+    const me = await ownProfile(request);
+    expect(me.bio).toBe("Muutettu");
+    expect(me.answers[questions[0].id]).toMatchObject({ value: 3, explanation: "Perustelu" });
+    expect(me.answers[questions[1].id].value).toBe(0);
+  });
+});
+
 test.describe("Public candidate endpoints", () => {
   test("UC-VOTER-2: list all candidates", async ({ request }) => {
     const { res, body } = await get(request, "/candidates");

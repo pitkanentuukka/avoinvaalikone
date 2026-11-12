@@ -11,6 +11,7 @@ unaffected, and what a fix would look like.
 ## Question UUID keys must be lowercase
 
 **Endpoints:** `POST /api/voter/match` (`answers`, `weights`),
+`PUT /api/candidates/me/:candidateToken` and
 `PUT /api/candidates/me/:candidateToken/answers` (`answers`)
 
 Validation accepts UUIDs in any case, but the routes look answers up by the
@@ -112,3 +113,17 @@ the copy it saves in localStorage keeps them as such.
 **Fix:** require `Number.isInteger(value)` in range, as
 `PUT /api/candidates/me/:candidateToken/answers` already does. Decide first
 whether to keep accepting digit strings.
+
+## A profile-only save of a removed candidate answers 200 with an empty body
+
+**Endpoint:** `PUT /api/candidates/me/:candidateToken` without `answers`
+
+If the party removes the candidate between the token lookup and the profile
+update, the update matches no row and the response is a 200 with an empty body
+instead of an error. With `answers`, the same case returns 404.
+
+**Why the frontend is unaffected:** it always sends `answers` (`{}` when nothing
+is rated), so it always takes the transactional branch.
+
+**Fix:** return 404 when the update matches no row, as the `answers` branch
+does.

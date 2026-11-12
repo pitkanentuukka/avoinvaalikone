@@ -119,10 +119,17 @@ export function createApi({
 
     // Candidate-token gated (the candidate's personal link)
     getOwnProfile: (token) => apiFetch(`/candidates/me/${token}`),
-    updateOwnProfile: (token, data) =>
-      apiFetch(`/candidates/me/${token}`, { method: "PUT", body: data }),
-    saveOwnAnswers: (token, answers) =>
-      apiFetch(`/candidates/me/${token}/answers`, { method: "PUT", body: { answers } }),
+    // One request, so the server saves the profile and the answers together
+    // or neither: a rejected answer must not leave the profile change stored.
+    // A backend that predates the combined save ignores `answers` and replies
+    // without `saved`; that is an error (answersIgnored), not a success.
+    saveOwnProfile: async (token, profile, answers) => {
+      const result = await apiFetch(`/candidates/me/${token}`, { method: "PUT", body: { ...profile, answers } });
+      if (typeof result?.saved !== "number") {
+        throw Object.assign(new Error("Answers were not saved"), { answersIgnored: true });
+      }
+      return result;
+    },
 
     // Admin
     getParties: (secret) => apiFetch("/admin/parties", { adminSecret: secret }),
