@@ -5,13 +5,22 @@ const { isValidUUID, validateUUIDArray, isValidRange } = require("../middleware/
 
 const router = Router();
 
+// Weight used for a question the voter didn't weight. The weighting UI shows
+// "somewhat important" (1) as selected until the voter picks something else and
+// sends only the weights the voter clicked, so a missing weight means 1.
+const DEFAULT_WEIGHT = 1;
+
+function weightFor(weights, qId) {
+  return weights[qId] === undefined ? DEFAULT_WEIGHT : parseInt(weights[qId], 10);
+}
+
 /**
  * POST /api/voter/match
  *
  * Body:
  * {
  *   answers: { [questionId]: value (0-4) },
- *   weights: { [questionId]: weight (0-3) },   // optional
+ *   weights: { [questionId]: weight (0-3) },   // optional, missing → DEFAULT_WEIGHT
  *   questionSetIds: ["uuid", ...]               // optional filter
  * }
  *
@@ -144,7 +153,7 @@ router.post("/match", async (req, res, next) => {
         const voterValue = parseInt(answers[qId], 10);
         if (isNaN(voterValue) || !cAnswers[qId]) continue;
 
-        const w = (parseInt(weights[qId], 10) || 0) + 1; // default weight 0 → factor 1; weight 3 → factor 4
+        const w = weightFor(weights, qId) + 1; // weight 0 → factor 1; weight 3 → factor 4
         const diff = Math.abs(voterValue - cAnswers[qId].value);
         const similarity = 1 - diff / 4;
 
@@ -180,7 +189,7 @@ router.post("/match", async (req, res, next) => {
         .join(", ");
       const flatValues = [sessionId];
       for (const qId of voterQuestionIds) {
-        flatValues.push(qId, parseInt(answers[qId], 10), parseInt(weights[qId], 10) || 0);
+        flatValues.push(qId, parseInt(answers[qId], 10), weightFor(weights, qId));
       }
       // Fire-and-forget: the research insert must not add latency to the match
       // response. Losing anonymized rows on a crash is acceptable.

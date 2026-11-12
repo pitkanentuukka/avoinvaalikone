@@ -62,7 +62,7 @@ docker compose down                       # Stop all services
 - NGO submissions: 20 req / 15 min
 - Voter match: 60 req / 1 min
 
-**Match algorithm** (`src/routes/voter.js`): For each overlapping question, computes `similarity = 1 - |voterValue - candidateValue| / 4`, multiplied by `weight + 1` (so weight 0 → factor 1, weight 3 → factor 4). Scores are averaged and returned as a percentage. When the voter restricts to certain sets, set membership is tested with `EXISTS` against `question_set_questions` (not a column on `questions`), so a question shared by multiple selected sets is still counted once.
+**Match algorithm** (`src/routes/voter.js`): For each overlapping question, computes `similarity = 1 - |voterValue - candidateValue| / 4`, multiplied by `weight + 1` (so weight 0 → factor 1, weight 3 → factor 4). A question with no weight in the request counts as weight 1 (`DEFAULT_WEIGHT`), because the weighting UI shows "somewhat important" as selected and only sends weights the voter clicked; the same default is stored in `voter_responses`. Scores are averaged and returned as a percentage. When the voter restricts to certain sets, set membership is tested with `EXISTS` against `question_set_questions` (not a column on `questions`), so a question shared by multiple selected sets is still counted once.
 
 ### Frontend
 
