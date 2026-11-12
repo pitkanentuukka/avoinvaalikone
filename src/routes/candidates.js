@@ -355,12 +355,20 @@ router.put("/me/:candidateToken/answers", requireCandidateToken, async (req, res
   let client;
   try {
     client = await db.getClient();
+    await client.query("BEGIN");
+
     // Skip questions that no longer exist (merged or deleted while the
     // candidate had the form open) instead of failing the whole save on a
     // foreign-key violation; their ids are returned so the UI can say so.
+    // FOR KEY SHARE makes a concurrent delete or merge wait for this save, so
+    // a question can't vanish between this check and the upsert. Locking in id
+    // order, as the merge endpoint does, keeps the two from deadlocking.
     const ids = Object.keys(answers).filter(isValidUUID);
     const { rows: existingRows } = ids.length
-      ? await client.query("SELECT id, statement FROM questions WHERE id = ANY($1)", [ids])
+      ? await client.query(
+          "SELECT id, statement FROM questions WHERE id = ANY($1) ORDER BY id FOR KEY SHARE",
+          [ids]
+        )
       : { rows: [] };
     const statements = new Map(existingRows.map((r) => [r.id, r.statement]));
 
@@ -396,10 +404,9 @@ router.put("/me/:candidateToken/answers", requireCandidateToken, async (req, res
       const inQuestions = (list) => `${list.length > 1 ? "kysymyksissä" : "kysymyksessä"}: ${quoteList(list)}`;
       if (invalidValue.length) errors.push(`Virheellinen vastaus ${inQuestions(invalidValue)}`);
       if (tooLong.length) errors.push(`Liian pitkä perustelu (maksimi: 500 merkkiä) ${inQuestions(tooLong)}`);
+      await client.query("ROLLBACK");
       return res.status(400).json({ error: errors.join(". ") });
     }
-
-    await client.query("BEGIN");
 
     for (const [questionId, value, explanation] of toSave) {
       await client.query(

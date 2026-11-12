@@ -248,10 +248,11 @@ adminRouter.post("/merge-questions", requireAdmin, async (req, res, next) => {
 
     await client.query("BEGIN");
 
-    // Verify every referenced question exists.
+    // Verify every referenced question exists. Lock in id order, as the
+    // candidate answer save does, so the two can't deadlock.
     const allIds = [keepId, ...dropIds];
     const { rows: found } = await client.query(
-      "SELECT id FROM questions WHERE id = ANY($1) FOR UPDATE",
+      "SELECT id FROM questions WHERE id = ANY($1) ORDER BY id FOR UPDATE",
       [allIds]
     );
     if (found.length !== allIds.length) {

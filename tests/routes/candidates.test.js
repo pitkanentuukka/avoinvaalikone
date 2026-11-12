@@ -333,8 +333,8 @@ describe("PUT /api/candidates/me/:candidateToken/answers", () => {
     db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
     const client = buildMockClient();
     client.query
-      .mockResolvedValueOnce({ rows: [{ id: QUESTION_ID }, { id: QUESTION_ID2 }] }) // existing questions
       .mockResolvedValueOnce({}) // BEGIN
+      .mockResolvedValueOnce({ rows: [{ id: QUESTION_ID }, { id: QUESTION_ID2 }] }) // existing questions
       .mockResolvedValueOnce({}) // UPSERT answer 1
       .mockResolvedValueOnce({}) // UPSERT answer 2
       .mockResolvedValueOnce({}) // UPDATE timestamp
@@ -358,8 +358,8 @@ describe("PUT /api/candidates/me/:candidateToken/answers", () => {
     db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
     const client = buildMockClient();
     client.query
-      .mockResolvedValueOnce({ rows: [{ id: QUESTION_ID }] }) // QUESTION_ID2 no longer exists
       .mockResolvedValueOnce({}) // BEGIN
+      .mockResolvedValueOnce({ rows: [{ id: QUESTION_ID }] }) // QUESTION_ID2 no longer exists
       .mockResolvedValueOnce({}) // UPDATE timestamp
       .mockResolvedValueOnce({}); // COMMIT
 
@@ -373,6 +373,7 @@ describe("PUT /api/candidates/me/:candidateToken/answers", () => {
   test("explanation over 500 characters → 400 naming the question, nothing saved", async () => {
     db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
     const client = buildMockClient();
+    client.query.mockResolvedValueOnce({}); // BEGIN
     client.query.mockResolvedValueOnce({
       rows: [
         { id: QUESTION_ID, statement: "Ydinvoimaa on lisättävä" },
@@ -392,8 +393,8 @@ describe("PUT /api/candidates/me/:candidateToken/answers", () => {
     expect(res.body.error).toMatch(/liian pitkä/i);
     expect(res.body.error).toContain("Ydinvoimaa on lisättävä");
     expect(res.body.error).not.toContain("Bensaveroa");
-    // The whole save is rejected: no transaction, no upserts.
-    expect(client.query).toHaveBeenCalledTimes(1);
+    // The whole save is rejected: BEGIN, the check, ROLLBACK — no upserts.
+    expect(client.query).toHaveBeenCalledTimes(3);
     expect(client.release).toHaveBeenCalled();
   });
 
@@ -401,8 +402,8 @@ describe("PUT /api/candidates/me/:candidateToken/answers", () => {
     db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
     const client = buildMockClient();
     client.query
-      .mockResolvedValueOnce({ rows: [{ id: QUESTION_ID, statement: "Ydinvoimaa on lisättävä" }] })
       .mockResolvedValueOnce({}) // BEGIN
+      .mockResolvedValueOnce({ rows: [{ id: QUESTION_ID, statement: "Ydinvoimaa on lisättävä" }] })
       .mockResolvedValueOnce({}) // UPSERT
       .mockResolvedValueOnce({}) // UPDATE timestamp
       .mockResolvedValueOnce({}); // COMMIT
@@ -419,8 +420,8 @@ describe("PUT /api/candidates/me/:candidateToken/answers", () => {
     db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
     const client = buildMockClient();
     client.query
-      .mockResolvedValueOnce({ rows: [{ id: QUESTION_ID, statement: "Ydinvoimaa on lisättävä" }] })
       .mockResolvedValueOnce({}) // BEGIN
+      .mockResolvedValueOnce({ rows: [{ id: QUESTION_ID, statement: "Ydinvoimaa on lisättävä" }] })
       .mockResolvedValueOnce({}) // UPSERT
       .mockResolvedValueOnce({}) // UPDATE timestamp
       .mockResolvedValueOnce({}); // COMMIT
@@ -436,8 +437,8 @@ describe("PUT /api/candidates/me/:candidateToken/answers", () => {
     db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
     const client = buildMockClient();
     client.query
-      .mockResolvedValueOnce({ rows: [{ id: QUESTION_ID, statement: "Ydinvoimaa on lisättävä" }] })
       .mockResolvedValueOnce({}) // BEGIN
+      .mockResolvedValueOnce({ rows: [{ id: QUESTION_ID, statement: "Ydinvoimaa on lisättävä" }] })
       .mockResolvedValueOnce({}) // UPSERT
       .mockResolvedValueOnce({}) // UPDATE timestamp
       .mockResolvedValueOnce({}); // COMMIT
@@ -450,17 +451,19 @@ describe("PUT /api/candidates/me/:candidateToken/answers", () => {
   test.each([5, false, ["x"]])("non-string explanation %p → 400, nothing saved", async (explanation) => {
     db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
     const client = buildMockClient();
+    client.query.mockResolvedValueOnce({}); // BEGIN
     client.query.mockResolvedValueOnce({ rows: [{ id: QUESTION_ID, statement: "Ydinvoimaa on lisättävä" }] });
 
     const res = await request(app).put(url).send({ answers: { [QUESTION_ID]: { value: 2, explanation } } });
     expect(res.status).toBe(400);
     expect(res.body.error).toContain("Ydinvoimaa on lisättävä");
-    expect(client.query).toHaveBeenCalledTimes(1);
+    expect(client.query).toHaveBeenCalledTimes(3);
   });
 
   test("several offending questions → plural message listing each", async () => {
     db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
     const client = buildMockClient();
+    client.query.mockResolvedValueOnce({}); // BEGIN
     client.query.mockResolvedValueOnce({
       rows: [
         { id: QUESTION_ID, statement: "Ydinvoimaa on lisättävä" },
@@ -485,6 +488,7 @@ describe("PUT /api/candidates/me/:candidateToken/answers", () => {
   test.each([5, -1, "abc", null])("invalid value %p → 400 naming the question, nothing saved", async (value) => {
     db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
     const client = buildMockClient();
+    client.query.mockResolvedValueOnce({}); // BEGIN
     client.query.mockResolvedValueOnce({
       rows: [
         { id: QUESTION_ID, statement: "Ydinvoimaa on lisättävä" },
@@ -499,7 +503,7 @@ describe("PUT /api/candidates/me/:candidateToken/answers", () => {
     expect(res.body.error).toMatch(/virheellinen/i);
     expect(res.body.error).toContain("Bensaveroa on laskettava");
     expect(res.body.error).not.toContain("Ydinvoimaa");
-    expect(client.query).toHaveBeenCalledTimes(1);
+    expect(client.query).toHaveBeenCalledTimes(3);
     expect(client.release).toHaveBeenCalled();
   });
 
@@ -507,6 +511,7 @@ describe("PUT /api/candidates/me/:candidateToken/answers", () => {
     db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
     const client = buildMockClient();
     const statement = "Väittämä ".repeat(50).trim();
+    client.query.mockResolvedValueOnce({}); // BEGIN
     client.query.mockResolvedValueOnce({ rows: [{ id: QUESTION_ID, statement }] });
 
     const res = await request(app)
@@ -521,8 +526,8 @@ describe("PUT /api/candidates/me/:candidateToken/answers", () => {
     db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
     const client = buildMockClient();
     client.query
-      .mockResolvedValueOnce({ rows: [] }) // QUESTION_ID no longer exists
       .mockResolvedValueOnce({}) // BEGIN
+      .mockResolvedValueOnce({ rows: [] }) // QUESTION_ID no longer exists
       .mockResolvedValueOnce({}) // UPDATE timestamp
       .mockResolvedValueOnce({}); // COMMIT
 
@@ -534,29 +539,32 @@ describe("PUT /api/candidates/me/:candidateToken/answers", () => {
   test.each([3, "2", true])("non-object answer %p → 400 naming the question", async (answer) => {
     db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
     const client = buildMockClient();
+    client.query.mockResolvedValueOnce({}); // BEGIN
     client.query.mockResolvedValueOnce({ rows: [{ id: QUESTION_ID, statement: "Ydinvoimaa on lisättävä" }] });
 
     const res = await request(app).put(url).send({ answers: { [QUESTION_ID]: answer } });
     expect(res.status).toBe(400);
     expect(res.body.error).toContain("Ydinvoimaa on lisättävä");
-    expect(client.query).toHaveBeenCalledTimes(1);
+    expect(client.query).toHaveBeenCalledTimes(3);
   });
 
   test("a skipped question doesn't let an invalid answer through: 400, nothing saved", async () => {
     db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
     const client = buildMockClient();
+    client.query.mockResolvedValueOnce({}); // BEGIN
     client.query.mockResolvedValueOnce({ rows: [{ id: QUESTION_ID, statement: "Ydinvoimaa on lisättävä" }] }); // QUESTION_ID2 gone
 
     const res = await request(app)
       .put(url)
       .send({ answers: { [QUESTION_ID]: { value: 9 }, [QUESTION_ID2]: { value: 2 } } });
     expect(res.status).toBe(400);
-    expect(client.query).toHaveBeenCalledTimes(1);
+    expect(client.query).toHaveBeenCalledTimes(3);
   });
 
   test("invalid value and too-long explanation → both reported", async () => {
     db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
     const client = buildMockClient();
+    client.query.mockResolvedValueOnce({}); // BEGIN
     client.query.mockResolvedValueOnce({
       rows: [
         { id: QUESTION_ID, statement: "Ydinvoimaa on lisättävä" },
