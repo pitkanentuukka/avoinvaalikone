@@ -272,6 +272,7 @@ const translations = {
     navVoter: "Voter",
     navNgo: "NGO",
     navAdmin: "Admin",
+    navAbout: "About",
 
     // Home
     homeTitle: "Find your candidate",
