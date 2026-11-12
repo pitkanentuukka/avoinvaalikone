@@ -107,3 +107,37 @@ describe("voterMatch", () => {
     }
   });
 });
+
+// The token-gated views show "invalid link" only when the server rejected the
+// token; anything else is temporary and gets a retry instead.
+describe("isInvalidLinkError", () => {
+  let isInvalidLinkError;
+  beforeAll(async () => {
+    ({ isInvalidLinkError } = await import("../../vaalikone-frontend/src/api.js"));
+  });
+
+  test("an unknown token (404) is an invalid link", async () => {
+    const { api } = apiWith(jsonResponse(404, { error: "Virheellinen ehdokastunniste" }));
+    const err = await api.getOwnProfile("nope").catch((e) => e);
+    expect(err.message).toBe("Virheellinen ehdokastunniste");
+    expect(err.status).toBe(404);
+    expect(isInvalidLinkError(err)).toBe(true);
+  });
+
+  test.each([401, 403])("a %i is an invalid link", async (status) => {
+    const { api } = apiWith(jsonResponse(status, {}));
+    expect(isInvalidLinkError(await api.getPartyOverview("t").catch((e) => e))).toBe(true);
+  });
+
+  test.each([429, 500, 503])("a %i is not an invalid link", async (status) => {
+    const { api } = apiWith(jsonResponse(status, {}), jsonResponse(status, {}));
+    const err = await api.getRegistration("t").catch((e) => e);
+    expect(err.status).toBe(status);
+    expect(isInvalidLinkError(err)).toBe(false);
+  });
+
+  test("a network error is not an invalid link", async () => {
+    const { api } = apiWith(networkError(), networkError());
+    expect(isInvalidLinkError(await api.getOwnProfile("t").catch((e) => e))).toBe(false);
+  });
+});
