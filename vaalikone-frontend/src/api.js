@@ -21,6 +21,12 @@ function mapKeys(obj, fn) {
 const toCamel = (data) => mapKeys(data, snakeToCamel);
 const _toSnake = (data) => mapKeys(data, camelToSnake);
 
+// The server rejected the token itself. Any other failure (rate limit, server
+// error, network) is temporary, so the views offer a retry instead.
+export function isInvalidLinkError(err) {
+  return [401, 403, 404].includes(err?.status);
+}
+
 // `fetch` and `retryDelayMs` are injectable for the unit tests.
 export function createApi({
   base,
@@ -53,8 +59,10 @@ export function createApi({
       res = await doFetch(); // a failure here is final: at most one retry
     }
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: "Server error" }));
-      throw new Error(err.error || `HTTP ${res.status}`);
+      const data = await res.json().catch(() => ({ error: "Server error" }));
+      const err = new Error(data.error || `HTTP ${res.status}`);
+      err.status = res.status;
+      throw err;
     }
     if (res.status === 204) return null;
     const data = await res.json();

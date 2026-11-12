@@ -66,8 +66,8 @@ docker compose down                       # Stop all services
 
 ### Frontend
 
-Everything lives in `vaalikone-frontend/src/App.jsx` — a single-file React app — except the API client in `vaalikone-frontend/src/api.js`, kept free of Vite-only syntax so `tests/unit/apiClient.test.js` can `import()` it (`npm test` runs Jest with `--experimental-vm-modules` for this). `api.js` contains:
-- `apiFetch` helper with automatic snake_case ↔ camelCase conversion. It retries once on 502/503/504 or a network error, but only `GET`s and requests passing `retry: true`; a non-idempotent request may already have taken effect when its response was lost. The match POST opts in because the client generates its `sessionId` and resends the same one, so the retry's research insert is a no-op.
+Everything lives in `vaalikone-frontend/src/App.jsx` — a single-file React app — except the API client in `vaalikone-frontend/src/api.js` and the magic-link parsing in `vaalikone-frontend/src/tokenLinks.js`, both kept free of Vite-only syntax so the unit tests (`tests/unit/apiClient.test.js`, `tests/unit/tokenLinks.test.js`) can `import()` them (`npm test` runs Jest with `--experimental-vm-modules` for this). The token is scrubbed from the address bar on load but kept in the tab's `sessionStorage`, so a reload reopens the same view. `api.js` contains:
+- `apiFetch` helper with automatic snake_case ↔ camelCase conversion. It retries once on 502/503/504 or a network error, but only `GET`s and requests passing `retry: true`; a non-idempotent request may already have taken effect when its response was lost. The match POST opts in because the client generates its `sessionId` and resends the same one, so the retry's research insert is a no-op. A failed request throws an `Error` carrying the HTTP `status` (none for network errors); `isInvalidLinkError()` is true only for 401/403/404, so the token-gated views show "invalid link" only then and offer a retry for anything else.
 - `createApi()`, returning the `api` object with typed methods for all backend endpoints
 
 `App.jsx` contains:
