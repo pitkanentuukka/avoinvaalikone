@@ -126,6 +126,17 @@ describe("pool config", () => {
     }
   });
 
+  // 0 switches statement_timeout off; the client-side default must not turn
+  // that into a short timeout that kills long queries.
+  test("the default query timeout is off when statement_timeout is off", async () => {
+    const off = loadPool({ PG_QUERY_TIMEOUT_MS: undefined, PG_STATEMENT_TIMEOUT_MS: "0" });
+    try {
+      expect(off.pool.options.query_timeout).toBe(0);
+    } finally {
+      await off.pool.end();
+    }
+  });
+
   test("the default query timeout follows a raised statement_timeout", async () => {
     const raised = loadPool({ PG_QUERY_TIMEOUT_MS: undefined, PG_STATEMENT_TIMEOUT_MS: "60000" });
     try {

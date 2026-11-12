@@ -15,8 +15,10 @@ const statementTimeout = parseInt(process.env.PG_STATEMENT_TIMEOUT_MS || "10000"
 // enforced by the server, so without this a query (and the ROLLBACK after
 // it) waits until the kernel gives up retransmitting, ~15 minutes. The
 // default sits above statement_timeout so a merely slow query still gets
-// the server's own error first.
-const queryTimeout = parseInt(process.env.PG_QUERY_TIMEOUT_MS || String(statementTimeout + 5000), 10);
+// the server's own error first. PG_STATEMENT_TIMEOUT_MS=0 switches the
+// statement timeout off, and then the default leaves this one off too.
+const defaultQueryTimeout = statementTimeout > 0 ? statementTimeout + 5000 : 0;
+const queryTimeout = parseInt(process.env.PG_QUERY_TIMEOUT_MS || String(defaultQueryTimeout), 10);
 
 const QUERY_TIMEOUT_MESSAGE = "Query read timeout";
 
@@ -25,6 +27,12 @@ const QUERY_TIMEOUT_MESSAGE = "Query read timeout";
 // queries once the client is back in the pool) would queue behind a reply
 // that never comes. A timeout means the connection is presumed dead: close
 // it, so later queries fail at once and release() discards the client.
+//
+// Covers query(text[, values][, callback]) and query(config[, callback]), the
+// forms this codebase uses; a submittable whose callback lives on the object
+// is not watched. pg starts the timer when query() is called, not when the
+// query is sent, so queries pipelined on one client could time out while
+// queued behind a slow one; routes run one query at a time per client.
 class TimeoutClosingClient extends Client {
   query(...args) {
     const last = args.length - 1;
@@ -37,7 +45,12 @@ class TimeoutClosingClient extends Client {
     }
     const result = super.query(...args);
     if (result && typeof result.catch === "function") {
-      result.catch((err) => this._closeIfTimedOut(err));
+      // Return the chained promise, rethrowing, so a rejection nobody
+      // handles still surfaces as unhandledRejection.
+      return result.catch((err) => {
+        this._closeIfTimedOut(err);
+        throw err;
+      });
     }
     return result;
   }

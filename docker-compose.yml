@@ -64,6 +64,8 @@ services:
       DATABASE_URL: postgresql://vaalikone:vaalikone_password@db:5432/vaalikone
       REDIS_URL: redis://redis:6379
       PG_POOL_MAX: ${PG_POOL_MAX:-10}
+      PG_STATEMENT_TIMEOUT_MS: ${PG_STATEMENT_TIMEOUT_MS:-}
+      PG_QUERY_TIMEOUT_MS: ${PG_QUERY_TIMEOUT_MS:-}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:80}
       SENTRY_DSN: ${SENTRY_DSN:-}
       ADMIN_SECRET: ${ADMIN_SECRET:?ADMIN_SECRET must be set (no insecure default)}

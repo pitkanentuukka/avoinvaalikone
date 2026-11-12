@@ -27,9 +27,10 @@ async function commit(client) {
 
 // Roll back a failed transaction without masking the error that caused it.
 // The client is undefined when getClient() itself failed. ROLLBACK rejects
-// when the connection broke mid-transaction; pg marks such a client
-// unqueryable and the pool discards it on release(), so there is nothing
-// more to do in either case.
+// when the connection broke mid-transaction or an earlier query timed out;
+// pg marks such a client unqueryable, or src/db/pool.js has already closed
+// it, and the pool discards it on release(), so there is nothing more to do
+// in any of these cases.
 async function rollback(client) {
   if (!client || !open.delete(client)) return;
   try {
