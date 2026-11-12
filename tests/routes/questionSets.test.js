@@ -695,6 +695,21 @@ describe("POST /api/admin/question-sets/:id/questions", () => {
     expect(res.body.statement).toBe("Uusi väittämä");
     expect(res.body.sortOrder).toBe(3);
   });
+
+  // Issue #18: the set check runs before BEGIN, so there is nothing to roll back.
+  test("set lookup fails before BEGIN → 500, no ROLLBACK, client released", async () => {
+    const client = buildMockClient();
+    client.query.mockRejectedValueOnce(new Error("DB down")); // SELECT set
+    jest.spyOn(console, "error").mockImplementation(() => {});
+    const res = await request(app)
+      .post(`/api/admin/question-sets/${VALID_UUID}/questions`)
+      .set("Authorization", authHeader)
+      .send({ statement: "Uusi väittämä" });
+    console.error.mockRestore();
+    expect(res.status).toBe(500);
+    expect(client.query.mock.calls.map(([sql]) => sql)).not.toContain("ROLLBACK");
+    expect(client.release).toHaveBeenCalledTimes(1);
+  });
 });
 
 // ─── DELETE /api/admin/question-sets/:id/questions/:questionId ───────────────
@@ -765,6 +780,38 @@ describe("DELETE /api/admin/question-sets/:id/questions/:questionId", () => {
     const sqls = client.query.mock.calls.map(([sql]) => sql);
     expect(sqls[3]).toMatch(/ORDER BY q\.id FOR UPDATE/);
     expect(sqls[4]).toMatch(/DELETE FROM questions/);
+  });
+
+  // The 404 was decided on data already read, and pg discards the dead
+  // client on release, so a failed early-return ROLLBACK doesn't turn it
+  // into a 500 (#18).
+  test("question not found, ROLLBACK fails on a dead connection → still 404, client released once", async () => {
+    const client = buildMockClient();
+    client.query
+      .mockResolvedValueOnce({ rows: [stagedSet] })                             // SELECT set
+      .mockResolvedValueOnce({})                                                // BEGIN
+      .mockResolvedValueOnce({ rowCount: 0 })                                   // DELETE link → no rows
+      .mockRejectedValueOnce(new Error("Connection terminated unexpectedly")); // ROLLBACK
+    const res = await request(app)
+      .delete(`/api/admin/question-sets/${VALID_UUID}/questions/${Q1}`)
+      .set("Authorization", authHeader);
+    expect(res.status).toBe(404);
+    expect(client.query.mock.calls.map(([sql]) => sql).filter((s) => s === "ROLLBACK")).toHaveLength(1);
+    expect(client.release).toHaveBeenCalledTimes(1);
+  });
+
+  // Issue #18: the set check runs before BEGIN, so there is nothing to roll back.
+  test("set lookup fails before BEGIN → 500, no ROLLBACK, client released", async () => {
+    const client = buildMockClient();
+    client.query.mockRejectedValueOnce(new Error("DB down")); // SELECT set
+    jest.spyOn(console, "error").mockImplementation(() => {});
+    const res = await request(app)
+      .delete(`/api/admin/question-sets/${VALID_UUID}/questions/${Q1}`)
+      .set("Authorization", authHeader);
+    console.error.mockRestore();
+    expect(res.status).toBe(500);
+    expect(client.query.mock.calls.map(([sql]) => sql)).not.toContain("ROLLBACK");
+    expect(client.release).toHaveBeenCalledTimes(1);
   });
 });
 
