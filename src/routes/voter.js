@@ -2,17 +2,9 @@ const { Router } = require("express");
 const { randomUUID } = require("crypto");
 const db = require("../db/pool");
 const { isValidUUID, validateUUIDArray, isValidRange } = require("../middleware/validation");
+const { weightFor, scoreCandidate, compareResults } = require("../match");
 
 const router = Router();
-
-// Weight used for a question the voter didn't weight. The weighting UI shows
-// "somewhat important" (1) as selected until the voter picks something else and
-// sends only the weights the voter clicked, so a missing weight means 1.
-const DEFAULT_WEIGHT = 1;
-
-function weightFor(weights, qId) {
-  return weights[qId] === undefined ? DEFAULT_WEIGHT : parseInt(weights[qId], 10);
-}
 
 /**
  * POST /api/voter/match
@@ -24,7 +16,9 @@ function weightFor(weights, qId) {
  *   questionSetIds: ["uuid", ...]               // optional filter
  * }
  *
- * Returns candidates ranked by match percentage.
+ * Returns { sessionId, questionCount, results }: candidates ranked by match
+ * percentage. questionCount is how many of the voter's questions were scored;
+ * each result's answeredCount is how many of those the candidate answered.
  */
 router.post("/match", async (req, res, next) => {
   try {
@@ -74,28 +68,37 @@ router.post("/match", async (req, res, next) => {
     // been merged or deleted; those must not reach the voter_responses insert
     // (FK violation) or the match computation. This also bounds the insert to
     // the number of questions actually in the DB.
-    const { rows: existingRows } = await db.query(
-      "SELECT id FROM questions WHERE id = ANY($1)",
-      [allQuestionIds]
-    );
+    //
+    // The same query flags which of them belong to the selected sets. A question
+    // can belong to several sets, so membership is tested with EXISTS against the
+    // join table rather than a column on questions (which avoids duplicate rows
+    // when a question is shared by multiple selected sets). Only those questions
+    // are scored: localStorage also keeps answers to sets the voter has since
+    // deselected, and every question scored counts against candidates who
+    // skipped it.
+    const hasSetFilter = Array.isArray(questionSetIds) && questionSetIds.length > 0;
+    const { rows: existingRows } = hasSetFilter
+      ? await db.query(
+          `SELECT q.id, EXISTS (
+             SELECT 1 FROM question_set_questions qsq
+             WHERE qsq.question_id = q.id AND qsq.question_set_id = ANY($2)
+           ) AS in_selected_sets
+           FROM questions q WHERE q.id = ANY($1)`,
+          [allQuestionIds, questionSetIds]
+        )
+      : await db.query("SELECT id FROM questions WHERE id = ANY($1)", [allQuestionIds]);
     const voterQuestionIds = existingRows.map((r) => r.id);
     if (voterQuestionIds.length === 0) {
-      return res.json({ sessionId: null, results: [] });
+      return res.json({ sessionId: null, questionCount: 0, results: [] });
     }
+    // The DB returns IDs in lowercase; an answer sent under another spelling of
+    // the key has no value here and is left out of scoring (and questionCount).
+    const scoredQuestionIds = (hasSetFilter
+      ? existingRows.filter((r) => r.in_selected_sets).map((r) => r.id)
+      : voterQuestionIds
+    ).filter((id) => answers[id] !== undefined);
 
-    // Optionally filter to only questions that belong to certain sets. A question
-    // can now belong to several sets, so we test set membership with EXISTS against
-    // the join table rather than a column on questions (which avoids duplicate rows
-    // when a question is shared by multiple selected sets).
-    let questionFilter = "";
-    const params = [voterQuestionIds];
-    if (Array.isArray(questionSetIds) && questionSetIds.length > 0) {
-      params.push(questionSetIds);
-      questionFilter = `AND EXISTS (
-        SELECT 1 FROM question_set_questions qsq
-        WHERE qsq.question_id = ca.question_id AND qsq.question_set_id = ANY($${params.length})
-      )`;
-    }
+    const params = [scoredQuestionIds];
 
     // Optionally filter by constituency
     let constituencyFilter = "";
@@ -113,7 +116,6 @@ router.post("/match", async (req, res, next) => {
        FROM candidate_answers ca
        JOIN candidates c ON c.id = ca.candidate_id
        WHERE ca.question_id = ANY($1)
-       ${questionFilter}
        ${constituencyFilter}`,
       params
     );
@@ -121,7 +123,7 @@ router.post("/match", async (req, res, next) => {
     // Fetch candidate info
     const candidateIds = [...new Set(candidateAnswers.map((a) => a.candidate_id))];
     if (candidateIds.length === 0) {
-      return res.json({ results: [] });
+      return res.json({ questionCount: scoredQuestionIds.length, results: [] });
     }
 
     const { rows: candidates } = await db.query(
@@ -145,24 +147,7 @@ router.post("/match", async (req, res, next) => {
     // Compute match scores
     const results = candidates.map((c) => {
       const cAnswers = answersByCandidate[c.id] || {};
-      let totalWeight = 0;
-      let weightedScore = 0;
-      let answeredCount = 0;
-
-      for (const qId of voterQuestionIds) {
-        const voterValue = parseInt(answers[qId], 10);
-        if (isNaN(voterValue) || !cAnswers[qId]) continue;
-
-        const w = weightFor(weights, qId) + 1; // weight 0 → factor 1; weight 3 → factor 4
-        const diff = Math.abs(voterValue - cAnswers[qId].value);
-        const similarity = 1 - diff / 4;
-
-        weightedScore += similarity * w;
-        totalWeight += w;
-        answeredCount++;
-      }
-
-      const match = totalWeight > 0 ? Math.round((weightedScore / totalWeight) * 100) : 0;
+      const { match, answeredCount } = scoreCandidate(answers, weights, scoredQuestionIds, cAnswers);
 
       return {
         id: c.id,
@@ -178,8 +163,7 @@ router.post("/match", async (req, res, next) => {
       };
     });
 
-    // Sort by match descending
-    results.sort((a, b) => b.match - a.match);
+    results.sort(compareResults);
 
     let sessionId = null;
     if (includeInResearch !== false && voterQuestionIds.length > 0) {
@@ -202,7 +186,7 @@ router.post("/match", async (req, res, next) => {
       });
     }
 
-    res.json({ sessionId, results });
+    res.json({ sessionId, questionCount: scoredQuestionIds.length, results });
   } catch (err) {
     next(err);
   }

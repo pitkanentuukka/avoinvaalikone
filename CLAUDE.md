@@ -62,7 +62,7 @@ docker compose down                       # Stop all services
 - NGO submissions: 20 req / 15 min
 - Voter match: 60 req / 1 min
 
-**Match algorithm** (`src/routes/voter.js`): For each overlapping question, computes `similarity = 1 - |voterValue - candidateValue| / 4`, multiplied by `weight + 1` (so weight 0 → factor 1, weight 3 → factor 4). A question with no weight in the request counts as weight 1 (`DEFAULT_WEIGHT`), because the weighting UI shows "somewhat important" as selected and only sends weights the voter clicked; the same default is stored in `voter_responses`. Scores are averaged and returned as a percentage. When the voter restricts to certain sets, set membership is tested with `EXISTS` against `question_set_questions` (not a column on `questions`), so a question shared by multiple selected sets is still counted once.
+**Match algorithm** (`src/match.js`, called from `src/routes/voter.js`): For each question the voter answered, computes `similarity = 1 - |voterValue - candidateValue| / 4`, multiplied by `weight + 1` (so weight 0 → factor 1, weight 3 → factor 4). A question the candidate skipped counts as similarity 0 with the voter's weight. Without that, a candidate who answered one question and agreed would get 100%. A question with no weight in the request counts as weight 1 (`DEFAULT_WEIGHT`), because the weighting UI shows "somewhat important" as selected and only sends weights the voter clicked; the same default is stored in `voter_responses`. Scores are averaged over all of the voter's scored questions and returned as a percentage, with `questionCount` in the response so the UI can show "vastannut X/Y". Results sort by match, then `answeredCount`, then name. When the voter restricts to certain sets, only the voter's questions in those sets are scored. Set membership is tested with `EXISTS` against `question_set_questions` (not a column on `questions`), so a question shared by multiple selected sets is still counted once.
 
 ### Frontend
 
@@ -94,6 +94,7 @@ Copy `.env.example` to `.env`. Required: `DATABASE_URL`, `ADMIN_SECRET`. Optiona
 - All DB queries use parameterized statements (`$1`, `$2`, …) — no string interpolation
 - Admin endpoints are mounted at `/api/admin/*`; token-gated endpoints use `/api/candidates/party/:partyToken/...`, `/api/candidates/register/:registrationToken`, and `/api/candidates/me/:candidateToken/...`
 - Tokens are 24 random bytes from pgcrypto (`encode(gen_random_bytes(24), 'hex')` column defaults; rotate with `SET col = DEFAULT`)
+- API behaviour that only direct API clients can hit (the frontend never triggers it) is documented in `docs/direct-api-caveats.md` rather than fixed for now; add new cases there
 - Migrations run as a single SQL transaction (`migrations/001_initial.sql`); new migrations should follow the same versioned pattern and update `schema_migrations`
 
 ## Issue Workflow

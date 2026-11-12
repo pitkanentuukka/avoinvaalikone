@@ -168,7 +168,7 @@ describe("POST /api/voter/match — algorithm", () => {
       .post("/api/voter/match")
       .send({ answers: { [VALID_UUID]: 2 } });
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ results: [] });
+    expect(res.body).toEqual({ questionCount: 1, results: [] });
   });
 
   test("two candidates → sorted descending by match", async () => {
@@ -212,6 +212,119 @@ describe("POST /api/voter/match — algorithm", () => {
       .send({ answers: { [VALID_UUID]: 2, [VALID_UUID2]: 3 } });
     expect(res.status).toBe(200);
     expect(res.body.results[0].answeredCount).toBe(1);
+  });
+
+  // Issue #3: the question the candidate skipped must count against the match,
+  // and the response must say out of how many questions answeredCount is.
+  test("skipped question lowers the match; questionCount is the voter's question total", async () => {
+    db.query.mockResolvedValueOnce({ rows: [{ id: VALID_UUID }, { id: VALID_UUID2 }] });
+    db.query.mockResolvedValueOnce({
+      rows: [{ candidate_id: CANDIDATE_ID, question_id: VALID_UUID, value: 2 }],
+    });
+    db.query.mockResolvedValueOnce({
+      rows: [{ id: CANDIDATE_ID, name: "A", photo_url: null, bio: null, party_id: "p1", party_name: "P" }],
+    });
+    db.query.mockResolvedValueOnce({ rows: [] });
+
+    const res = await request(app)
+      .post("/api/voter/match")
+      .send({ answers: { [VALID_UUID]: 2, [VALID_UUID2]: 3 } });
+    expect(res.status).toBe(200);
+    expect(res.body.results[0].match).toBe(50);
+    expect(res.body.results[0].answeredCount).toBe(1);
+    expect(res.body.questionCount).toBe(2);
+  });
+
+  test("candidate who answered one question ranks below one who answered all", async () => {
+    const CAND2 = "880e8400-e29b-41d4-a716-446655440000";
+    db.query.mockResolvedValueOnce({ rows: [{ id: VALID_UUID }, { id: VALID_UUID2 }] });
+    db.query.mockResolvedValueOnce({
+      rows: [
+        { candidate_id: CANDIDATE_ID, question_id: VALID_UUID, value: 2 }, // agrees, skipped Q2
+        { candidate_id: CAND2, question_id: VALID_UUID, value: 2 },
+        { candidate_id: CAND2, question_id: VALID_UUID2, value: 3 }, // diff 1 → 0.75
+      ],
+    });
+    db.query.mockResolvedValueOnce({
+      rows: [
+        { id: CANDIDATE_ID, name: "A", photo_url: null, bio: null, party_id: "p1", party_name: "P" },
+        { id: CAND2, name: "B", photo_url: null, bio: null, party_id: "p1", party_name: "P" },
+      ],
+    });
+    db.query.mockResolvedValueOnce({ rows: [] });
+
+    const res = await request(app)
+      .post("/api/voter/match")
+      .send({ answers: { [VALID_UUID]: 2, [VALID_UUID2]: 2 } });
+    expect(res.status).toBe(200);
+    expect(res.body.results.map((r) => [r.id, r.match])).toEqual([
+      [CAND2, 88],
+      [CANDIDATE_ID, 50],
+    ]);
+  });
+
+  // Voter answers persist in localStorage across set selections, so the request
+  // can carry answers to sets the voter has since deselected. Those must not be
+  // scored — with skipped questions now counting as 0, they would drag every
+  // candidate down — so the set filter applies to the voter's questions too.
+  test("questionSetIds also restrict which of the voter's questions are scored", async () => {
+    db.query.mockResolvedValueOnce({
+      rows: [
+        { id: VALID_UUID, in_selected_sets: true },
+        { id: VALID_UUID2, in_selected_sets: false }, // answered earlier, set since deselected
+      ],
+    });
+    db.query.mockResolvedValueOnce({
+      rows: [{ candidate_id: CANDIDATE_ID, question_id: VALID_UUID, value: 2 }],
+    });
+    db.query.mockResolvedValueOnce({
+      rows: [{ id: CANDIDATE_ID, name: "A", photo_url: null, bio: null, party_id: "p1", party_name: "P" }],
+    });
+    db.query.mockResolvedValueOnce({ rows: [] });
+
+    const SET_ID = "990e8400-e29b-41d4-a716-446655440000";
+    const res = await request(app)
+      .post("/api/voter/match")
+      .send({ answers: { [VALID_UUID]: 2, [VALID_UUID2]: 4 }, questionSetIds: [SET_ID] });
+    expect(res.status).toBe(200);
+
+    const [sql, params] = db.query.mock.calls[0];
+    expect(sql).toMatch(/question_set_questions/);
+    expect(params).toEqual([[VALID_UUID, VALID_UUID2], [SET_ID]]);
+    expect(res.body.results[0].match).toBe(100);
+    expect(res.body.questionCount).toBe(1);
+  });
+
+  test("every answer in a deselected set → nothing scored, empty results with questionCount 0", async () => {
+    db.query.mockResolvedValueOnce({ rows: [{ id: VALID_UUID, in_selected_sets: false }] });
+    db.query.mockResolvedValueOnce({ rows: [] }); // no candidate answers for an empty question list
+
+    const res = await request(app)
+      .post("/api/voter/match")
+      .send({ answers: { [VALID_UUID]: 2 }, questionSetIds: [VALID_UUID2] });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ questionCount: 0, results: [] });
+    expect(db.query.mock.calls[1][1]).toEqual([[]]);
+  });
+
+  // The DB hands back lowercase IDs, so an uppercase answer key finds no value
+  // and is left out of scoring; it must not inflate the "X/Y" denominator either.
+  test("an answer key the scoring can't read is not counted in questionCount", async () => {
+    db.query.mockResolvedValueOnce({ rows: [{ id: VALID_UUID }, { id: VALID_UUID2 }] });
+    db.query.mockResolvedValueOnce({
+      rows: [{ candidate_id: CANDIDATE_ID, question_id: VALID_UUID, value: 2 }],
+    });
+    db.query.mockResolvedValueOnce({
+      rows: [{ id: CANDIDATE_ID, name: "A", photo_url: null, bio: null, party_id: "p1", party_name: "P" }],
+    });
+    db.query.mockResolvedValueOnce({ rows: [] });
+
+    const res = await request(app)
+      .post("/api/voter/match")
+      .send({ answers: { [VALID_UUID]: 2, [VALID_UUID2.toUpperCase()]: 4 } });
+    expect(res.status).toBe(200);
+    expect(res.body.questionCount).toBe(1);
+    expect(res.body.results[0]).toMatchObject({ match: 100, answeredCount: 1 });
   });
 });
 
@@ -372,7 +485,7 @@ describe("POST /api/voter/match — stale question IDs", () => {
       .post("/api/voter/match")
       .send({ answers: { [VALID_UUID]: 2 } });
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ sessionId: null, results: [] });
+    expect(res.body).toEqual({ sessionId: null, questionCount: 0, results: [] });
     expect(db.query).toHaveBeenCalledTimes(1);
   });
 });
@@ -428,17 +541,19 @@ describe("POST /api/voter/match — validation", () => {
     expect(res.body.error).toMatch(/kysymyssarjan tunnisteet/i);
   });
 
-  test("valid questionSetIds → DB called with $2 param containing set IDs", async () => {
-    db.query.mockResolvedValueOnce({ rows: [{ id: VALID_UUID }] }); // questions that still exist
+  test("valid questionSetIds → question lookup called with $2 param containing set IDs", async () => {
+    db.query.mockResolvedValueOnce({ rows: [{ id: VALID_UUID, in_selected_sets: true }] });
     db.query.mockResolvedValueOnce({ rows: [] });
     const res = await request(app)
       .post("/api/voter/match")
       .send({ answers: { [VALID_UUID]: 2 }, questionSetIds: [VALID_UUID2] });
     expect(res.status).toBe(200);
-    // Second DB call (index 1) is candidate_answers; first (index 0) is COUNT
-    const [, params] = db.query.mock.calls[1];
+    // First DB call (index 0) looks up the voter's questions and their set
+    // membership; candidate_answers (index 1) gets the already-filtered IDs.
+    const [, params] = db.query.mock.calls[0];
     expect(params).toHaveLength(2);
     expect(params[1]).toEqual([VALID_UUID2]);
+    expect(db.query.mock.calls[1][1]).toEqual([[VALID_UUID]]);
   });
 
   test("boundary answer value = 0 → accepted", async () => {
@@ -460,7 +575,7 @@ describe("POST /api/voter/match — validation", () => {
   });
 
   test("empty candidateIds with questionSetIds filter → still { results: [] } not bare []", async () => {
-    db.query.mockResolvedValueOnce({ rows: [{ id: VALID_UUID }] }); // questions that still exist
+    db.query.mockResolvedValueOnce({ rows: [{ id: VALID_UUID, in_selected_sets: true }] });
     db.query.mockResolvedValueOnce({ rows: [] }); // no candidate_answers
     const res = await request(app)
       .post("/api/voter/match")

@@ -1852,6 +1852,7 @@ function VoterView() {
   const [weights, setWeights] = useState({});
   const [currentQ, setCurrentQ] = useState(0);
   const [results, setResults] = useState([]);
+  const [questionCount, setQuestionCount] = useState(0);
   const [expandedCandidate, setExpandedCandidate] = useState(null);
   // Full candidate records (incl. answer explanations) fetched lazily on first
   // expand — the match response only carries answer values to keep it small.
@@ -1940,7 +1941,7 @@ function VoterView() {
     setStep("loading-results");
     setError(null);
     try {
-      const { results: matchResults } = await api.voterMatch({
+      const { results: matchResults, questionCount: scoredCount } = await api.voterMatch({
         answers: voterAnswers,
         weights,
         questionSetIds: [...selectedSetIds],
@@ -1948,6 +1949,7 @@ function VoterView() {
         includeInResearch,
       });
       setResults(matchResults ?? []);
+      setQuestionCount(scoredCount ?? 0);
       setStep("results");
     } catch (e) {
       setError(e.message);
@@ -2199,6 +2201,9 @@ function VoterView() {
                   <span style={{ fontWeight: 700, fontSize: "16px" }}>{c.name}</span>
                   <Badge>{c.partyName}</Badge>
                   {c.constituency && <Badge color="blue">{c.constituency}</Badge>}
+                  {questionCount > 0 && (
+                    <span style={{ fontSize: "12px", color: palette.textLight }}>{t.voterAnsweredOf(c.answeredCount, questionCount)}</span>
+                  )}
                   {(c.bio || c.photoUrl) && (
                     <button onClick={(e) => { e.stopPropagation(); setProfileCandidate(c); }} style={{
                       background: "none", border: `1px solid ${palette.border}`, borderRadius: "4px",
@@ -2219,9 +2224,11 @@ function VoterView() {
                 {activeQuestions.map((q) => {
                   const ca = c.answers?.[q.id];
                   const va = voterAnswers[q.id];
-                  if (!ca) return null;
-                  const agree = ca.value === va;
-                  const close = Math.abs(ca.value - va) <= 1;
+                  // A question the candidate skipped counts as full disagreement in
+                  // the match, so show it rather than leaving the score unexplained.
+                  if (!ca && va === undefined) return null;
+                  const agree = ca && ca.value === va;
+                  const close = ca && Math.abs(ca.value - va) <= 1;
                   const explanation = candidateDetails[c.id]?.answers?.[q.id]?.explanation;
                   return (
                     <div key={q.id} style={{ marginBottom: "16px" }}>
@@ -2229,7 +2236,7 @@ function VoterView() {
                       <div style={{ display: "flex", gap: "16px", fontSize: "13px", flexWrap: "wrap" }}>
                         <span style={{ color: palette.textMuted }}>{t.voterYou}: <strong style={{ color: palette.text }}>{labels[va]}</strong></span>
                         <span style={{ color: agree ? palette.accent : close ? palette.warn : palette.danger }}>
-                          {t.voterCandidate}: <strong>{labels[ca.value]}</strong>{agree && " ✓"}
+                          {t.voterCandidate}: <strong>{ca ? labels[ca.value] : t.voterCandidateNoAnswer}</strong>{agree && " ✓"}
                         </span>
                       </div>
                       {explanation && (

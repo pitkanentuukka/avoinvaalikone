@@ -267,18 +267,18 @@ Question UUID keys must be **lowercase**, as the API returns them. An uppercase 
 
 - `answers` — voter values 0–4 per question UUID (required)
 - `weights` — importance weights 0–3 per question UUID (optional, default 1)
-- `questionSetIds` — restrict to specific sets (optional)
+- `questionSetIds` — restrict to specific sets (optional). Only the voter's answers to questions in these sets are scored.
 
-Question UUIDs in `answers` and `weights` must be **lowercase**, as the API returns them. Validation accepts uppercase too, but the route looks answers and weights up by the lowercase ID from the database. An uppercase key is therefore silently ignored in scoring, and an uppercase `answers` key also makes that request's research insert fail. The frontend always sends lowercase. Direct API clients must too, until keys are normalised server-side.
+Question UUIDs in `answers` and `weights` must be **lowercase**, as the API returns them, and direct clients should always send `questionSetIds`. See [docs/direct-api-caveats.md](docs/direct-api-caveats.md) for what happens otherwise. That file lists all API behaviour the frontend never triggers but direct API clients can.
 
-**Match algorithm:** For each overlapping question:
+**Match algorithm:** For each question the voter answered:
 ```
-similarity = 1 - |voterValue - candidateValue| / 4
+similarity = 1 - |voterValue - candidateValue| / 4   (0 if the candidate skipped it)
 weighted   = similarity × (weight + 1)
 ```
-Scores are averaged across all overlapping questions and returned as a percentage.
+The weighted similarities are averaged over all of the voter's questions and returned as a percentage. A skipped question counts as full disagreement, so a candidate cannot reach a high match by answering only a few questions.
 
-**Response:** `{ sessionId, results: [...] }` — candidates sorted by `match` descending, each with their answers for comparison. The `sessionId` is also used to anonymously store voter responses for analytics.
+**Response:** `{ sessionId, questionCount, results: [...] }`. `questionCount` is the number of the voter's questions that were scored. Results are sorted by `match` descending, then `answeredCount` descending (how many of the `questionCount` questions the candidate answered), then by name. Each result includes the candidate's answers for comparison. The `sessionId` is also used to store voter responses anonymously for analytics.
 
 ---
 
