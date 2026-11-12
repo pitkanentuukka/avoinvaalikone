@@ -60,13 +60,12 @@ async function lockQuestions(client, questionIds) {
  */
 async function deleteOrphanQuestions(client, questionIds) {
   if (!questionIds || questionIds.length === 0) return;
-  await lockQuestions(client, questionIds);
-  await client.query(
-    `DELETE FROM questions q
-     WHERE q.id = ANY($1)
-       AND NOT EXISTS (SELECT 1 FROM question_set_questions l WHERE l.question_id = q.id)`,
-    [questionIds]
-  );
+  const orphanFilter = `q.id = ANY($1)
+       AND NOT EXISTS (SELECT 1 FROM question_set_questions l WHERE l.question_id = q.id)`;
+  // Lock in id order first, as lockQuestions does, but only the orphans: a
+  // question another set still shares isn't deleted and needn't be locked.
+  await client.query(`SELECT q.id FROM questions q WHERE ${orphanFilter} ORDER BY q.id FOR UPDATE`, [questionIds]);
+  await client.query(`DELETE FROM questions q WHERE ${orphanFilter}`, [questionIds]);
 }
 
 /**
