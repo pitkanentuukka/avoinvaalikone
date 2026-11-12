@@ -13,3 +13,4 @@ upcloud.pub
 
 # Test artifacts
 test-results/
+coverage/
