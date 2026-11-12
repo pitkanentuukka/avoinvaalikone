@@ -75,12 +75,17 @@ app.use(express.json({ limit: "1mb" }));
 // outage is far better than dropping the voter-match endpoint on election
 // night — that would be strictly worse than the per-process fallback.
 
-// Rate limiting for admin endpoints (strict)
+// Rate limiting for admin endpoints (strict). It only exists to stop guessing
+// ADMIN_SECRET, so requests carrying the valid secret are skipped: one admin
+// UI action costs ~3 requests, and counting them locked the admin out after
+// about ten actions. Skipping (rather than skipSuccessfulRequests) also keeps
+// the admin's own 4xx responses from counting, and keeps the real admin in
+// even when failed guesses from the same IP have used up the budget.
 const adminLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 30,
   message: { error: "Liian monta pyyntöä. Yritä myöhemmin uudelleen." },
-  skip: (req) => process.env.NODE_ENV !== 'production',
+  skip: (req) => process.env.NODE_ENV !== 'production' || isAdminRequest(req),
   store: redisStore("rl:admin:"),
   passOnStoreError: true,
 });
