@@ -195,6 +195,8 @@ A *question set* is one organization's themed bundle of statements — the core 
 }
 ```
 
+Each entry in `questions` is a string or `{ "statement": "..." }`, at most 50 entries. A statement over 500 characters rejects the submission with a 400 naming it, as does a submission with no non-empty statements. Entries that are blank, or neither a string nor an object with a string `statement`, are skipped **without notice** while the rest are saved. The frontend never sends those. Direct API clients should send only non-empty strings.
+
 ---
 
 ### Candidates
