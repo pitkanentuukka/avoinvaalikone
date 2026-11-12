@@ -589,6 +589,29 @@ describe("POST /api/voter/match — validation", () => {
     expect(db.query).not.toHaveBeenCalled();
   });
 
+  test("weights: null counts as no weights", async () => {
+    db.query.mockResolvedValueOnce({ rows: [{ id: VALID_UUID }] }); // questions that still exist
+    db.query.mockResolvedValueOnce({ rows: [] }); // no candidate answers
+    const res = await request(app)
+      .post("/api/voter/match")
+      .send({ answers: { [VALID_UUID]: 2 }, weights: null });
+    expect(res.status).toBe(200);
+    expect(res.body.questionCount).toBe(1);
+  });
+
+  test.each([
+    ["a number", 2],
+    ["a string", "2"],
+    ["an array", []],
+  ])("weights as %s → 400", async (_, weights) => {
+    const res = await request(app)
+      .post("/api/voter/match")
+      .send({ answers: { [VALID_UUID]: 2 }, weights });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/painoarvot/i);
+    expect(db.query).not.toHaveBeenCalled();
+  });
+
   test("invalid UUID in questionSetIds → 400", async () => {
     const res = await request(app)
       .post("/api/voter/match")
