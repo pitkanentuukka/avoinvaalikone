@@ -1557,6 +1557,22 @@ function RegisterView({ registrationToken, onRegistered }) {
   );
 }
 
+// One question on the candidate's own page: the scale and an optional explanation.
+function AnswerCard({ question: q, number, answer, setAnswer }) {
+  const { t } = useTranslation();
+  return (
+    <Card style={{ marginBottom: "12px" }}>
+      <div style={{ fontSize: "14px", fontWeight: 600, marginBottom: "12px" }}>
+        <span style={{ color: palette.textLight, marginRight: "6px" }}>{number}.</span>{q.statement}
+      </div>
+      <ScaleInput value={answer?.value} onChange={(v) => setAnswer(q.id, "value", v)} />
+      <div style={{ marginTop: "12px" }}>
+        <TextArea value={answer?.text || ""} onChange={(v) => setAnswer(q.id, "text", v)} placeholder={t.candidateExplainPlaceholder} rows={2} maxLength={500} />
+      </div>
+    </Card>
+  );
+}
+
 // The candidate's own page, reached only through their personal link.
 function answersFromProfile(me) {
   return Object.fromEntries(
@@ -1741,15 +1757,7 @@ function CandidateView({ candidateToken, justRegistered, leaveGuardRef }) {
           </div>
           <p style={{ fontSize: "12px", color: palette.textLight, marginBottom: "16px", marginLeft: "34px" }}>{qs.ngoName}</p>
           {(qs.questions || []).map((q, qi) => (
-            <Card key={q.id} style={{ marginBottom: "12px" }}>
-              <div style={{ fontSize: "14px", fontWeight: 600, marginBottom: "12px" }}>
-                <span style={{ color: palette.textLight, marginRight: "6px" }}>{qi + 1}.</span>{q.statement}
-              </div>
-              <ScaleInput value={answers[q.id]?.value} onChange={(v) => setAnswer(q.id, "value", v)} />
-              <div style={{ marginTop: "12px" }}>
-                <TextArea value={answers[q.id]?.text || ""} onChange={(v) => setAnswer(q.id, "text", v)} placeholder={t.candidateExplainPlaceholder} rows={2} maxLength={500} />
-              </div>
-            </Card>
+            <AnswerCard key={q.id} question={q} number={qi + 1} answer={answers[q.id]} setAnswer={setAnswer} />
           ))}
         </section>
       ))}
@@ -1810,6 +1818,21 @@ function revokeConsent() {
 }
 
 // ─── Voter ───
+// The voter's optional constituency filter on the question set selection step.
+function ConstituencyFilter({ value, onChange }) {
+  const { t } = useTranslation();
+  return (
+    <div style={{ marginBottom: "24px" }}>
+      <label style={{ fontSize: "13px", fontWeight: 600, display: "block", marginBottom: "6px" }}>{t.voterConstituencyLabel}</label>
+      <p style={{ fontSize: "13px", color: palette.textMuted, marginBottom: "8px", marginTop: 0 }}>{t.voterConstituencyDesc}</p>
+      <select value={value} onChange={(e) => onChange(e.target.value)} style={selectStyle}>
+        <option value="">{t.voterConstituencyAll}</option>
+        {FI_CONSTITUENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
+      </select>
+    </div>
+  );
+}
+
 function VoterView() {
   const { t } = useTranslation();
   const labels = useLabels();
@@ -1995,18 +2018,7 @@ function VoterView() {
           </div>
         )}
         {error && <ErrorBanner message={error} />}
-        <div style={{ marginBottom: "24px" }}>
-          <label style={{ fontSize: "13px", fontWeight: 600, display: "block", marginBottom: "6px" }}>{t.voterConstituencyLabel}</label>
-          <p style={{ fontSize: "13px", color: palette.textMuted, marginBottom: "8px", marginTop: 0 }}>{t.voterConstituencyDesc}</p>
-          <select value={constituency} onChange={(e) => setConstituency(e.target.value)} style={{
-            width: "100%", padding: "10px 14px", borderRadius: "6px", border: `1px solid ${palette.border}`,
-            fontFamily: "'Source Serif 4', Georgia, serif", fontSize: "14px",
-            background: palette.surface, color: palette.text, outline: "none", boxSizing: "border-box",
-          }}>
-            <option value="">{t.voterConstituencyAll}</option>
-            {FI_CONSTITUENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
-        </div>
+        <ConstituencyFilter value={constituency} onChange={setConstituency} />
         {approvedSets.length === 0 && <p style={{ color: palette.textLight }}>{t.voterNoSets}</p>}
         {approvedSets.map((qs) => (
           <Card key={qs.id} onClick={() => toggleSet(qs.id)} style={{
@@ -2337,3 +2349,6 @@ export default function App() {
     </LanguageContext.Provider>
   );
 }
+
+// Rendered on their own by the unit tests (tests/unit/formLabels.test.js).
+export { Header, HomeView, AdminView, NgoView, ProfileFields, CopyField, AnswerCard, ConstituencyFilter };
