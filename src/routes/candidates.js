@@ -361,8 +361,9 @@ router.put("/me/:candidateToken/answers", requireCandidateToken, async (req, res
     // candidate had the form open) instead of failing the whole save on a
     // foreign-key violation; their ids are returned so the UI can say so.
     // FOR KEY SHARE makes a concurrent delete or merge wait for this save, so
-    // a question can't vanish between this check and the upsert. Locking in id
-    // order, as the merge endpoint does, keeps the two from deadlocking.
+    // a question can't vanish between this check and the upsert. Every admin
+    // path that deletes questions locks them in id order first (lockQuestions
+    // in questionSets.js), so locking in the same order can't deadlock.
     const ids = Object.keys(answers).filter(isValidUUID);
     const { rows: existingRows } = ids.length
       ? await client.query(

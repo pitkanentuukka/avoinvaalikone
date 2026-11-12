@@ -476,9 +476,11 @@ describe("PATCH /api/admin/question-sets/:id/review", () => {
     client.query
       .mockResolvedValueOnce({})                                                  // BEGIN
       .mockResolvedValueOnce({ rows: [pendingSet] })                              // SELECT FOR UPDATE
+      .mockResolvedValueOnce({ rows: [{ id: Q2 }] })                              // lock deletable questions
       .mockResolvedValueOnce({ rows: [{ id: Q2, statement: "Väittämä 2" }] })    // SELECT originals (rejected)
       // no edits
       .mockResolvedValueOnce({})                                                  // DELETE FROM question_set_questions (unlink)
+      .mockResolvedValueOnce({ rows: [{ id: Q2 }] })                              // lock orphan candidates
       .mockResolvedValueOnce({})                                                  // DELETE FROM questions (orphan cleanup)
       .mockResolvedValueOnce({ rows: [{ id: Q1, statement: "Väittämä 1" }] })    // SELECT remaining
       .mockResolvedValueOnce({ rows: [updated] })                                 // UPDATE status + hidden
@@ -504,6 +506,10 @@ describe("PATCH /api/admin/question-sets/:id/review", () => {
       typeof sql === "string" && sql.includes("DELETE")
     );
     expect(deleteCalls).toHaveLength(2);
+
+    // The rejected question is locked in id order before anything changes, so
+    // a concurrent answer save can't deadlock with it (#16).
+    expect(client.query.mock.calls[2]).toEqual([expect.stringMatching(/ORDER BY id FOR UPDATE/), [[Q2]]]);
   });
 
   test("all questions rejected → status rejected, not hidden → 200", async () => {
@@ -512,9 +518,11 @@ describe("PATCH /api/admin/question-sets/:id/review", () => {
     client.query
       .mockResolvedValueOnce({})                                                                    // BEGIN
       .mockResolvedValueOnce({ rows: [pendingSet] })                                               // SELECT FOR UPDATE
+      .mockResolvedValueOnce({ rows: [{ id: Q1 }, { id: Q2 }] })                                    // lock deletable questions
       .mockResolvedValueOnce({ rows: [{ id: Q1, statement: "Väittämä 1" }, { id: Q2, statement: "Väittämä 2" }] }) // SELECT originals (rejected)
       // no edits
       .mockResolvedValueOnce({})                                                                    // DELETE FROM question_set_questions (unlink)
+      .mockResolvedValueOnce({ rows: [{ id: Q1 }, { id: Q2 }] })                                    // lock orphan candidates
       .mockResolvedValueOnce({})                                                                    // DELETE FROM questions (orphan cleanup)
       .mockResolvedValueOnce({ rows: [] })                                                          // SELECT remaining → empty
       .mockResolvedValueOnce({ rows: [updated] })                                                   // UPDATE status
@@ -532,6 +540,40 @@ describe("PATCH /api/admin/question-sets/:id/review", () => {
 
     expect(res.status).toBe(200);
     expect(res.body.status).toBe("rejected");
+  });
+
+  // A merge deletes the duplicate; locking both questions in id order before
+  // any change keeps a concurrent answer save from deadlocking with it (#16).
+  test("inline merge locks duplicate and canonical in id order before changing anything", async () => {
+    const client = buildMockClient();
+    const updated = { ...stagedSet, reviewed_at: new Date().toISOString() };
+    client.query
+      .mockResolvedValueOnce({})                                              // BEGIN
+      .mockResolvedValueOnce({ rows: [pendingSet] })                          // SELECT FOR UPDATE
+      .mockResolvedValueOnce({ rows: [{ id: Q1 }, { id: VALID_UUID }] })     // lock deletable questions
+      .mockResolvedValueOnce({})                                              // merge: INSERT candidate_answers
+      .mockResolvedValueOnce({})                                              // merge: INSERT voter_responses
+      .mockResolvedValueOnce({})                                              // merge: INSERT links
+      .mockResolvedValueOnce({})                                              // merge: DELETE question
+      .mockResolvedValueOnce({ rows: [{ id: VALID_UUID, statement: "Kanoninen" }, { id: Q2, statement: "Väittämä 2" }] }) // SELECT remaining
+      .mockResolvedValueOnce({ rows: [updated] })                             // UPDATE status + hidden
+      .mockResolvedValueOnce({});                                             // COMMIT
+
+    const res = await request(app)
+      .patch(`/api/admin/question-sets/${VALID_UUID}/review`)
+      .set("Authorization", authHeader)
+      .send({
+        reviews: [
+          { questionId: Q1, rejected: false, duplicateOf: VALID_UUID },
+          { questionId: Q2, rejected: false },
+        ],
+      });
+
+    expect(res.status).toBe(200);
+    const sqls = client.query.mock.calls.map(([sql]) => sql);
+    expect(sqls[2]).toMatch(/FROM questions\b[\s\S]*ORDER BY id FOR UPDATE/);
+    expect(client.query.mock.calls[2][1][0]).toEqual(expect.arrayContaining([Q1, VALID_UUID]));
+    expect(sqls[3]).toMatch(/INSERT INTO candidate_answers/);
   });
 
   test("DB error → ROLLBACK called, 500 returned, client released", async () => {
@@ -713,12 +755,43 @@ describe("DELETE /api/admin/question-sets/:id/questions/:questionId", () => {
       .mockResolvedValueOnce({ rows: [stagedSet] }) // SELECT set
       .mockResolvedValueOnce({})                    // BEGIN
       .mockResolvedValueOnce({ rowCount: 1 })       // DELETE link
+      .mockResolvedValueOnce({ rows: [{ id: Q1 }] }) // lock orphan candidate
       .mockResolvedValueOnce({})                    // DELETE orphan question
       .mockResolvedValueOnce({});                   // COMMIT
     const res = await request(app)
       .delete(`/api/admin/question-sets/${VALID_UUID}/questions/${Q1}`)
       .set("Authorization", authHeader);
     expect(res.status).toBe(204);
+    const sqls = client.query.mock.calls.map(([sql]) => sql);
+    expect(sqls[3]).toMatch(/ORDER BY id FOR UPDATE/);
+    expect(sqls[4]).toMatch(/DELETE FROM questions/);
+  });
+});
+
+// ─── DELETE /api/admin/question-sets/:id ─────────────────────────────────────
+
+describe("DELETE /api/admin/question-sets/:id", () => {
+  // Orphaned questions are locked in id order before the DELETE, which would
+  // otherwise lock them in scan order and could deadlock with a concurrent
+  // answer save that holds some of them (#16).
+  test("happy path → orphans locked in id order before they're deleted → 204", async () => {
+    const client = buildMockClient();
+    client.query
+      .mockResolvedValueOnce({})                                            // BEGIN
+      .mockResolvedValueOnce({ rows: [{ question_id: Q2 }, { question_id: Q1 }] }) // SELECT linked
+      .mockResolvedValueOnce({ rowCount: 1 })                               // DELETE set
+      .mockResolvedValueOnce({ rows: [{ id: Q1 }, { id: Q2 }] })            // lock orphan candidates
+      .mockResolvedValueOnce({})                                            // DELETE orphan questions
+      .mockResolvedValueOnce({});                                           // COMMIT
+    const res = await request(app)
+      .delete(`/api/admin/question-sets/${VALID_UUID}`)
+      .set("Authorization", authHeader);
+    expect(res.status).toBe(204);
+    const sqls = client.query.mock.calls.map(([sql]) => sql);
+    expect(sqls[3]).toMatch(/FROM questions\b[\s\S]*ORDER BY id FOR UPDATE/);
+    expect(client.query.mock.calls[3][1]).toEqual([[Q2, Q1]]);
+    expect(sqls[4]).toMatch(/DELETE FROM questions/);
+    expect(sqls[5]).toBe("COMMIT");
   });
 });
 

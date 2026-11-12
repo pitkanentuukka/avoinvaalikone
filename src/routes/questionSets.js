@@ -40,12 +40,27 @@ async function fetchQuestionsBySet(setIds) {
 }
 
 /**
+ * Lock the given questions FOR UPDATE, in id order, and return the ones that
+ * exist. Call it before deleting or merging questions: a candidate's answer
+ * save key-share locks its questions in the same order, so the two can't
+ * deadlock, and the save waits instead of hitting a foreign-key violation.
+ */
+async function lockQuestions(client, questionIds) {
+  const { rows } = await client.query(
+    "SELECT id FROM questions WHERE id = ANY($1) ORDER BY id FOR UPDATE",
+    [questionIds]
+  );
+  return rows;
+}
+
+/**
  * Delete any of the given questions that are no longer linked to any set.
  * Deleting a question cascades to its candidate_answers and voter_responses, so
  * this is only called for questions we have just unlinked from their last set.
  */
 async function deleteOrphanQuestions(client, questionIds) {
   if (!questionIds || questionIds.length === 0) return;
+  await lockQuestions(client, questionIds);
   await client.query(
     `DELETE FROM questions q
      WHERE q.id = ANY($1)
@@ -248,13 +263,9 @@ adminRouter.post("/merge-questions", requireAdmin, async (req, res, next) => {
 
     await client.query("BEGIN");
 
-    // Verify every referenced question exists. Lock in id order, as the
-    // candidate answer save does, so the two can't deadlock.
+    // Verify every referenced question exists.
     const allIds = [keepId, ...dropIds];
-    const { rows: found } = await client.query(
-      "SELECT id FROM questions WHERE id = ANY($1) ORDER BY id FOR UPDATE",
-      [allIds]
-    );
+    const found = await lockQuestions(client, allIds);
     if (found.length !== allIds.length) {
       await client.query("ROLLBACK");
       return res.status(404).json({ error: "Kysymystä ei löytynyt" });
@@ -419,6 +430,14 @@ adminRouter.patch("/:id/review", requireAdmin, validateUUIDParam("id"), async (r
     const rejectedReviews = reviews.filter((r) => r.rejected);
     const mergedReviews = reviews.filter((r) => !r.rejected && r.duplicateOf);
     const editedReviews = reviews.filter((r) => !r.rejected && !r.duplicateOf && r.editedStatement?.trim());
+
+    // Lock every question a merge or rejection may delete, all at once, before
+    // changing anything (see lockQuestions).
+    const deletableIds = [
+      ...mergedReviews.flatMap((r) => [r.questionId, r.duplicateOf]),
+      ...rejectedReviews.map((r) => r.questionId),
+    ];
+    if (deletableIds.length > 0) await lockQuestions(client, deletableIds);
 
     // Fetch originals for rejected and edited questions (needed for email)
     const needOriginalIds = [
