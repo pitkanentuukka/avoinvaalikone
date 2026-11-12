@@ -102,15 +102,21 @@ introduces.
   query (it dominated response size). Explanations are lazy-loaded per candidate
   via `GET /api/candidates/:id` when a result card is expanded
   (`vaalikone-frontend/src/App.jsx`).
-- The session id is generated with `crypto.randomUUID()` instead of a
-  `SELECT gen_random_uuid()` round-trip.
+- The session id comes from the client (see below) or, failing that,
+  `crypto.randomUUID()`, instead of a `SELECT gen_random_uuid()` round-trip.
 - The `voter_responses` research insert is **fire-and-forget** (not awaited) so
   it adds no latency to the match response; losing anonymized rows on a crash is
   acceptable. Errors are caught and logged.
 
 ### Client-side retry
-- `apiFetch` in `App.jsx` retries once after a 1s delay on `502/503/504` or a
-  network error, smoothing over a replica restarting during a rolling deploy.
+- `apiFetch` in `vaalikone-frontend/src/api.js` retries once after a 1s delay
+  on `502/503/504` or a network error, smoothing over a replica restarting
+  during a rolling deploy. Only `GET`s and requests marked `retry: true` are
+  retried; any other request may already have taken effect when its response
+  was lost.
+- The match POST is marked retryable: the client generates its `sessionId` and
+  resends the same one, so the retry's research insert hits
+  `ON CONFLICT DO NOTHING` instead of storing a second session.
 
 ## Rate limiting
 

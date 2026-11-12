@@ -13,8 +13,14 @@ const router = Router();
  * {
  *   answers: { [questionId]: value (0-4) },
  *   weights: { [questionId]: weight (0-3) },   // optional, missing → DEFAULT_WEIGHT
- *   questionSetIds: ["uuid", ...]               // optional filter
+ *   questionSetIds: ["uuid", ...],              // optional filter
+ *   sessionId: "uuid"                           // optional, see below
  * }
+ *
+ * sessionId keys the anonymous research rows. The frontend generates one per
+ * submission and resends it when it retries after a transient upstream error,
+ * so the retry's insert conflicts and stores no second session. Without one,
+ * the server generates it.
  *
  * Returns { sessionId, questionCount, results }: candidates ranked by match
  * percentage. questionCount is how many of the voter's questions were scored;
@@ -22,7 +28,14 @@ const router = Router();
  */
 router.post("/match", async (req, res, next) => {
   try {
-    const { answers, weights = {}, questionSetIds, constituency, includeInResearch = true } = req.body;
+    const {
+      answers,
+      weights = {},
+      questionSetIds,
+      constituency,
+      includeInResearch = true,
+      sessionId: clientSessionId,
+    } = req.body;
 
     if (!answers || typeof answers !== "object" || Object.keys(answers).length === 0) {
       return res.status(400).json({ error: "Vastaukset vaaditaan" });
@@ -61,6 +74,10 @@ router.post("/match", async (req, res, next) => {
       if (typeof constituency !== "string" || constituency.length > 255) {
         return res.status(400).json({ error: "Virheellinen vaalipiiri" });
       }
+    }
+
+    if (clientSessionId !== undefined && clientSessionId !== null && !isValidUUID(clientSessionId)) {
+      return res.status(400).json({ error: "Virheellinen istunnon tunniste" });
     }
 
     // Keep only answers for questions that still exist. Voter answers are stored
@@ -167,7 +184,7 @@ router.post("/match", async (req, res, next) => {
 
     let sessionId = null;
     if (includeInResearch !== false && voterQuestionIds.length > 0) {
-      sessionId = randomUUID();
+      sessionId = clientSessionId ?? randomUUID();
       const placeholders = voterQuestionIds
         .map((_, i) => `($1, $${i * 3 + 2}, $${i * 3 + 3}, $${i * 3 + 4})`)
         .join(", ");

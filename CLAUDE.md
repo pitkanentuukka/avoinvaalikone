@@ -66,13 +66,15 @@ docker compose down                       # Stop all services
 
 ### Frontend
 
-Everything lives in `vaalikone-frontend/src/App.jsx` — a single-file React app. It contains:
-- `apiFetch` helper with automatic snake_case ↔ camelCase conversion
-- `api` object with typed methods for all backend endpoints
+Everything lives in `vaalikone-frontend/src/App.jsx` — a single-file React app — except the API client in `vaalikone-frontend/src/api.js`, kept free of Vite-only syntax so `tests/unit/apiClient.test.js` can `import()` it (`npm test` runs Jest with `--experimental-vm-modules` for this). `api.js` contains:
+- `apiFetch` helper with automatic snake_case ↔ camelCase conversion. It retries once on 502/503/504 or a network error, but only `GET`s and requests passing `retry: true`; a non-idempotent request may already have taken effect when its response was lost. The match POST opts in because the client generates its `sessionId` and resends the same one, so the retry's research insert is a no-op.
+- `createApi()`, returning the `api` object with typed methods for all backend endpoints
+
+`App.jsx` contains:
 - Multiple view components rendered based on `currentView` state
 - Views: voter quiz, results, admin panel (parties, question set approval), NGO submission form, candidate registration
 
-The `API_BASE` constant at the top of `App.jsx` points to `http://localhost:3000/api` — change this for non-local deployments.
+The `API_BASE` constant at the top of `App.jsx` defaults to same-origin `/api`; override it with `VITE_API_BASE` at build time.
 
 ### Database Schema
 

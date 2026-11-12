@@ -60,3 +60,38 @@ the one window where the frontend can hit this.
 
 **Fix:** score only questions in at least one approved, visible set, whether or
 not `questionSetIds` is given.
+
+## A reused match `sessionId` merges submissions
+
+**Endpoint:** `POST /api/voter/match` (`sessionId`)
+
+The research insert is `ON CONFLICT DO NOTHING` on `(session_id, question_id)`.
+A client that sends the same `sessionId` with different answers gets one
+research session: answers to questions already stored under that id are
+silently dropped, and answers to new questions are added to it.
+
+**Why the frontend is unaffected:** it generates a fresh `sessionId` for every
+submission and reuses it only for the one retry of that same request.
+
+**Fix:** none needed for retries. If direct clients need it, reject a
+`sessionId` that already has rows with different answers.
+
+## The match `sessionId` stored for research is client-chosen
+
+**Endpoint:** `POST /api/voter/match` (`sessionId`)
+
+`voter_responses.session_id` is stored exactly as the client sent it. Before
+#7 it was always server-random (the `migrations/005` header still says so). A
+client could pick ids that encode an identifier, or reuse one id per device,
+and so link research rows to a person or device. Clients already learned the
+server-random id from the response and could record it, so what changed is
+control over the id, not knowledge of it.
+
+**Why the frontend is unaffected:** it generates a fresh UUID for each
+submission with `crypto.randomUUID()`, never persists it, and reuses it only for
+the one retry of that request. So the voter-facing promise that research rows
+aren't linked to the browser still holds.
+
+**Fix:** store a keyed hash of the client id, such as an HMAC under a server
+secret shared by all replicas. Retries would still collide, but the stored key
+would be neither client-chosen nor client-known.
