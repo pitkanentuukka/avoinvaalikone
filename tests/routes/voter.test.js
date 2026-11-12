@@ -94,14 +94,71 @@ describe("POST /api/voter/match — algorithm", () => {
     expect(res.body.results[0].match).toBe(80);
   });
 
-  test("default weight (missing key) → treated as weight=0, factor=1", async () => {
-    // voter=4, cand=2, diff=2, similarity=0.5, factor=1 → score=0.5=50%
+  test("no weights at all → plain average", async () => {
+    // voter=4, cand=2, diff=2, similarity=0.5 → score=0.5=50%
     setupDb([{ candidate_id: CANDIDATE_ID, question_id: VALID_UUID, value: 2, explanation: "" }]);
     const res = await request(app)
       .post("/api/voter/match")
       .send({ answers: { [VALID_UUID]: 4 } }); // no weights
     expect(res.status).toBe(200);
     expect(res.body.results[0].match).toBe(50);
+  });
+
+  // The weighting UI shows "somewhat important" (weight 1) as selected for every
+  // question the voter hasn't touched, and only sends weights the voter clicked.
+  // A missing weight must therefore count exactly like an explicit 1.
+  function setupTwoQuestions() {
+    // Q1: voter=2, cand=2 → similarity 1; Q2: voter=0, cand=4 → similarity 0
+    db.query.mockResolvedValueOnce({ rows: [{ id: VALID_UUID }, { id: VALID_UUID2 }] });
+    db.query.mockResolvedValueOnce({
+      rows: [
+        { candidate_id: CANDIDATE_ID, question_id: VALID_UUID, value: 2 },
+        { candidate_id: CANDIDATE_ID, question_id: VALID_UUID2, value: 4 },
+      ],
+    });
+    db.query.mockResolvedValueOnce({
+      rows: [{ id: CANDIDATE_ID, name: "Testi Ehdokas", photo_url: null, bio: null, party_id: "aaa", party_name: "Testi Puolue" }],
+    });
+    db.query.mockResolvedValueOnce({ rows: [] });
+  }
+
+  test("missing weight counts the same as the displayed default (weight 1)", async () => {
+    // Q1 explicit weight 1 → factor 2; Q2 untouched → factor 2 → 2/4 = 50%
+    setupTwoQuestions();
+    const res = await request(app)
+      .post("/api/voter/match")
+      .send({
+        answers: { [VALID_UUID]: 2, [VALID_UUID2]: 0 },
+        weights: { [VALID_UUID]: 1 },
+      });
+    expect(res.status).toBe(200);
+    expect(res.body.results[0].match).toBe(50);
+  });
+
+  test("string weights are read like numbers (\"0\" stays 0)", async () => {
+    // Q1 weight "0" → factor 1; Q2 weight "1" → factor 2 → 1/3 = 33%
+    setupTwoQuestions();
+    const res = await request(app)
+      .post("/api/voter/match")
+      .send({
+        answers: { [VALID_UUID]: 2, [VALID_UUID2]: 0 },
+        weights: { [VALID_UUID]: "0", [VALID_UUID2]: "1" },
+      });
+    expect(res.status).toBe(200);
+    expect(res.body.results[0].match).toBe(33);
+  });
+
+  test("explicit weight 0 ('not important') is not replaced by the default", async () => {
+    // Q1 weight 0 → factor 1; Q2 untouched → factor 2 → 1/3 = 33%
+    setupTwoQuestions();
+    const res = await request(app)
+      .post("/api/voter/match")
+      .send({
+        answers: { [VALID_UUID]: 2, [VALID_UUID2]: 0 },
+        weights: { [VALID_UUID]: 0 },
+      });
+    expect(res.status).toBe(200);
+    expect(res.body.results[0].match).toBe(33);
   });
 
   test("empty candidateIds (no one answered) → returns { results: [] }", async () => {
@@ -241,6 +298,29 @@ describe("POST /api/voter/match — voter response storage", () => {
     expect(insertCall[1][0]).toMatch(UUID_RE); // generated session id leads the params
     expect(insertCall[1]).toContain(VALID_UUID);
     expect(insertCall[1]).toContain(2);
+  });
+
+  test("research row records the default weight 1 for untouched questions and keeps explicit 0", async () => {
+    db.query.mockResolvedValueOnce({ rows: [{ id: VALID_UUID }, { id: VALID_UUID2 }] });
+    db.query.mockResolvedValueOnce({
+      rows: [{ candidate_id: CANDIDATE_ID, question_id: VALID_UUID, value: 2 }],
+    });
+    db.query.mockResolvedValueOnce({
+      rows: [{ id: CANDIDATE_ID, name: "A", photo_url: null, bio: null, party_id: "p1", party_name: "P" }],
+    });
+    db.query.mockResolvedValueOnce({ rows: [] });
+
+    await request(app)
+      .post("/api/voter/match")
+      .send({
+        answers: { [VALID_UUID]: 2, [VALID_UUID2]: 3 },
+        weights: { [VALID_UUID2]: 0 },
+      });
+
+    const insertCall = db.query.mock.calls[3];
+    expect(insertCall[0]).toMatch(/INSERT INTO voter_responses/);
+    // params: [sessionId, q1, value1, weight1, q2, value2, weight2]
+    expect(insertCall[1].slice(1)).toEqual([VALID_UUID, 2, 1, VALID_UUID2, 3, 0]);
   });
 
   test("no voter_responses INSERT when candidates list is empty", async () => {

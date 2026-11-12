@@ -56,9 +56,9 @@ test.describe("UC-VOTER-1: Voter match", () => {
     const result = await voterMatch(request, { answers, weights });
     const match = result.results.find((r) => r.id === setup.candidate.id);
     expect(match).toBeDefined();
-    // q1: sim=1, weight=3+1=4; q2: sim=0.5 (|0-2|/4=0.5), weight=1; q3: sim=0 (|4-0|/4=1), weight=1
-    // weighted = (1*4 + 0.5*1 + 0*1) / (4+1+1) = 4.5/6 = 75%
-    expect(match.match).toBe(75);
+    // q1: sim=1, weight=3+1=4; q2: sim=0.5 (|0-2|/4=0.5), default weight=1+1=2; q3: sim=0 (|4-0|/4=1), default weight=1+1=2
+    // weighted = (1*4 + 0.5*2 + 0*2) / (4+2+2) = 5/8 = 62.5% → 63
+    expect(match.match).toBe(63);
   });
 
   test("filter by questionSetIds", async ({ request }) => {

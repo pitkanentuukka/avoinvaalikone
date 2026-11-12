@@ -124,7 +124,7 @@ vaalikone/
 | **question_sets** | id, ngo_name, ngo_email, title, status, hidden | `status`: `pending \| approved \| rejected` |
 | **questions** | id, statement | Canonical question; may belong to several sets |
 | **question_set_questions** | question_set_id, question_id, sort_order | Join table (a question ↔ many sets, per-set ordering) |
-| **voter_responses** | session_id, question_id, value, weight | Anonymous analytics (no PII) |
+| **voter_responses** | session_id, question_id, value, weight | Anonymous analytics (no PII). `weight` of an unweighted question is 1; rows stored before migration 014 recorded 0 for those, so their 0s mix "not important" with "untouched" |
 
 All primary keys are UUIDs (`gen_random_uuid()`). New migrations should follow the versioned pattern and update `schema_migrations`.
 
