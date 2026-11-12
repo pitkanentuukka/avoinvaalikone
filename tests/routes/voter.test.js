@@ -161,14 +161,15 @@ describe("POST /api/voter/match — algorithm", () => {
     expect(res.body.results[0].match).toBe(33);
   });
 
-  test("empty candidateIds (no one answered) → returns { results: [] }", async () => {
+  test("empty candidateIds (no one answered) → same response shape, empty results", async () => {
     db.query.mockResolvedValueOnce({ rows: [{ id: VALID_UUID }] }); // questions that still exist
-    db.query.mockResolvedValueOnce({ rows: [] }); // no candidate_answers, early return
+    db.query.mockResolvedValueOnce({ rows: [] }); // no candidate_answers
+    db.query.mockResolvedValueOnce({ rows: [] }); // voter_responses INSERT
     const res = await request(app)
       .post("/api/voter/match")
       .send({ answers: { [VALID_UUID]: 2 } });
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ questionCount: 1, results: [] });
+    expect(res.body).toEqual({ sessionId: expect.stringMatching(UUID_RE), questionCount: 1, results: [] });
   });
 
   test("two candidates → sorted descending by match", async () => {
@@ -298,13 +299,18 @@ describe("POST /api/voter/match — algorithm", () => {
   test("every answer in a deselected set → nothing scored, empty results with questionCount 0", async () => {
     db.query.mockResolvedValueOnce({ rows: [{ id: VALID_UUID, in_selected_sets: false }] });
     db.query.mockResolvedValueOnce({ rows: [] }); // no candidate answers for an empty question list
+    db.query.mockResolvedValueOnce({ rows: [] }); // voter_responses INSERT
 
     const res = await request(app)
       .post("/api/voter/match")
       .send({ answers: { [VALID_UUID]: 2 }, questionSetIds: [VALID_UUID2] });
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ questionCount: 0, results: [] });
+    expect(res.body).toEqual({ sessionId: expect.stringMatching(UUID_RE), questionCount: 0, results: [] });
     expect(db.query.mock.calls[1][1]).toEqual([[]]);
+    // The voter still answered the question, so it is recorded for research
+    // like any other answer outside the selected sets.
+    expect(db.query.mock.calls[2][0]).toMatch(/INSERT INTO voter_responses/);
+    expect(db.query.mock.calls[2][1].slice(1)).toEqual([VALID_UUID, 2, 1]);
   });
 
   // The DB hands back lowercase IDs, so an uppercase answer key finds no value
@@ -355,6 +361,7 @@ describe("POST /api/voter/match — response shape", () => {
   test("empty results has same envelope shape as non-empty results", async () => {
     db.query.mockResolvedValueOnce({ rows: [{ id: VALID_UUID }] }); // questions that still exist
     db.query.mockResolvedValueOnce({ rows: [] }); // no candidate_answers
+    db.query.mockResolvedValueOnce({ rows: [] }); // voter_responses INSERT
 
     const res = await request(app)
       .post("/api/voter/match")
@@ -483,15 +490,54 @@ describe("POST /api/voter/match — voter response storage", () => {
     expect(insertCall[1].slice(1)).toEqual([VALID_UUID, 2, 1, VALID_UUID2, 3, 0]);
   });
 
-  test("no voter_responses INSERT when candidates list is empty", async () => {
+  // Regression (#24): with no candidate answers yet (early in an election, or
+  // a narrow constituency filter) the route returned before the research
+  // insert, so these sessions were never recorded and got no sessionId.
+  test("voter_responses INSERT still runs when no candidate has answered", async () => {
     db.query.mockResolvedValueOnce({ rows: [{ id: VALID_UUID }] }); // questions that still exist
-    db.query.mockResolvedValueOnce({ rows: [] }); // empty → early return
+    db.query.mockResolvedValueOnce({ rows: [] }); // no candidate answers
+    db.query.mockResolvedValueOnce({ rows: [] }); // voter_responses INSERT
 
-    await request(app)
+    const res = await request(app)
       .post("/api/voter/match")
-      .send({ answers: { [VALID_UUID]: 2 } });
+      .send({ answers: { [VALID_UUID]: 2 }, weights: { [VALID_UUID]: 3 }, constituency: "Helsingin vaalipiiri" });
 
-    // Only 2 DB calls: question existence + candidate_answers (no INSERT)
+    expect(res.status).toBe(200);
+    expect(res.body.results).toEqual([]);
+    expect(res.body.sessionId).toMatch(UUID_RE);
+    expect(db.query.mock.calls[1][1]).toEqual([[VALID_UUID], "Helsingin vaalipiiri"]);
+    // No candidates → no candidate info query; the third call is the insert.
+    expect(db.query).toHaveBeenCalledTimes(3);
+    const insertCall = db.query.mock.calls[2];
+    expect(insertCall[0]).toMatch(/INSERT INTO voter_responses/);
+    expect(insertCall[1]).toEqual([res.body.sessionId, VALID_UUID, 2, 3]);
+  });
+
+  test("no candidates: client-supplied sessionId is used and returned", async () => {
+    const SESSION_ID = "990e8400-e29b-41d4-a716-446655440000";
+    db.query.mockResolvedValueOnce({ rows: [{ id: VALID_UUID }] });
+    db.query.mockResolvedValueOnce({ rows: [] });
+    db.query.mockResolvedValueOnce({ rows: [] });
+
+    const res = await request(app)
+      .post("/api/voter/match")
+      .send({ answers: { [VALID_UUID]: 2 }, sessionId: SESSION_ID });
+
+    expect(res.status).toBe(200);
+    expect(res.body.sessionId).toBe(SESSION_ID);
+    expect(db.query.mock.calls[2][1][0]).toBe(SESSION_ID);
+  });
+
+  test("no candidates with includeInResearch: false → sessionId null, no INSERT", async () => {
+    db.query.mockResolvedValueOnce({ rows: [{ id: VALID_UUID }] });
+    db.query.mockResolvedValueOnce({ rows: [] });
+
+    const res = await request(app)
+      .post("/api/voter/match")
+      .send({ answers: { [VALID_UUID]: 2 }, includeInResearch: false });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ sessionId: null, questionCount: 1, results: [] });
     expect(db.query).toHaveBeenCalledTimes(2);
   });
 });
@@ -636,6 +682,7 @@ describe("POST /api/voter/match — validation", () => {
   test("valid questionSetIds → question lookup called with $2 param containing set IDs", async () => {
     db.query.mockResolvedValueOnce({ rows: [{ id: VALID_UUID, in_selected_sets: true }] });
     db.query.mockResolvedValueOnce({ rows: [] });
+    db.query.mockResolvedValueOnce({ rows: [] }); // voter_responses INSERT
     const res = await request(app)
       .post("/api/voter/match")
       .send({ answers: { [VALID_UUID]: 2 }, questionSetIds: [VALID_UUID2] });
@@ -651,6 +698,7 @@ describe("POST /api/voter/match — validation", () => {
   test("boundary answer value = 0 → accepted", async () => {
     db.query.mockResolvedValueOnce({ rows: [{ id: VALID_UUID }] }); // questions that still exist
     db.query.mockResolvedValueOnce({ rows: [] });
+    db.query.mockResolvedValueOnce({ rows: [] }); // voter_responses INSERT
     const res = await request(app)
       .post("/api/voter/match")
       .send({ answers: { [VALID_UUID]: 0 } });
@@ -660,6 +708,7 @@ describe("POST /api/voter/match — validation", () => {
   test("boundary answer value = 4 → accepted", async () => {
     db.query.mockResolvedValueOnce({ rows: [{ id: VALID_UUID }] }); // questions that still exist
     db.query.mockResolvedValueOnce({ rows: [] });
+    db.query.mockResolvedValueOnce({ rows: [] }); // voter_responses INSERT
     const res = await request(app)
       .post("/api/voter/match")
       .send({ answers: { [VALID_UUID]: 4 } });
@@ -669,6 +718,7 @@ describe("POST /api/voter/match — validation", () => {
   test("empty candidateIds with questionSetIds filter → still { results: [] } not bare []", async () => {
     db.query.mockResolvedValueOnce({ rows: [{ id: VALID_UUID, in_selected_sets: true }] });
     db.query.mockResolvedValueOnce({ rows: [] }); // no candidate_answers
+    db.query.mockResolvedValueOnce({ rows: [] }); // voter_responses INSERT
     const res = await request(app)
       .post("/api/voter/match")
       .send({ answers: { [VALID_UUID]: 2 }, questionSetIds: [VALID_UUID2] });
@@ -680,6 +730,7 @@ describe("POST /api/voter/match — validation", () => {
   test("empty questionSetIds array → no filter applied, accepted", async () => {
     db.query.mockResolvedValueOnce({ rows: [{ id: VALID_UUID }] }); // questions that still exist
     db.query.mockResolvedValueOnce({ rows: [] });
+    db.query.mockResolvedValueOnce({ rows: [] }); // voter_responses INSERT
     const res = await request(app)
       .post("/api/voter/match")
       .send({ answers: { [VALID_UUID]: 2 }, questionSetIds: [] });

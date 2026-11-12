@@ -219,9 +219,7 @@ test.describe("E2E-5: Party deletion cascade", () => {
     result = await voterMatch(request, {
       answers: { [qs.questions[0].id]: 2 },
     });
-    // When no candidates overlap, backend returns [] directly instead of { results: [] }
-    const results = result.results || result;
-    expect(results.find((r) => r.id === candidate.id)).toBeUndefined();
+    expect(result.results.find((r) => r.id === candidate.id)).toBeUndefined();
 
     // Candidate profile should 404
     const { res } = await get(request, `/candidates/${candidate.id}`);

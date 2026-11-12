@@ -156,14 +156,15 @@ test.describe("UC-VOTER-1: Voter match validation", () => {
     expect(res.status()).toBe(400);
   });
 
-  test("no overlapping candidates returns empty array", async ({ request }) => {
-    // Use a UUID that no candidate has answered
+  test("nonexistent question → empty results, nothing recorded", async ({ request }) => {
+    // A question ID that doesn't exist (e.g. deleted since the voter answered)
     const { res, body } = await post(request, "/voter/match", {
       answers: { "00000000-0000-0000-0000-000000000099": 2 },
     });
     expect(res.status()).toBe(200);
     expect(Array.isArray(body.results)).toBe(true);
     expect(body.results).toHaveLength(0);
+    expect(body.sessionId).toBeNull();
   });
 });
 
