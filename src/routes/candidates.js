@@ -355,7 +355,7 @@ router.put("/me/:candidateToken/answers", requireCandidateToken, async (req, res
   try {
     // Skip questions that no longer exist (merged or deleted while the
     // candidate had the form open) instead of failing the whole save on a
-    // foreign-key violation.
+    // foreign-key violation; their ids are returned so the UI can say so.
     const ids = Object.keys(answers).filter(isValidUUID);
     const { rows: existingRows } = ids.length
       ? await client.query("SELECT id, statement FROM questions WHERE id = ANY($1)", [ids])
@@ -365,10 +365,15 @@ router.put("/me/:candidateToken/answers", requireCandidateToken, async (req, res
     // Validate everything up front and reject the whole save if anything is
     // off, so the candidate never sees "saved" for an answer that wasn't.
     const toSave = [];
+    const skipped = [];
     const invalidValue = [];
     const tooLong = [];
     for (const [questionId, answer] of Object.entries(answers)) {
-      if (!statements.has(questionId) || !answer || typeof answer !== "object") continue;
+      if (!statements.has(questionId)) {
+        skipped.push(questionId);
+        continue;
+      }
+      if (!answer || typeof answer !== "object") continue; // nothing to save for this question
 
       const value = typeof answer.value === "string" && /^\d$/.test(answer.value) ? Number(answer.value) : answer.value;
       const explanation = answer.explanation ?? "";
@@ -382,8 +387,9 @@ router.put("/me/:candidateToken/answers", requireCandidateToken, async (req, res
     }
     if (invalidValue.length || tooLong.length) {
       const errors = [];
-      if (invalidValue.length) errors.push(`Virheellinen vastaus kysymykseen: ${quoteList(invalidValue)}`);
-      if (tooLong.length) errors.push(`Perustelu on liian pitkä (maksimi: 500 merkkiä) kysymykseen: ${quoteList(tooLong)}`);
+      const toQuestions = (list) => `${list.length > 1 ? "kysymyksiin" : "kysymykseen"}: ${quoteList(list)}`;
+      if (invalidValue.length) errors.push(`Virheellinen vastaus ${toQuestions(invalidValue)}`);
+      if (tooLong.length) errors.push(`Perustelu on liian pitkä (maksimi: 500 merkkiä) ${toQuestions(tooLong)}`);
       return res.status(400).json({ error: errors.join(". ") });
     }
 
@@ -405,7 +411,7 @@ router.put("/me/:candidateToken/answers", requireCandidateToken, async (req, res
     );
 
     await client.query("COMMIT");
-    res.json({ saved: toSave.length });
+    res.json({ saved: toSave.length, skipped });
   } catch (err) {
     await client.query("ROLLBACK");
     next(err);

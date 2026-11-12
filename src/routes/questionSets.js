@@ -171,7 +171,8 @@ publicRouter.post("/", async (req, res, next) => {
       else statements.push({ statement: stmt.trim(), sortOrder: i + 1 });
     }
     if (tooLong.length) {
-      return res.status(400).json({ error: `Väittämä on liian pitkä (maksimi: 500 merkkiä): ${quoteList(tooLong)}` });
+      const subject = tooLong.length > 1 ? "Väittämät ovat liian pitkiä" : "Väittämä on liian pitkä";
+      return res.status(400).json({ error: `${subject} (maksimi: 500 merkkiä): ${quoteList(tooLong)}` });
     }
     if (statements.length === 0) {
       return res.status(400).json({ error: "Vähintään yksi väittämä vaaditaan" });

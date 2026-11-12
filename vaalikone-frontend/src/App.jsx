@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, createContext, useContext } from "react";
+import { useState, useEffect, useMemo, useRef, createContext, useContext } from "react";
 import { marked } from "marked";
 import translations from "./translations";
 import voterGuideContent from "./guides/voter-guide.md?raw";
@@ -228,8 +228,11 @@ function LoadingState({ text }) {
 
 function ErrorBanner({ message, onRetry }) {
   const { t } = useTranslation();
+  const ref = useRef(null);
+  // Submit buttons often sit at the bottom of long forms; bring the error into view.
+  useEffect(() => { ref.current?.scrollIntoView?.({ behavior: "smooth", block: "nearest" }); }, [message]);
   return (
-    <div style={{
+    <div ref={ref} style={{
       padding: "14px 20px", borderRadius: "8px", background: palette.dangerLight,
       border: `1px solid #E8C0BA`, color: palette.danger, fontSize: "14px",
       display: "flex", justifyContent: "space-between", alignItems: "center",
@@ -326,8 +329,8 @@ function TextArea({ value, onChange, placeholder, rows = 3, maxLength }) {
   return (
     <div>
       {textarea}
-      <div style={{ textAlign: "right", fontSize: "12px", color: value.length >= maxLength ? palette.danger : palette.textLight }}>
-        {value.length} / {maxLength}
+      <div style={{ textAlign: "right", fontSize: "12px", color: (value ?? "").length >= maxLength ? palette.danger : palette.textLight }}>
+        {(value ?? "").length} / {maxLength}
       </div>
     </div>
   );
@@ -1680,7 +1683,13 @@ function CandidateView({ candidateToken, justRegistered }) {
         }
       }
       if (Object.keys(apiAnswers).length > 0) {
-        await api.saveOwnAnswers(candidateToken, apiAnswers);
+        const { skipped = [] } = await api.saveOwnAnswers(candidateToken, apiAnswers);
+        if (skipped.length > 0) {
+          setAnswers((prev) => Object.fromEntries(Object.entries(prev).filter(([qId]) => !skipped.includes(qId))));
+          setQuestionSets(await api.getQuestionSets());
+          setError(t.candidateAnswersSkipped(skipped.length));
+          return;
+        }
       }
       setSaved(true);
     } catch (e) {

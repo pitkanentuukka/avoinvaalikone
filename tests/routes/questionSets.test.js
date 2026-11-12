@@ -180,6 +180,22 @@ describe("POST /api/question-sets", () => {
     expect(client.release).toHaveBeenCalled();
   });
 
+  test("over-long statement in object form → 400; several → plural message", async () => {
+    const client = buildMockClient();
+    const res = await request(app)
+      .post("/api/question-sets")
+      .send({
+        ngoName: "TestiJärjestö",
+        title: "Sarja",
+        questions: [{ statement: "Eka " + "a".repeat(500) }, { statement: "Toka " + "b".repeat(500) }],
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/Väittämät ovat liian pitkiä/);
+    expect(res.body.error).toContain("Eka");
+    expect(res.body.error).toContain("Toka");
+    expect(client.query).not.toHaveBeenCalled();
+  });
+
   test("statement of exactly 500 characters → 201", async () => {
     const client = buildMockClient();
     const qs = { id: VALID_UUID, ngo_name: "TestiJärjestö", title: "Sarja", status: "pending" };

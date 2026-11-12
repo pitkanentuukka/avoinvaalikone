@@ -349,12 +349,12 @@ describe("PUT /api/candidates/me/:candidateToken/answers", () => {
         },
       });
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ saved: 2 });
+    expect(res.body).toEqual({ saved: 2, skipped: [] });
     expect(client.query.mock.calls[2][1][0]).toBe(CANDIDATE_ID);
     expect(client.release).toHaveBeenCalled();
   });
 
-  test("unknown question and null answer are skipped, not a 500", async () => {
+  test("unknown question and null answer are skipped, not a 500; unknown one is reported", async () => {
     db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
     const client = buildMockClient();
     client.query
@@ -367,7 +367,7 @@ describe("PUT /api/candidates/me/:candidateToken/answers", () => {
       .put(url)
       .send({ answers: { [QUESTION_ID]: null, [QUESTION_ID2]: { value: 3 } } });
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ saved: 0 });
+    expect(res.body).toEqual({ saved: 0, skipped: [QUESTION_ID2] });
   });
 
   test("explanation over 500 characters → 400 naming the question, nothing saved", async () => {
@@ -411,7 +411,75 @@ describe("PUT /api/candidates/me/:candidateToken/answers", () => {
       .put(url)
       .send({ answers: { [QUESTION_ID]: { value: 2, explanation: "a".repeat(500) } } });
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ saved: 1 });
+    expect(res.body).toEqual({ saved: 1, skipped: [] });
+    expect(client.query.mock.calls[2][1]).toEqual([CANDIDATE_ID, QUESTION_ID, 2, "a".repeat(500)]);
+  });
+
+  test("length is measured after trimming surrounding whitespace", async () => {
+    db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
+    const client = buildMockClient();
+    client.query
+      .mockResolvedValueOnce({ rows: [{ id: QUESTION_ID, statement: "Ydinvoimaa on lisättävä" }] })
+      .mockResolvedValueOnce({}) // BEGIN
+      .mockResolvedValueOnce({}) // UPSERT
+      .mockResolvedValueOnce({}) // UPDATE timestamp
+      .mockResolvedValueOnce({}); // COMMIT
+
+    const res = await request(app)
+      .put(url)
+      .send({ answers: { [QUESTION_ID]: { value: 2, explanation: `  ${"a".repeat(500)}  ` } } });
+    expect(res.status).toBe(200);
+    expect(client.query.mock.calls[2][1][3]).toBe("a".repeat(500));
+  });
+
+  test("numeric string value is accepted", async () => {
+    db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
+    const client = buildMockClient();
+    client.query
+      .mockResolvedValueOnce({ rows: [{ id: QUESTION_ID, statement: "Ydinvoimaa on lisättävä" }] })
+      .mockResolvedValueOnce({}) // BEGIN
+      .mockResolvedValueOnce({}) // UPSERT
+      .mockResolvedValueOnce({}) // UPDATE timestamp
+      .mockResolvedValueOnce({}); // COMMIT
+
+    const res = await request(app).put(url).send({ answers: { [QUESTION_ID]: { value: "2" } } });
+    expect(res.status).toBe(200);
+    expect(client.query.mock.calls[2][1]).toEqual([CANDIDATE_ID, QUESTION_ID, 2, ""]);
+  });
+
+  test.each([5, false, ["x"]])("non-string explanation %p → 400, nothing saved", async (explanation) => {
+    db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
+    const client = buildMockClient();
+    client.query.mockResolvedValueOnce({ rows: [{ id: QUESTION_ID, statement: "Ydinvoimaa on lisättävä" }] });
+
+    const res = await request(app).put(url).send({ answers: { [QUESTION_ID]: { value: 2, explanation } } });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("Ydinvoimaa on lisättävä");
+    expect(client.query).toHaveBeenCalledTimes(1);
+  });
+
+  test("several offending questions → plural message listing each", async () => {
+    db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
+    const client = buildMockClient();
+    client.query.mockResolvedValueOnce({
+      rows: [
+        { id: QUESTION_ID, statement: "Ydinvoimaa on lisättävä" },
+        { id: QUESTION_ID2, statement: "Bensaveroa on laskettava" },
+      ],
+    });
+
+    const res = await request(app)
+      .put(url)
+      .send({
+        answers: {
+          [QUESTION_ID]: { value: 2, explanation: "a".repeat(501) },
+          [QUESTION_ID2]: { value: 1, explanation: "b".repeat(501) },
+        },
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/kysymyksiin/);
+    expect(res.body.error).toContain("Ydinvoimaa on lisättävä");
+    expect(res.body.error).toContain("Bensaveroa on laskettava");
   });
 
   test.each([5, -1, "abc", null])("invalid value %p → 400 naming the question, nothing saved", async (value) => {
