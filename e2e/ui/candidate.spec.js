@@ -70,6 +70,41 @@ test.describe("Candidate and party portal UI", () => {
     await expect(page.getByPlaceholder("esim. Matti Meikäläinen")).toHaveValue("Linkki Ehdokas");
     // Only on first registration is the "save your link" banner shown.
     await expect(page.getByText("Henkilökohtainen linkkisi")).toHaveCount(0);
+
+    // The token is gone from the URL, but a reload reopens the same page.
+    await page.reload();
+    await expect(page.getByPlaceholder("esim. Matti Meikäläinen")).toHaveValue("Linkki Ehdokas");
+
+    // A fresh visit to the site in the same tab doesn't.
+    await page.goto("/");
+    await expect(page.getByPlaceholder("Linkki tai tunniste")).toBeVisible();
+    await expect(page.getByPlaceholder("esim. Matti Meikäläinen")).toHaveCount(0);
+  });
+
+  test("a temporary load error offers a retry instead of \"invalid link\"", async ({ page, request }) => {
+    const candidate = await createCandidate(request, party, { name: "Retry Ehdokas" });
+    await page.route("**/api/candidates/me/*", (route) => route.fulfill({ status: 500, body: "{}" }));
+
+    await page.goto(`/?candidateToken=${candidate.token}`);
+    await expect(page.getByText("Sivun lataaminen epäonnistui")).toBeVisible();
+    await expect(page.getByText("Linkki ei kelpaa")).toHaveCount(0);
+
+    await page.unroute("**/api/candidates/me/*");
+    await page.getByRole("button", { name: "Yritä uudelleen" }).click();
+    await expect(page.getByPlaceholder("esim. Matti Meikäläinen")).toHaveValue("Retry Ehdokas");
+  });
+
+  test("leaving with unsaved answers asks first", async ({ page, request }) => {
+    const candidate = await createCandidate(request, party, { name: "Unsaved Ehdokas" });
+    await page.goto(`/?candidateToken=${candidate.token}`);
+    await page.getByPlaceholder("esim. Matti Meikäläinen").fill("Unsaved Ehdokas 2");
+
+    const dialog = page.waitForEvent("dialog");
+    await page.getByRole("button", { name: "Etusivu" }).click();
+    const d = await dialog;
+    expect(d.message()).toContain("tallentamattomia muutoksia");
+    await d.dismiss();
+    await expect(page.getByPlaceholder("esim. Matti Meikäläinen")).toHaveValue("Unsaved Ehdokas 2");
   });
 
   test("registered candidates appear in the party portal", async ({ page, request }) => {

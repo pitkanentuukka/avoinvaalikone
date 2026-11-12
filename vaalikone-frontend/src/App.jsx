@@ -1,7 +1,9 @@
 import { useState, useEffect, useMemo, useRef, useId, createContext, useContext } from "react";
 import { marked } from "marked";
+import * as Sentry from "@sentry/react";
 import translations from "./translations";
-import { createApi } from "./api";
+import { createApi, isTransientError } from "./api";
+import { readInitialLink, rememberLink, tokenLinkFromParams } from "./tokenLinks";
 import voterGuideContent from "./guides/voter-guide.md?raw";
 import candidateGuideContent from "./guides/candidate-guide.md?raw";
 import adminGuideContent from "./guides/admin-guide.md?raw";
@@ -1296,6 +1298,26 @@ function InvalidLink({ legacy = false }) {
   );
 }
 
+// A load that failed for a temporary reason (rate limit, server error,
+// network). The link may well be fine, so offer a retry, not InvalidLink.
+function LoadFailed({ onRetry }) {
+  const { t } = useTranslation();
+  return (
+    <div style={{ maxWidth: 500, margin: "0 auto", padding: "80px 24px" }}>
+      <ErrorBanner message={t.linkLoadFailed} onRetry={onRetry} />
+    </div>
+  );
+}
+
+function ViewCrashed() {
+  const { t } = useTranslation();
+  return (
+    <div style={{ maxWidth: 500, margin: "0 auto", padding: "80px 24px" }}>
+      <ErrorBanner message={t.viewCrashed} />
+    </div>
+  );
+}
+
 function CopyField({ value }) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
@@ -1370,6 +1392,8 @@ function PartyView({ partyToken }) {
   const [questionCount, setQuestionCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [invalid, setInvalid] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(null);
   const [sent, setSent] = useState({});
@@ -1377,18 +1401,20 @@ function PartyView({ partyToken }) {
   useEffect(() => {
     async function load() {
       setLoading(true);
+      setLoadFailed(false);
       try {
         const [overview, qs] = await Promise.all([api.getPartyOverview(partyToken), api.getQuestionSets()]);
         setData(overview);
         setQuestionCount(distinctQuestions(qs).length);
-      } catch {
-        setInvalid(true);
+      } catch (e) {
+        if (isTransientError(e)) setLoadFailed(true);
+        else setInvalid(true);
       } finally {
         setLoading(false);
       }
     }
     load();
-  }, [partyToken]);
+  }, [partyToken, attempt]);
 
   async function run(key, fn) {
     setBusy(key);
@@ -1425,6 +1451,7 @@ function PartyView({ partyToken }) {
 
   if (loading) return <LoadingState />;
   if (invalid) return <InvalidLink />;
+  if (loadFailed) return <LoadFailed onRetry={() => setAttempt((n) => n + 1)} />;
 
   return (
     <div style={{ maxWidth: 680, margin: "0 auto", padding: "40px 24px" }}>
@@ -1476,16 +1503,28 @@ function RegisterView({ registrationToken, onRegistered }) {
   const [partyName, setPartyName] = useState(null);
   const [loading, setLoading] = useState(true);
   const [invalid, setInvalid] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const [profile, setProfile] = useState(EMPTY_PROFILE);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    api.getRegistration(registrationToken)
-      .then((r) => setPartyName(r.party.name))
-      .catch(() => setInvalid(true))
-      .finally(() => setLoading(false));
-  }, [registrationToken]);
+    async function load() {
+      setLoading(true);
+      setLoadFailed(false);
+      try {
+        const r = await api.getRegistration(registrationToken);
+        setPartyName(r.party.name);
+      } catch (e) {
+        if (isTransientError(e)) setLoadFailed(true);
+        else setInvalid(true);
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+  }, [registrationToken, attempt]);
 
   async function submit() {
     setSaving(true);
@@ -1501,6 +1540,7 @@ function RegisterView({ registrationToken, onRegistered }) {
 
   if (loading) return <LoadingState />;
   if (invalid) return <InvalidLink />;
+  if (loadFailed) return <LoadFailed onRetry={() => setAttempt((n) => n + 1)} />;
 
   return (
     <div style={{ maxWidth: 600, margin: "0 auto", padding: "40px 24px" }}>
@@ -1524,7 +1564,7 @@ function answersFromProfile(me) {
   );
 }
 
-function CandidateView({ candidateToken, justRegistered }) {
+function CandidateView({ candidateToken, justRegistered, leaveGuardRef }) {
   const { t } = useTranslation();
   const [partyName, setPartyName] = useState("");
   const [questionSets, setQuestionSets] = useState([]);
@@ -1533,12 +1573,38 @@ function CandidateView({ candidateToken, justRegistered }) {
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(true);
   const [invalid, setInvalid] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+  // Counts edits, and the edit count the last successful save covered, so
+  // leaving the page with unsaved changes can be warned about.
+  const edits = useRef({ made: 0, saved: 0 });
+  const [hasUnsaved, setHasUnsaved] = useState(false);
+  const syncUnsaved = () => setHasUnsaved(edits.current.made !== edits.current.saved);
+
+  // In-app navigation unmounts the view without unloading the page.
+  useEffect(() => {
+    leaveGuardRef.current = () => edits.current.made !== edits.current.saved;
+    return () => { leaveGuardRef.current = null; };
+  }, [leaveGuardRef]);
+
+  // Only while there are unsaved changes: in Firefox any beforeunload
+  // listener keeps the page out of the back/forward cache.
+  useEffect(() => {
+    if (!hasUnsaved) return;
+    function warn(e) {
+      e.preventDefault();
+      e.returnValue = ""; // older browsers need this to show the prompt
+    }
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [hasUnsaved]);
 
   useEffect(() => {
     async function load() {
       setLoading(true);
+      setLoadFailed(false);
       try {
         const [me, qs] = await Promise.all([api.getOwnProfile(candidateToken), api.getQuestionSets()]);
         setPartyName(me.party.name);
@@ -1548,25 +1614,39 @@ function CandidateView({ candidateToken, justRegistered }) {
           photoUrl: me.photoUrl || "", bio: me.bio || "",
         });
         setAnswers(answersFromProfile(me));
-      } catch {
-        setInvalid(true);
+      } catch (e) {
+        if (isTransientError(e)) setLoadFailed(true);
+        else setInvalid(true);
       } finally {
         setLoading(false);
       }
     }
     load();
-  }, [candidateToken]);
+  }, [candidateToken, attempt]);
 
   const approvedSets = questionSets.filter((s) => s.status === "approved");
   const allQuestions = distinctQuestions(questionSets);
 
   function setAnswer(qId, field, val) {
+    if (answers[qId]?.[field] === val) return;
+    edits.current.made++;
+    setHasUnsaved(true);
     setAnswers((a) => ({ ...a, [qId]: { ...a[qId], [field]: val } }));
+  }
+
+  function setProfileField(k, v) {
+    edits.current.made++;
+    setHasUnsaved(true);
+    setProfile((p) => ({ ...p, [k]: v }));
   }
 
   async function save() {
     setSaving(true);
     setError(null);
+    // Edits made while the save is in flight aren't covered by it, and
+    // explanations for unrated questions aren't sent at all.
+    const unsent = Object.values(answers).some((a) => a.value === undefined && a.text?.trim());
+    const editsSaved = unsent ? edits.current.saved : edits.current.made;
     try {
       await api.updateOwnProfile(candidateToken, profilePayload(profile));
       const apiAnswers = {};
@@ -1578,6 +1658,8 @@ function CandidateView({ candidateToken, justRegistered }) {
       if (Object.keys(apiAnswers).length > 0) {
         const { skipped = [] } = await api.saveOwnAnswers(candidateToken, apiAnswers);
         if (skipped.length > 0) {
+          edits.current.saved = editsSaved;
+          syncUnsaved();
           // Those questions are gone. Drop them locally rather than refetching
           // the public (edge-cached) question list, and reload own answers
           // (uncached) in case a merge carried one over to the kept question.
@@ -1601,6 +1683,8 @@ function CandidateView({ candidateToken, justRegistered }) {
           return;
         }
       }
+      edits.current.saved = editsSaved;
+      syncUnsaved();
       setSaved(true);
     } catch (e) {
       setError(e.message);
@@ -1611,6 +1695,7 @@ function CandidateView({ candidateToken, justRegistered }) {
 
   if (loading) return <LoadingState />;
   if (invalid) return <InvalidLink />;
+  if (loadFailed) return <LoadFailed onRetry={() => setAttempt((n) => n + 1)} />;
 
   if (saved) {
     return (
@@ -1648,7 +1733,7 @@ function CandidateView({ candidateToken, justRegistered }) {
 
       <Card style={{ marginBottom: "24px" }}>
         <div style={{ fontSize: "14px", fontWeight: 700, marginBottom: "16px" }}>{t.candidateProfile}</div>
-        <ProfileFields profile={profile} setField={(k, v) => setProfile((p) => ({ ...p, [k]: v }))} />
+        <ProfileFields profile={profile} setField={setProfileField} />
       </Card>
 
       {approvedSets.map((qs) => (
@@ -2149,22 +2234,6 @@ function VoterView() {
 
 // ─── App ───
 
-// Map magic-link query params to the view they open. Candidate links win over
-// the others so an old link carrying several params lands somewhere sensible.
-function tokenLinkFromParams(params) {
-  const candidateToken = params.get("candidateToken");
-  if (candidateToken) return { view: "candidate", token: candidateToken };
-  // Answering links sent before personal links existed
-  // (?view=candidate&partyToken=…&candidateId=…). They carry the party token,
-  // which now opens the secretary's portal — never open it from one of these.
-  if (params.get("candidateId")) return { view: "legacy", token: null };
-  const registrationToken = params.get("register");
-  if (registrationToken) return { view: "register", token: registrationToken };
-  const partyToken = params.get("partyToken");
-  if (partyToken) return { view: "party", token: partyToken };
-  return null;
-}
-
 // The home page accepts either a pasted link (any of the above) or a bare
 // party token, which is what party secretaries have historically been given.
 function tokenLinkFromInput(value) {
@@ -2179,28 +2248,58 @@ function tokenLinkFromInput(value) {
   return { view: "party", token: text };
 }
 
+// Null where storage is blocked; even reading the property can throw then.
+const sessionStore = (() => {
+  try { return window.sessionStorage; } catch { return null; }
+})();
+
+// Read once per page load: a second read (StrictMode runs state initializers
+// twice) would find the URL already scrubbed and forget the link.
+let pageLoadLink;
+function readPageLoadLink() {
+  if (pageLoadLink !== undefined) return pageLoadLink;
+  const navigationType = window.performance?.getEntriesByType?.("navigation")[0]?.type
+    // Browsers without Navigation Timing Level 2 (Safari before 15).
+    ?? (window.performance?.navigation?.type === 1 ? "reload" : undefined);
+  pageLoadLink = readInitialLink(window.location.search, sessionStore, navigationType);
+  // Tokens are bearer secrets delivered as magic links. Scrub them from the
+  // address bar once read so they don't linger in browser history,
+  // bookmarks, or anything else that copies the URL. The open link is kept
+  // in the tab's sessionStorage instead, so a reload can reopen it.
+  if (tokenLinkFromParams(new URLSearchParams(window.location.search))) {
+    window.history.replaceState({}, "", window.location.pathname);
+  }
+  return pageLoadLink;
+}
+
 export default function App() {
-  const [initialLink] = useState(() => {
-    const link = tokenLinkFromParams(new URLSearchParams(window.location.search));
-    // Tokens are bearer secrets delivered as magic links. Scrub them from the
-    // address bar once read so they don't linger in browser history,
-    // bookmarks, or anything else that copies the URL.
-    if (link) window.history.replaceState({}, "", window.location.pathname);
-    return link;
-  });
+  const [initialLink] = useState(readPageLoadLink);
 
   const [view, setView] = useState(initialLink?.view || "home");
   const [token, setToken] = useState(initialLink?.token || null);
-  const [justRegistered, setJustRegistered] = useState(false);
+  const [justRegistered, setJustRegistered] = useState(Boolean(initialLink?.justRegistered));
   const [lang, setLang] = useState(DEFAULT_LANG);
+  // Set by CandidateView while mounted: true when it has unsaved changes.
+  const leaveGuardRef = useRef(null);
+  // Bumped to reset the error boundary when navigating after a crash, even
+  // to the view that crashed.
+  const crashed = useRef(false);
+  const [boundaryResets, setBoundaryResets] = useState(0);
 
   function openLink(link) {
+    rememberLink(sessionStore, link);
     setToken(link.token);
-    setJustRegistered(false);
+    setJustRegistered(Boolean(link.justRegistered));
     setView(link.view);
   }
 
   function navigate(next) {
+    if (leaveGuardRef.current?.() && !confirmAction(t.candidateUnsavedConfirm)) return;
+    rememberLink(sessionStore, null);
+    if (crashed.current) {
+      crashed.current = false;
+      setBoundaryResets((n) => n + 1);
+    }
     setToken(null);
     setJustRegistered(false);
     setView(next);
@@ -2215,20 +2314,28 @@ export default function App() {
         <style>{`@keyframes spin { to { transform: rotate(360deg); } } .app-nav::-webkit-scrollbar { display: none; }`}</style>
         <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&display=swap" rel="stylesheet" />
         <Header view={view} navigate={navigate} />
-        {view === "home" && <HomeView navigate={navigate} openLink={openLink} />}
-        {view === "about" && <AboutView />}
-        {view === "admin" && <AdminView />}
-        {view === "ngo" && <NgoView />}
-        {view === "party" && <PartyView partyToken={token} />}
-        {view === "legacy" && <InvalidLink legacy />}
-        {view === "register" && (
-          <RegisterView
-            registrationToken={token}
-            onRegistered={(candidateToken) => { openLink({ view: "candidate", token: candidateToken }); setJustRegistered(true); }}
-          />
-        )}
-        {view === "candidate" && <CandidateView key={token} candidateToken={token} justRegistered={justRegistered} />}
-        {view === "voter" && <VoterView />}
+        {/* A render error would otherwise unmount the whole app, and with the
+            link remembered for reloads, crash again on every reload. */}
+        <Sentry.ErrorBoundary
+          key={`${view}:${token}:${boundaryResets}`}
+          fallback={<ViewCrashed />}
+          onError={() => { crashed.current = true; rememberLink(sessionStore, null); }}
+        >
+          {view === "home" && <HomeView navigate={navigate} openLink={openLink} />}
+          {view === "about" && <AboutView />}
+          {view === "admin" && <AdminView />}
+          {view === "ngo" && <NgoView />}
+          {view === "party" && <PartyView partyToken={token} />}
+          {view === "legacy" && <InvalidLink legacy />}
+          {view === "register" && (
+            <RegisterView
+              registrationToken={token}
+              onRegistered={(candidateToken) => openLink({ view: "candidate", token: candidateToken, justRegistered: true })}
+            />
+          )}
+          {view === "candidate" && <CandidateView key={token} candidateToken={token} justRegistered={justRegistered} leaveGuardRef={leaveGuardRef} />}
+          {view === "voter" && <VoterView />}
+        </Sentry.ErrorBoundary>
       </div>
     </LanguageContext.Provider>
   );
