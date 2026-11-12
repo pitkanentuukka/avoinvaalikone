@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, createContext, useContext } from "react";
+import { useState, useEffect, useMemo, useRef, useId, createContext, useContext } from "react";
 import { marked } from "marked";
 import translations from "./translations";
 import voterGuideContent from "./guides/voter-guide.md?raw";
@@ -319,8 +319,10 @@ function ScaleInput({ value, onChange }) {
 }
 
 function TextArea({ value, onChange, placeholder, rows = 3, maxLength }) {
+  const counterId = useId();
   const textarea = (
     <textarea value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} rows={rows} maxLength={maxLength}
+      aria-describedby={maxLength ? counterId : undefined}
       style={{
         width: "100%", padding: "12px 14px", borderRadius: "6px", border: `1px solid ${palette.border}`,
         fontFamily: "'Source Serif 4', Georgia, serif", fontSize: "14px", resize: "vertical",
@@ -331,7 +333,7 @@ function TextArea({ value, onChange, placeholder, rows = 3, maxLength }) {
   return (
     <div>
       {textarea}
-      <div style={{ textAlign: "right", fontSize: "12px", color: (value ?? "").length >= maxLength ? palette.danger : palette.textLight }}>
+      <div id={counterId} aria-live="polite" style={{ textAlign: "right", fontSize: "12px", color: (value ?? "").length >= maxLength ? palette.danger : palette.textLight }}>
         {(value ?? "").length} / {maxLength}
       </div>
     </div>
@@ -1695,7 +1697,15 @@ function CandidateView({ candidateToken, justRegistered }) {
           const isSkipped = (qId) => skipped.includes(qId);
           setQuestionSets((sets) => sets.map((s) => ({ ...s, questions: (s.questions || []).filter((q) => !isSkipped(q.id)) })));
           try {
-            setAnswers(answersFromProfile(await api.getOwnProfile(candidateToken)));
+            const me = await api.getOwnProfile(candidateToken);
+            setAnswers((prev) => {
+              const next = answersFromProfile(me);
+              // Keep explanations typed for questions not rated yet (they weren't sent).
+              for (const [qId, a] of Object.entries(prev)) {
+                if (a.value === undefined && !isSkipped(qId)) next[qId] = { ...next[qId], text: a.text };
+              }
+              return next;
+            });
           } catch {
             setAnswers((prev) => Object.fromEntries(Object.entries(prev).filter(([qId]) => !isSkipped(qId))));
           }
