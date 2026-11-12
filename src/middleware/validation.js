@@ -46,14 +46,14 @@ function isValidEmail(value) {
  */
 function excerpt(text, maxLength = 60) {
   const chars = Array.from(text); // code points, so an emoji is never split
-  return chars.length > maxLength ? `${chars.slice(0, maxLength).join("").trimEnd()}…` : text;
+  return chars.length > maxLength ? `${chars.slice(0, maxLength).join('').trimEnd()}…` : text;
 }
 
 /**
  * Join quoted excerpts of texts for an error message
  */
 function quoteList(texts) {
-  return texts.map((t) => `"${excerpt(t)}"`).join(", ");
+  return texts.map((t) => `"${excerpt(t)}"`).join(', ');
 }
 
 /**

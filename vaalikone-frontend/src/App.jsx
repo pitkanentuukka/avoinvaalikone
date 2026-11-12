@@ -333,7 +333,7 @@ function TextArea({ value, onChange, placeholder, rows = 3, maxLength }) {
   return (
     <div>
       {textarea}
-      <div id={counterId} aria-live="polite" style={{ textAlign: "right", fontSize: "12px", color: (value ?? "").length >= maxLength ? palette.danger : palette.textLight }}>
+      <div id={counterId} style={{ textAlign: "right", fontSize: "12px", color: (value ?? "").length >= maxLength ? palette.danger : palette.textLight }}>
         {(value ?? "").length} / {maxLength}
       </div>
     </div>
@@ -1700,9 +1700,10 @@ function CandidateView({ candidateToken, justRegistered }) {
             const me = await api.getOwnProfile(candidateToken);
             setAnswers((prev) => {
               const next = answersFromProfile(me);
-              // Keep explanations typed for questions not rated yet (they weren't sent).
+              // Keep explanations typed for questions not rated yet (they weren't
+              // sent), unless a merge has since given the question a server answer.
               for (const [qId, a] of Object.entries(prev)) {
-                if (a.value === undefined && !isSkipped(qId)) next[qId] = { ...next[qId], text: a.text };
+                if (a.value === undefined && !isSkipped(qId) && next[qId] === undefined) next[qId] = a;
               }
               return next;
             });
