@@ -25,6 +25,8 @@ const router = Router();
  * Returns { sessionId, questionCount, results }: candidates ranked by match
  * percentage. questionCount is how many of the voter's questions were scored;
  * each result's answeredCount is how many of those the candidate answered.
+ * sessionId is null when includeInResearch is false or none of the answered
+ * questions exist any more; otherwise it is set even if no candidate matched.
  */
 router.post("/match", async (req, res, next) => {
   try {

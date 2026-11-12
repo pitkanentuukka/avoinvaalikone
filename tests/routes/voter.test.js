@@ -505,6 +505,7 @@ describe("POST /api/voter/match — voter response storage", () => {
     expect(res.status).toBe(200);
     expect(res.body.results).toEqual([]);
     expect(res.body.sessionId).toMatch(UUID_RE);
+    expect(db.query.mock.calls[1][1]).toEqual([[VALID_UUID], "Helsingin vaalipiiri"]);
     // No candidates → no candidate info query; the third call is the insert.
     expect(db.query).toHaveBeenCalledTimes(3);
     const insertCall = db.query.mock.calls[2];
