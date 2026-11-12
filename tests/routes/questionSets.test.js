@@ -791,5 +791,8 @@ describe("POST /api/admin/question-sets/merge-questions", () => {
     expect(res.status).toBe(200);
     expect(res.body.merged).toBe(1);
     expect(res.body.sets).toHaveLength(1);
+    // Locked in id order, like the candidate answer save (#16), so the two
+    // can't deadlock.
+    expect(client.query.mock.calls[1][0]).toMatch(/ORDER BY id\s+FOR UPDATE/);
   });
 });

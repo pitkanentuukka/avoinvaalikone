@@ -574,12 +574,49 @@ describe("PUT /api/candidates/me/:candidateToken/answers", () => {
     );
   });
 
+  // A question deleted or merged between the existence check and the upsert
+  // must end up in `skipped`, not a foreign-key violation (#16): the check runs
+  // inside the transaction and key-share locks the rows, so a concurrent delete
+  // waits for the save. The lock is taken in id order, the same order the merge
+  // endpoint locks in, so the two can't deadlock.
+  test("existence check runs inside the transaction and locks the questions in id order", async () => {
+    db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
+    const client = buildMockClient();
+    client.query
+      .mockResolvedValueOnce({}) // BEGIN
+      .mockResolvedValueOnce({ rows: [{ id: QUESTION_ID }] }) // existing questions
+      .mockResolvedValueOnce({}) // UPSERT
+      .mockResolvedValueOnce({}) // UPDATE timestamp
+      .mockResolvedValueOnce({}); // COMMIT
+
+    const res = await request(app).put(url).send({ answers: { [QUESTION_ID]: { value: 2 } } });
+    expect(res.status).toBe(200);
+    const sqls = client.query.mock.calls.map(([sql]) => sql);
+    expect(sqls[0]).toBe("BEGIN");
+    expect(sqls[1]).toMatch(/FROM questions\b[\s\S]*ORDER BY id\s+FOR KEY SHARE/);
+    expect(sqls[2]).toMatch(/INSERT INTO candidate_answers/);
+  });
+
+  test("validation failure after the lock → ROLLBACK, 400, client released", async () => {
+    db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
+    const client = buildMockClient();
+    client.query
+      .mockResolvedValueOnce({}) // BEGIN
+      .mockResolvedValueOnce({ rows: [{ id: QUESTION_ID, statement: "Ydinvoimaa on lisättävä" }] })
+      .mockResolvedValueOnce({}); // ROLLBACK
+
+    const res = await request(app).put(url).send({ answers: { [QUESTION_ID]: { value: 9 } } });
+    expect(res.status).toBe(400);
+    expect(client.query.mock.calls.map(([sql]) => sql)).toEqual(["BEGIN", expect.any(String), "ROLLBACK"]);
+    expect(client.release).toHaveBeenCalled();
+  });
+
   test("DB error → ROLLBACK called and client.release() still called", async () => {
     db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
     const client = buildMockClient();
     client.query
-      .mockResolvedValueOnce({ rows: [{ id: QUESTION_ID }] }) // existing questions
       .mockResolvedValueOnce({}) // BEGIN
+      .mockResolvedValueOnce({ rows: [{ id: QUESTION_ID }] }) // existing questions
       .mockRejectedValueOnce(new Error("DB failure")); // UPSERT fails
 
     const res = await request(app)
