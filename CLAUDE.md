@@ -94,6 +94,7 @@ Copy `.env.example` to `.env`. Required: `DATABASE_URL`, `ADMIN_SECRET`. Optiona
 - All DB queries use parameterized statements (`$1`, `$2`, …) — no string interpolation
 - Admin endpoints are mounted at `/api/admin/*`; token-gated endpoints use `/api/candidates/party/:partyToken/...`, `/api/candidates/register/:registrationToken`, and `/api/candidates/me/:candidateToken/...`
 - Tokens are 24 random bytes from pgcrypto (`encode(gen_random_bytes(24), 'hex')` column defaults; rotate with `SET col = DEFAULT`)
+- API behaviour that only direct API clients can hit (the frontend never triggers it) is documented in `docs/direct-api-caveats.md` rather than fixed for now; add new cases there
 - Migrations run as a single SQL transaction (`migrations/001_initial.sql`); new migrations should follow the same versioned pattern and update `schema_migrations`
 
 ## Issue Workflow

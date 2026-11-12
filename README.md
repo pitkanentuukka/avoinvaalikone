@@ -263,7 +263,7 @@ A *question set* is one organization's themed bundle of statements — the core 
 - `weights` — importance weights 0–3 per question UUID (optional, default 1)
 - `questionSetIds` — restrict to specific sets (optional). Only the voter's answers to questions in these sets are scored.
 
-Question UUIDs in `answers` and `weights` must be **lowercase**, as the API returns them. Validation accepts uppercase too, but the route looks answers and weights up by the lowercase ID from the database. An uppercase key is therefore silently ignored in scoring, and an uppercase `answers` key also makes that request's research insert fail. The frontend always sends lowercase. Direct API clients must too, until keys are normalised server-side.
+Question UUIDs in `answers` and `weights` must be **lowercase**, as the API returns them, and direct clients should always send `questionSetIds`. See [docs/direct-api-caveats.md](docs/direct-api-caveats.md) for what happens otherwise. That file lists all API behaviour the frontend never triggers but direct API clients can.
 
 **Match algorithm:** For each question the voter answered:
 ```
