@@ -231,9 +231,9 @@ function TextArea({ value, onChange, placeholder, rows = 3, maxLength, id, ariaL
   );
 }
 
-function Input({ value, onChange, placeholder, type = "text", id, ariaLabel }) {
+function Input({ value, onChange, placeholder, type = "text", id, ariaLabel, ariaDescribedBy, required }) {
   return (
-    <input id={id} aria-label={ariaLabel} type={type} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
+    <input id={id} aria-label={ariaLabel} aria-describedby={ariaDescribedBy} aria-required={required || undefined} type={type} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
       style={{
         width: "100%", padding: "10px 14px", borderRadius: "6px", border: `1px solid ${palette.border}`,
         fontFamily: "'Source Serif 4', Georgia, serif", fontSize: "14px",
@@ -243,11 +243,12 @@ function Input({ value, onChange, placeholder, type = "text", id, ariaLabel }) {
 }
 
 // A visible label tied to its field: `children` is called with the id the field must use.
-function Field({ label, children }) {
+// `required` only adds the visual asterisk; the field itself says aria-required.
+function Field({ label, required, children }) {
   const id = useId();
   return (
     <div>
-      <label htmlFor={id} style={labelStyle}>{label}</label>
+      <label htmlFor={id} style={labelStyle}>{label}{required && <span aria-hidden="true"> *</span>}</label>
       {children(id)}
     </div>
   );
@@ -297,10 +298,10 @@ function NgoLogo({ src, name, size = 40 }) {
 
 // ─── Language Selector ───
 function LanguageSelector() {
-  const { lang, setLang, t } = useTranslation();
+  const { lang, setLang } = useTranslation();
   return (
     <select
-      aria-label={t.languageSelectLabel}
+      aria-label="Kieli / Language"
       value={lang}
       onChange={(e) => setLang(e.target.value)}
       style={{
@@ -405,6 +406,7 @@ function Header({ view, navigate }) {
 function HomeView({ navigate, openLink }) {
   const { t } = useTranslation();
   const [tokenInput, setTokenInput] = useState("");
+  const tokenDescId = useId();
   const go = () => {
     const link = tokenLinkFromInput(tokenInput);
     if (link) openLink(link);
@@ -429,9 +431,9 @@ function HomeView({ navigate, openLink }) {
         <Card style={{ textAlign: "left" }}>
           <div style={{ fontSize: "11px", fontWeight: 700, color: palette.info, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "6px" }}>{t.homeCandidateLabel}</div>
           <div style={{ fontWeight: 700, fontSize: "16px", marginBottom: "8px" }}>{t.homeCandidateTitle}</div>
-          <div style={{ fontSize: "13px", color: palette.textMuted, marginBottom: "12px" }}>{t.homeCandidateDesc}</div>
+          <div id={tokenDescId} style={{ fontSize: "13px", color: palette.textMuted, marginBottom: "12px" }}>{t.homeCandidateDesc}</div>
           <div style={{ display: "flex", gap: "8px" }}>
-            <Input value={tokenInput} onChange={setTokenInput} placeholder={t.homeCandidatePlaceholder} ariaLabel={t.homeCandidatePlaceholder} />
+            <Input value={tokenInput} onChange={setTokenInput} placeholder={t.homeCandidatePlaceholder} ariaLabel={t.homeCandidatePlaceholder} ariaDescribedBy={tokenDescId} />
             <Button onClick={go} disabled={!tokenInput.trim()} style={{ flexShrink: 0 }}>{t.homeGo}</Button>
           </div>
         </Card>
@@ -909,7 +911,7 @@ function AdminView() {
                           ) : mergeTargets.length > 0 && !isEditing ? (
                             <select
                               value=""
-                              aria-label={t.adminMarkDuplicate}
+                              aria-label={t.adminMarkDuplicateLabel(q.statement)}
                               onChange={(e) => e.target.value && setDuplicateOf(qs.id, q.id, e.target.value)}
                               style={{ marginTop: "8px", width: "100%", boxSizing: "border-box", fontSize: "12px", padding: "5px 6px", borderRadius: "4px", border: `1px solid ${palette.border}`, fontFamily: "inherit", background: palette.surface, color: palette.textMuted }}
                             >
@@ -927,7 +929,7 @@ function AdminView() {
                             value={editedStatement ?? q.statement}
                             onChange={(e) => setEditedStatement(qs.id, q.id, e.target.value)}
                             placeholder={t.adminEditQuestionPlaceholder}
-                            aria-label={t.adminEditQuestionLabel}
+                            aria-label={t.adminEditQuestionLabel(q.statement)}
                             rows={2}
                             style={{ marginTop: "8px", width: "100%", boxSizing: "border-box", fontSize: "13px", padding: "6px 8px", borderRadius: "4px", border: `1px solid ${palette.border}`, resize: "vertical", fontFamily: "inherit" }}
                           />
@@ -937,7 +939,7 @@ function AdminView() {
                             value={qState.reason ?? ""}
                             onChange={(e) => setRejectionReason(qs.id, q.id, e.target.value)}
                             placeholder={t.adminRejectionReasonPlaceholder}
-                            aria-label={t.adminRejectionReasonLabel}
+                            aria-label={t.adminRejectionReasonLabel(q.statement)}
                             rows={2}
                             style={{ marginTop: "8px", width: "100%", boxSizing: "border-box", fontSize: "13px", padding: "6px 8px", borderRadius: "4px", border: `1px solid ${palette.border}`, resize: "vertical", fontFamily: "inherit" }}
                           />
@@ -982,7 +984,7 @@ function AdminView() {
                       value={newQuestionText[qs.id] ?? ""}
                       onChange={(e) => setNewQuestionText((prev) => ({ ...prev, [qs.id]: e.target.value }))}
                       placeholder={t.adminNewQuestionPlaceholder}
-                      aria-label={t.adminNewQuestionLabel}
+                      aria-label={t.adminNewQuestionLabel(qs.title)}
                       rows={2}
                       style={{ flex: 1, fontSize: "13px", padding: "6px 8px", borderRadius: "4px", border: `1px solid ${palette.border}`, resize: "vertical", fontFamily: "inherit" }}
                     />
@@ -1260,7 +1262,7 @@ function NgoView() {
             <Input id={id} value={title} onChange={setTitle} placeholder={t.ngoSetTitlePlaceholder} />
           )}</Field>
           <div role="group" aria-labelledby={statementsLabelId}>
-            <div id={statementsLabelId} style={{ fontSize: "13px", fontWeight: 600, marginBottom: "10px" }}>{t.ngoStatementsLabel} ({questions.filter((q) => q.trim()).length})</div>
+            <div style={{ fontSize: "13px", fontWeight: 600, marginBottom: "10px" }}><span id={statementsLabelId}>{t.ngoStatementsLabel}</span> ({questions.filter((q) => q.trim()).length})</div>
             {questions.map((q, i) => (
               <div key={i} style={{ display: "flex", gap: "8px", marginBottom: "8px", alignItems: "start" }}>
                 <span style={{ color: palette.textLight, fontSize: "13px", marginTop: "10px", minWidth: "20px" }}>{i + 1}.</span>
@@ -1345,7 +1347,7 @@ function CopyField({ value, label }) {
   }
   return (
     <div style={{ display: "flex", gap: "8px" }}>
-      <input readOnly aria-label={label} value={value} onFocus={(e) => e.target.select()} style={{ ...selectStyle, fontFamily: "monospace", fontSize: "12px" }} />
+      <input readOnly aria-label={label ?? t.copyFieldLabel} value={value} onFocus={(e) => e.target.select()} style={{ ...selectStyle, fontFamily: "monospace", fontSize: "12px" }} />
       <Button variant="secondary" size="sm" onClick={copy} style={{ flexShrink: 0 }}>{copied ? t.copied : t.copy}</Button>
     </div>
   );
@@ -1356,14 +1358,14 @@ function ProfileFields({ profile, setField }) {
   const { t } = useTranslation();
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-      <Field label={`${t.candidateFullName} *`}>{(id) => (
-        <Input id={id} value={profile.name} onChange={(v) => setField("name", v)} placeholder={t.candidateFullNamePlaceholder} />
+      <Field label={t.candidateFullName} required>{(id) => (
+        <Input id={id} required value={profile.name} onChange={(v) => setField("name", v)} placeholder={t.candidateFullNamePlaceholder} />
       )}</Field>
-      <Field label={`${t.candidateEmailLabel} *`}>{(id) => (
-        <Input id={id} value={profile.email} onChange={(v) => setField("email", v)} placeholder={t.candidateEmailPlaceholder} type="email" />
+      <Field label={t.candidateEmailLabel} required>{(id) => (
+        <Input id={id} required value={profile.email} onChange={(v) => setField("email", v)} placeholder={t.candidateEmailPlaceholder} type="email" />
       )}</Field>
-      <Field label={`${t.candidateConstituencyLabel} *`}>{(id) => (
-        <select id={id} value={profile.constituency} onChange={(e) => setField("constituency", e.target.value)} style={selectStyle}>
+      <Field label={t.candidateConstituencyLabel} required>{(id) => (
+        <select id={id} aria-required="true" value={profile.constituency} onChange={(e) => setField("constituency", e.target.value)} style={selectStyle}>
           <option value="">{t.candidateConstituencyPlaceholder}</option>
           {FI_CONSTITUENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
         </select>

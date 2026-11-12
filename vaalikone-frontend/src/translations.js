@@ -1,13 +1,5 @@
 const translations = {
   fi: {
-    languageSelectLabel: "Kieli",
-    ngoStatementLabel: (n) => `Väittämä ${n}`,
-    ngoRemoveStatementLabel: (n) => `Poista väittämä ${n}`,
-    candidateExplainLabel: (statement) => `Perustelu väittämään: ${statement}`,
-    adminCandidateLinkLabel: (name) => `Ehdokkaan ${name} henkilökohtainen linkki`,
-    adminEditQuestionLabel: "Muokattu väittämä",
-    adminRejectionReasonLabel: "Hylkäämisen syy",
-    adminNewQuestionLabel: "Uusi väittämä",
     // Scale labels
     stronglyDisagree: "Täysin eri mieltä",
     disagree: "Eri mieltä",
@@ -22,6 +14,7 @@ const translations = {
     veryImportant: "Erittäin tärkeä",
 
     // Common
+    copyFieldLabel: "Linkki",
     loading: "Ladataan...",
     retry: "Yritä uudelleen",
     serverError: "Palvelinvirhe",
@@ -52,6 +45,11 @@ const translations = {
     homeGo: "Siirry",
 
     // Admin
+    adminCandidateLinkLabel: (name) => `Henkilökohtainen linkki: ${name}`,
+    adminMarkDuplicateLabel: (statement) => `Merkitse kaksoiskappaleeksi: ${statement}`,
+    adminEditQuestionLabel: (statement) => `Muokkaa väittämää: ${statement}`,
+    adminRejectionReasonLabel: (statement) => `Hylkäämisen syy: ${statement}`,
+    adminNewQuestionLabel: (setTitle) => `Uusi väittämä kysymyssarjaan: ${setTitle}`,
     adminLoginTitle: "Ylläpidon kirjautuminen",
     adminLoginDesc: "Syötä ylläpidon salasana",
     adminPasswordPlaceholder: "Ylläpidon salasana",
@@ -113,6 +111,8 @@ const translations = {
     adminMergeInSets: "Sarjoissa:",
 
     // NGO
+    ngoStatementLabel: (n) => `Väittämä ${n}`,
+    ngoRemoveStatementLabel: (n) => `Poista väittämä ${n}`,
     ngoTitle: "Lähetä kysymyksiä",
     ngoDesc: "Ehdota politiikkaväittämiä, joihin ehdokkaat vastaavat. Jokaisen väittämän tulee olla muotoiltu niin, että siihen voi vastata asteikolla \"täysin eri mieltä\" – \"täysin samaa mieltä\".",
     ngoCheckBefore: "Tarkista ennen lähettämistä, ettei vastaavaa kysymyssarjaa ole jo hyväksytty.",
@@ -138,6 +138,7 @@ const translations = {
     ngoSubmitAnother: "Lähetä toinen sarja",
 
     // Candidate
+    candidateExplainLabel: (statement) => `Perustele kantasi väittämään: ${statement}`,
     candidateInvalidToken: "Linkki ei kelpaa",
     candidateInvalidTokenDesc: "Linkki on virheellinen tai vanhentunut. Tarkista, että kopioit sen kokonaan, tai pyydä puolueesi yhteyshenkilöltä uusi.",
     candidateLegacyLink: "Linkki on vanhentunut",
@@ -261,14 +262,6 @@ const translations = {
   },
 
   en: {
-    languageSelectLabel: "Language",
-    ngoStatementLabel: (n) => `Statement ${n}`,
-    ngoRemoveStatementLabel: (n) => `Remove statement ${n}`,
-    candidateExplainLabel: (statement) => `Explanation for: ${statement}`,
-    adminCandidateLinkLabel: (name) => `Personal link for ${name}`,
-    adminEditQuestionLabel: "Edited statement",
-    adminRejectionReasonLabel: "Reason for rejection",
-    adminNewQuestionLabel: "New statement",
     // Scale labels
     stronglyDisagree: "Strongly disagree",
     disagree: "Disagree",
@@ -283,6 +276,7 @@ const translations = {
     veryImportant: "Very important",
 
     // Common
+    copyFieldLabel: "Link",
     loading: "Loading...",
     retry: "Retry",
     serverError: "Server error",
@@ -313,6 +307,11 @@ const translations = {
     homeGo: "Go",
 
     // Admin
+    adminCandidateLinkLabel: (name) => `Personal link: ${name}`,
+    adminMarkDuplicateLabel: (statement) => `Mark as duplicate: ${statement}`,
+    adminEditQuestionLabel: (statement) => `Edit statement: ${statement}`,
+    adminRejectionReasonLabel: (statement) => `Reason for rejection: ${statement}`,
+    adminNewQuestionLabel: (setTitle) => `New statement for set: ${setTitle}`,
     adminLoginTitle: "Admin login",
     adminLoginDesc: "Enter the admin password ",
     adminPasswordPlaceholder: "Admin password",
@@ -374,6 +373,8 @@ const translations = {
     adminMergeInSets: "In sets:",
 
     // NGO
+    ngoStatementLabel: (n) => `Statement ${n}`,
+    ngoRemoveStatementLabel: (n) => `Remove statement ${n}`,
     ngoTitle: "Submit questions",
     ngoDesc: "Propose policy statements for candidates to respond to. Each statement should be formulated so it can be answered on a scale from \"strongly disagree\" to \"strongly agree\".",
     ngoCheckBefore: "Before submitting, check that a similar question set has not already been approved.",
@@ -399,6 +400,7 @@ const translations = {
     ngoSubmitAnother: "Submit another set",
 
     // Candidate
+    candidateExplainLabel: (statement) => `Explain your position on: ${statement}`,
     candidateInvalidToken: "Link not valid",
     candidateInvalidTokenDesc: "This link is invalid or has expired. Check that you copied all of it, or ask your party contact for a new one.",
     candidateLegacyLink: "This link is out of date",

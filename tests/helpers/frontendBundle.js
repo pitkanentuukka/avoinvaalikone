@@ -4,7 +4,13 @@
 const path = require("path");
 
 const FRONTEND = path.resolve(__dirname, "../../vaalikone-frontend");
-const esbuild = require(require.resolve("esbuild", { paths: [FRONTEND] }));
+// esbuild comes with vite in the frontend's dependencies.
+let esbuild;
+try {
+  esbuild = require(require.resolve("esbuild", { paths: [FRONTEND] }));
+} catch (err) {
+  throw new Error(`esbuild not found: run "npm ci" in vaalikone-frontend/ first (${err.message})`);
+}
 
 // `import x from "./file.md?raw"` → the file's text.
 const rawImports = {
