@@ -1811,6 +1811,7 @@ function VoterView() {
   const [weights, setWeights] = useState({});
   const [currentQ, setCurrentQ] = useState(0);
   const [results, setResults] = useState([]);
+  const [questionCount, setQuestionCount] = useState(0);
   const [expandedCandidate, setExpandedCandidate] = useState(null);
   // Full candidate records (incl. answer explanations) fetched lazily on first
   // expand — the match response only carries answer values to keep it small.
@@ -1899,7 +1900,7 @@ function VoterView() {
     setStep("loading-results");
     setError(null);
     try {
-      const { results: matchResults } = await api.voterMatch({
+      const { results: matchResults, questionCount: scoredCount } = await api.voterMatch({
         answers: voterAnswers,
         weights,
         questionSetIds: [...selectedSetIds],
@@ -1907,6 +1908,7 @@ function VoterView() {
         includeInResearch,
       });
       setResults(matchResults ?? []);
+      setQuestionCount(scoredCount ?? 0);
       setStep("results");
     } catch (e) {
       setError(e.message);
@@ -2158,6 +2160,9 @@ function VoterView() {
                   <span style={{ fontWeight: 700, fontSize: "16px" }}>{c.name}</span>
                   <Badge>{c.partyName}</Badge>
                   {c.constituency && <Badge color="blue">{c.constituency}</Badge>}
+                  {questionCount > 0 && (
+                    <span style={{ fontSize: "12px", color: palette.textLight }}>{t.voterAnsweredOf(c.answeredCount, questionCount)}</span>
+                  )}
                   {(c.bio || c.photoUrl) && (
                     <button onClick={(e) => { e.stopPropagation(); setProfileCandidate(c); }} style={{
                       background: "none", border: `1px solid ${palette.border}`, borderRadius: "4px",

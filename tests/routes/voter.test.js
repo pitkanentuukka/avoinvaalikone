@@ -268,7 +268,12 @@ describe("POST /api/voter/match — algorithm", () => {
   // scored — with skipped questions now counting as 0, they would drag every
   // candidate down — so the set filter applies to the voter's questions too.
   test("questionSetIds also restrict which of the voter's questions are scored", async () => {
-    db.query.mockResolvedValueOnce({ rows: [{ id: VALID_UUID }] }); // VALID_UUID2 is outside the selected set
+    db.query.mockResolvedValueOnce({
+      rows: [
+        { id: VALID_UUID, in_selected_sets: true },
+        { id: VALID_UUID2, in_selected_sets: false }, // answered earlier, set since deselected
+      ],
+    });
     db.query.mockResolvedValueOnce({
       rows: [{ candidate_id: CANDIDATE_ID, question_id: VALID_UUID, value: 2 }],
     });
@@ -504,17 +509,19 @@ describe("POST /api/voter/match — validation", () => {
     expect(res.body.error).toMatch(/kysymyssarjan tunnisteet/i);
   });
 
-  test("valid questionSetIds → DB called with $2 param containing set IDs", async () => {
-    db.query.mockResolvedValueOnce({ rows: [{ id: VALID_UUID }] }); // questions that still exist
+  test("valid questionSetIds → question lookup called with $2 param containing set IDs", async () => {
+    db.query.mockResolvedValueOnce({ rows: [{ id: VALID_UUID, in_selected_sets: true }] });
     db.query.mockResolvedValueOnce({ rows: [] });
     const res = await request(app)
       .post("/api/voter/match")
       .send({ answers: { [VALID_UUID]: 2 }, questionSetIds: [VALID_UUID2] });
     expect(res.status).toBe(200);
-    // Second DB call (index 1) is candidate_answers; first (index 0) is COUNT
-    const [, params] = db.query.mock.calls[1];
+    // First DB call (index 0) looks up the voter's questions and their set
+    // membership; candidate_answers (index 1) gets the already-filtered IDs.
+    const [, params] = db.query.mock.calls[0];
     expect(params).toHaveLength(2);
     expect(params[1]).toEqual([VALID_UUID2]);
+    expect(db.query.mock.calls[1][1]).toEqual([[VALID_UUID]]);
   });
 
   test("boundary answer value = 0 → accepted", async () => {
@@ -536,7 +543,7 @@ describe("POST /api/voter/match — validation", () => {
   });
 
   test("empty candidateIds with questionSetIds filter → still { results: [] } not bare []", async () => {
-    db.query.mockResolvedValueOnce({ rows: [{ id: VALID_UUID }] }); // questions that still exist
+    db.query.mockResolvedValueOnce({ rows: [{ id: VALID_UUID, in_selected_sets: true }] });
     db.query.mockResolvedValueOnce({ rows: [] }); // no candidate_answers
     const res = await request(app)
       .post("/api/voter/match")

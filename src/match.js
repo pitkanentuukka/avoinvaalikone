@@ -8,13 +8,16 @@ function weightFor(weights, qId) {
 }
 
 /**
- * Scores one candidate against the voter.
+ * Scores one candidate against the voter. A question the voter answered but the
+ * candidate skipped counts as maximally distant (similarity 0) with the voter's
+ * weight, so a candidate can't reach a high match by answering only the few
+ * questions they agree with the voter on.
  *
  * @param answers          { [questionId]: voter value 0-4 }
  * @param weights          { [questionId]: weight 0-3 }, missing → DEFAULT_WEIGHT
  * @param questionIds      the voter's questions to score on
  * @param candidateAnswers { [questionId]: { value } }
- * @returns { match: 0-100, answeredCount }
+ * @returns { match: 0-100, answeredCount: questions both answered }
  */
 function scoreCandidate(answers, weights, questionIds, candidateAnswers) {
   let totalWeight = 0;
@@ -23,14 +26,16 @@ function scoreCandidate(answers, weights, questionIds, candidateAnswers) {
 
   for (const qId of questionIds) {
     const voterValue = parseInt(answers[qId], 10);
-    if (isNaN(voterValue) || !candidateAnswers[qId]) continue;
+    if (isNaN(voterValue)) continue;
 
     const w = weightFor(weights, qId) + 1; // weight 0 → factor 1; weight 3 → factor 4
+    totalWeight += w;
+    if (!candidateAnswers[qId]) continue;
+
     const diff = Math.abs(voterValue - candidateAnswers[qId].value);
     const similarity = 1 - diff / 4;
 
     weightedScore += similarity * w;
-    totalWeight += w;
     answeredCount++;
   }
 
@@ -38,9 +43,13 @@ function scoreCandidate(answers, weights, questionIds, candidateAnswers) {
   return { match, answeredCount };
 }
 
-// Sort order for match results: best match first.
+// Sort order for match results: best match first, then the candidate who
+// answered more of the voter's questions, then by name so equal results always
+// come out in the same order.
 function compareResults(a, b) {
-  return b.match - a.match;
+  return b.match - a.match
+    || b.answeredCount - a.answeredCount
+    || a.name.localeCompare(b.name, "fi");
 }
 
 module.exports = { DEFAULT_WEIGHT, weightFor, scoreCandidate, compareResults };

@@ -67,12 +67,12 @@ Voters answer questions and get matched with candidates.
 2. Optionally filters by specific question set IDs
 3. System computes weighted similarity scores for each candidate
 4. System stores anonymous voter responses (server-generated session UUID)
-5. Returns `sessionId` and candidates sorted by match percentage descending
+5. Returns `sessionId`, `questionCount` (the voter's questions that were scored) and candidates sorted by match percentage descending, then by `answeredCount`, then by name
 
 **Match Algorithm:**
-- For each overlapping question: `similarity = 1 - |voterValue - candidateValue| / 4`
+- For each of the voter's questions: `similarity = 1 - |voterValue - candidateValue| / 4`, or 0 if the candidate skipped it
 - Weight factor: `weight + 1` (weight 0 -> factor 1, weight 3 -> factor 4)
-- Final score: `weightedScore / totalWeight * 100`, rounded
+- Final score: `weightedScore / totalWeight * 100`, rounded; `totalWeight` covers all of the voter's questions
 
 **Edge Cases:**
 - Missing or empty `answers` object -> 400
@@ -82,7 +82,8 @@ Voters answer questions and get matched with candidates.
 - Non-UUID question set IDs in `questionSetIds` -> 400
 - Number of answers exceeds total question count in DB -> 400
 - No candidates have answered any of the voter's questions -> returns empty array
-- Candidate has only answered some of the voter's questions -> match computed on overlapping questions only
+- Candidate has only answered some of the voter's questions -> each skipped question counts as full disagreement; `answeredCount` says how many they answered
+- `questionSetIds` given -> answers to questions outside those sets (e.g. kept in localStorage from an earlier selection) are not scored
 - All voter answers match a candidate perfectly -> 100% match
 - All voter answers are maximally different from candidate -> 0% match (value diff = 4)
 - Weights default to 1 (the "somewhat important" option the UI shows as selected) if not provided; an explicit 0 is kept
