@@ -95,3 +95,25 @@ Copy `.env.example` to `.env`. Required: `DATABASE_URL`, `ADMIN_SECRET`. Optiona
 - Admin endpoints are mounted at `/api/admin/*`; token-gated endpoints use `/api/candidates/party/:partyToken/...`, `/api/candidates/register/:registrationToken`, and `/api/candidates/me/:candidateToken/...`
 - Tokens are 24 random bytes from pgcrypto (`encode(gen_random_bytes(24), 'hex')` column defaults; rotate with `SET col = DEFAULT`)
 - Migrations run as a single SQL transaction (`migrations/001_initial.sql`); new migrations should follow the same versioned pattern and update `schema_migrations`
+
+## Issue Workflow
+
+Bugs and tasks are tracked as GitHub issues (`pitkanentuukka/avoinvaalikone`). When working on an issue:
+
+1. Create a branch named after the issue: `<number>-short-summary`.
+2. Write tests that reproduce the issue. Prefer unit tests (`tests/unit/`); use integration tests (`tests/routes/`) only if unit tests can't cover it, and end-to-end tests (`e2e/`) only if nothing else works.
+   Run them and confirm they fail for the reason described in the issue.
+3. Commit and open a draft PR with `Fixes #<number>` in the description.
+4. Implement the fix. Run the full test suite (`npm test`, plus `npm run lint` in `vaalikone-frontend/` if the frontend changed); everything must pass.
+5. Review loop:
+   - Spawn a fresh review agent with only the issue and the code in context. Point it at `git diff main...HEAD` as the starting point, but let it read any code it needs.
+   - Post its findings as a PR comment (`Review round N`).
+   - Sort findings into: caused by or related to this change, or pre-existing and unrelated.
+   - Pre-existing, unrelated bugs: collect them and keep going. Don't fix them on this branch, and they don't trigger another round.
+   - Fix all related findings. Write a test for each functional bug where feasible.
+   - If any related finding was functional, run the full test suite and start a new round.
+   - If only nits/cosmetic/non-functional findings remain, fix them, run the full test suite, and exit the loop without another review.
+   - If a finding contradicts an earlier round's fix, stop and ask the user.
+6. Mark the PR ready for review and summarise what was fixed in each round.
+   List the collected pre-existing bugs and ask the user which ones to file as issues.
+   The user reviews and merges.
