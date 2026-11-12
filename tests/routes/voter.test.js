@@ -135,6 +135,19 @@ describe("POST /api/voter/match — algorithm", () => {
     expect(res.body.results[0].match).toBe(50);
   });
 
+  test("string weights are read like numbers (\"0\" stays 0)", async () => {
+    // Q1 weight "0" → factor 1; Q2 weight "1" → factor 2 → 1/3 = 33%
+    setupTwoQuestions();
+    const res = await request(app)
+      .post("/api/voter/match")
+      .send({
+        answers: { [VALID_UUID]: 2, [VALID_UUID2]: 0 },
+        weights: { [VALID_UUID]: "0", [VALID_UUID2]: "1" },
+      });
+    expect(res.status).toBe(200);
+    expect(res.body.results[0].match).toBe(33);
+  });
+
   test("explicit weight 0 ('not important') is not replaced by the default", async () => {
     // Q1 weight 0 → factor 1; Q2 untouched → factor 2 → 1/3 = 33%
     setupTwoQuestions();

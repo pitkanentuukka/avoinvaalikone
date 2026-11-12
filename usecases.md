@@ -85,7 +85,7 @@ Voters answer questions and get matched with candidates.
 - Candidate has only answered some of the voter's questions -> match computed on overlapping questions only
 - All voter answers match a candidate perfectly -> 100% match
 - All voter answers are maximally different from candidate -> 0% match (value diff = 4)
-- Weights default to 0 if not provided
+- Weights default to 1 (the "somewhat important" option the UI shows as selected) if not provided; an explicit 0 is kept
 - Rate limited: 60 requests per 1 minute
 - Voter responses are stored with a random session UUID (no identity link)
 
