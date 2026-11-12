@@ -1,8 +1,10 @@
 jest.mock("../../src/db/pool");
+jest.mock("../../src/email");
 
 const request = require("supertest");
 const app = require("../../src/index");
 const db = require("../../src/db/pool");
+const email = require("../../src/email");
 const { resetDbMocks, buildMockClient } = require("../helpers/mockDb");
 
 const ADMIN_SECRET = "test-admin-secret";
@@ -15,6 +17,11 @@ beforeAll(() => {
 
 beforeEach(() => {
   resetDbMocks();
+  // Real sends would log to email_log through the mocked db.query and steal
+  // later tests' mock results (when .env enables SMTP locally).
+  for (const fn of Object.values(email)) {
+    if (jest.isMockFunction(fn)) fn.mockReset().mockResolvedValue();
+  }
 });
 
 // ─── GET /api/question-sets ───────────────────────────────────────────────────

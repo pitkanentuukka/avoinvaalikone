@@ -2,7 +2,7 @@ const { Router } = require("express");
 const rateLimit = require("express-rate-limit");
 const db = require("../db/pool");
 const { requirePartyToken, requireCandidateToken, requireRegistrationToken } = require("../middleware/auth");
-const { isValidLength, isValidUrl, isValidEmail, validateUUIDParam, isValidUUID } = require("../middleware/validation");
+const { isValidLength, isValidUrl, isValidEmail, validateUUIDParam, isValidUUID, quoteList } = require("../middleware/validation");
 const { publicCache, noStore } = require("../middleware/cacheControl");
 const microCache = require("../middleware/microCache");
 const redisStore = require("../middleware/rateLimitStore");
@@ -358,32 +358,45 @@ router.put("/me/:candidateToken/answers", requireCandidateToken, async (req, res
     // foreign-key violation.
     const ids = Object.keys(answers).filter(isValidUUID);
     const { rows: existingRows } = ids.length
-      ? await client.query("SELECT id FROM questions WHERE id = ANY($1)", [ids])
+      ? await client.query("SELECT id, statement FROM questions WHERE id = ANY($1)", [ids])
       : { rows: [] };
-    const existingIds = new Set(existingRows.map((r) => r.id));
+    const statements = new Map(existingRows.map((r) => [r.id, r.statement]));
+
+    // Validate everything up front and reject the whole save if anything is
+    // off, so the candidate never sees "saved" for an answer that wasn't.
+    const toSave = [];
+    const invalidValue = [];
+    const tooLong = [];
+    for (const [questionId, answer] of Object.entries(answers)) {
+      if (!statements.has(questionId) || !answer || typeof answer !== "object") continue;
+
+      const value = typeof answer.value === "string" && /^\d$/.test(answer.value) ? Number(answer.value) : answer.value;
+      const explanation = answer.explanation ?? "";
+      if (!Number.isInteger(value) || value < 0 || value > 4 || typeof explanation !== "string") {
+        invalidValue.push(statements.get(questionId));
+      } else if (explanation.trim().length > 500) {
+        tooLong.push(statements.get(questionId));
+      } else {
+        toSave.push([questionId, value, explanation.trim()]);
+      }
+    }
+    if (invalidValue.length || tooLong.length) {
+      const errors = [];
+      if (invalidValue.length) errors.push(`Virheellinen vastaus kysymykseen: ${quoteList(invalidValue)}`);
+      if (tooLong.length) errors.push(`Perustelu on liian pitkä (maksimi: 500 merkkiä) kysymykseen: ${quoteList(tooLong)}`);
+      return res.status(400).json({ error: errors.join(". ") });
+    }
 
     await client.query("BEGIN");
 
-    let count = 0;
-    for (const [questionId, answer] of Object.entries(answers)) {
-      if (!existingIds.has(questionId) || !answer || typeof answer !== "object") continue;
-
-      const value = parseInt(answer.value, 10);
-      if (isNaN(value) || value < 0 || value > 4) continue;
-
-      // Validate explanation length if provided
-      if (answer.explanation && !isValidLength(answer.explanation, 500)) {
-        continue;
-      }
-
+    for (const [questionId, value, explanation] of toSave) {
       await client.query(
         `INSERT INTO candidate_answers (candidate_id, question_id, value, explanation)
          VALUES ($1, $2, $3, $4)
          ON CONFLICT (candidate_id, question_id)
          DO UPDATE SET value = $3, explanation = $4, answered_at = now()`,
-        [req.candidate.id, questionId, value, answer.explanation?.trim() || ""]
+        [req.candidate.id, questionId, value, explanation]
       );
-      count++;
     }
 
     await client.query(
@@ -392,7 +405,7 @@ router.put("/me/:candidateToken/answers", requireCandidateToken, async (req, res
     );
 
     await client.query("COMMIT");
-    res.json({ saved: count });
+    res.json({ saved: toSave.length });
   } catch (err) {
     await client.query("ROLLBACK");
     next(err);

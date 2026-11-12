@@ -313,14 +313,23 @@ function ScaleInput({ value, onChange }) {
   );
 }
 
-function TextArea({ value, onChange, placeholder, rows = 3 }) {
-  return (
-    <textarea value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} rows={rows}
+function TextArea({ value, onChange, placeholder, rows = 3, maxLength }) {
+  const textarea = (
+    <textarea value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} rows={rows} maxLength={maxLength}
       style={{
         width: "100%", padding: "12px 14px", borderRadius: "6px", border: `1px solid ${palette.border}`,
         fontFamily: "'Source Serif 4', Georgia, serif", fontSize: "14px", resize: "vertical",
         background: palette.surface, color: palette.text, outline: "none", boxSizing: "border-box",
       }} />
+  );
+  if (!maxLength) return textarea;
+  return (
+    <div>
+      {textarea}
+      <div style={{ textAlign: "right", fontSize: "12px", color: value.length >= maxLength ? palette.danger : palette.textLight }}>
+        {value.length} / {maxLength}
+      </div>
+    </div>
   );
 }
 
@@ -1344,7 +1353,7 @@ function NgoView() {
             {questions.map((q, i) => (
               <div key={i} style={{ display: "flex", gap: "8px", marginBottom: "8px", alignItems: "start" }}>
                 <span style={{ color: palette.textLight, fontSize: "13px", marginTop: "10px", minWidth: "20px" }}>{i + 1}.</span>
-                <div style={{ flex: 1 }}><TextArea value={q} onChange={(v) => updateQuestion(i, v)} placeholder={t.ngoStatementPlaceholder} rows={2} /></div>
+                <div style={{ flex: 1 }}><TextArea value={q} onChange={(v) => updateQuestion(i, v)} placeholder={t.ngoStatementPlaceholder} rows={2} maxLength={500} /></div>
                 {questions.length > 1 && (
                   <button onClick={() => removeQuestion(i)} style={{ background: "none", border: "none", color: palette.textLight, cursor: "pointer", fontSize: "18px", marginTop: "8px" }}>×</button>
                 )}
@@ -1443,7 +1452,7 @@ function ProfileFields({ profile, setField }) {
       </div>
       <div>
         <label style={labelStyle}>{t.candidateBio}</label>
-        <TextArea value={profile.bio} onChange={(v) => setField("bio", v)} placeholder={t.candidateBioPlaceholder} rows={4} />
+        <TextArea value={profile.bio} onChange={(v) => setField("bio", v)} placeholder={t.candidateBioPlaceholder} rows={4} maxLength={1000} />
       </div>
     </div>
   );
@@ -1737,7 +1746,7 @@ function CandidateView({ candidateToken, justRegistered }) {
               </div>
               <ScaleInput value={answers[q.id]?.value} onChange={(v) => setAnswer(q.id, "value", v)} />
               <div style={{ marginTop: "12px" }}>
-                <TextArea value={answers[q.id]?.text || ""} onChange={(v) => setAnswer(q.id, "text", v)} placeholder={t.candidateExplainPlaceholder} rows={2} />
+                <TextArea value={answers[q.id]?.text || ""} onChange={(v) => setAnswer(q.id, "text", v)} placeholder={t.candidateExplainPlaceholder} rows={2} maxLength={500} />
               </div>
             </Card>
           ))}
