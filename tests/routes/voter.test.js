@@ -413,6 +413,31 @@ describe("POST /api/voter/match — voter response storage", () => {
     expect(insertCall[1]).toContain(2);
   });
 
+  // The frontend retries the match POST once on a transient upstream error and
+  // sends the same sessionId both times, so a retry after a lost response hits
+  // the (session_id, question_id) key and stores no second session.
+  test("client-supplied sessionId is used for the research insert and returned", async () => {
+    const SESSION_ID = "880e8400-e29b-41d4-a716-446655440000";
+    db.query.mockResolvedValueOnce({ rows: [{ id: VALID_UUID }] }); // questions that still exist
+    db.query.mockResolvedValueOnce({
+      rows: [{ candidate_id: CANDIDATE_ID, question_id: VALID_UUID, value: 2 }],
+    });
+    db.query.mockResolvedValueOnce({
+      rows: [{ id: CANDIDATE_ID, name: "A", photo_url: null, bio: null, party_id: "p1", party_name: "P" }],
+    });
+    db.query.mockResolvedValueOnce({ rows: [] });
+
+    const res = await request(app)
+      .post("/api/voter/match")
+      .send({ answers: { [VALID_UUID]: 2 }, sessionId: SESSION_ID });
+
+    expect(res.status).toBe(200);
+    expect(res.body.sessionId).toBe(SESSION_ID);
+    const insertCall = db.query.mock.calls[3];
+    expect(insertCall[0]).toMatch(/INSERT INTO voter_responses[\s\S]*ON CONFLICT DO NOTHING/);
+    expect(insertCall[1][0]).toBe(SESSION_ID);
+  });
+
   test("research row records the default weight 1 for untouched questions and keeps explicit 0", async () => {
     db.query.mockResolvedValueOnce({ rows: [{ id: VALID_UUID }, { id: VALID_UUID2 }] });
     db.query.mockResolvedValueOnce({
@@ -531,6 +556,15 @@ describe("POST /api/voter/match — validation", () => {
       .send({ answers: { "not-a-uuid": 2 } });
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/tunnisteet/i);
+  });
+
+  test("non-UUID sessionId → 400", async () => {
+    const res = await request(app)
+      .post("/api/voter/match")
+      .send({ answers: { [VALID_UUID]: 2 }, sessionId: "not-a-uuid" });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/istunnon tunniste/i);
+    expect(db.query).not.toHaveBeenCalled();
   });
 
   test("invalid UUID in questionSetIds → 400", async () => {
