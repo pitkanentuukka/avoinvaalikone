@@ -213,6 +213,82 @@ describe("POST /api/voter/match — algorithm", () => {
     expect(res.status).toBe(200);
     expect(res.body.results[0].answeredCount).toBe(1);
   });
+
+  // Issue #3: the question the candidate skipped must count against the match,
+  // and the response must say out of how many questions answeredCount is.
+  test("skipped question lowers the match; questionCount is the voter's question total", async () => {
+    db.query.mockResolvedValueOnce({ rows: [{ id: VALID_UUID }, { id: VALID_UUID2 }] });
+    db.query.mockResolvedValueOnce({
+      rows: [{ candidate_id: CANDIDATE_ID, question_id: VALID_UUID, value: 2 }],
+    });
+    db.query.mockResolvedValueOnce({
+      rows: [{ id: CANDIDATE_ID, name: "A", photo_url: null, bio: null, party_id: "p1", party_name: "P" }],
+    });
+    db.query.mockResolvedValueOnce({ rows: [] });
+
+    const res = await request(app)
+      .post("/api/voter/match")
+      .send({ answers: { [VALID_UUID]: 2, [VALID_UUID2]: 3 } });
+    expect(res.status).toBe(200);
+    expect(res.body.results[0].match).toBe(50);
+    expect(res.body.results[0].answeredCount).toBe(1);
+    expect(res.body.questionCount).toBe(2);
+  });
+
+  test("candidate who answered one question ranks below one who answered all", async () => {
+    const CAND2 = "880e8400-e29b-41d4-a716-446655440000";
+    db.query.mockResolvedValueOnce({ rows: [{ id: VALID_UUID }, { id: VALID_UUID2 }] });
+    db.query.mockResolvedValueOnce({
+      rows: [
+        { candidate_id: CANDIDATE_ID, question_id: VALID_UUID, value: 2 }, // agrees, skipped Q2
+        { candidate_id: CAND2, question_id: VALID_UUID, value: 2 },
+        { candidate_id: CAND2, question_id: VALID_UUID2, value: 3 }, // diff 1 → 0.75
+      ],
+    });
+    db.query.mockResolvedValueOnce({
+      rows: [
+        { id: CANDIDATE_ID, name: "A", photo_url: null, bio: null, party_id: "p1", party_name: "P" },
+        { id: CAND2, name: "B", photo_url: null, bio: null, party_id: "p1", party_name: "P" },
+      ],
+    });
+    db.query.mockResolvedValueOnce({ rows: [] });
+
+    const res = await request(app)
+      .post("/api/voter/match")
+      .send({ answers: { [VALID_UUID]: 2, [VALID_UUID2]: 2 } });
+    expect(res.status).toBe(200);
+    expect(res.body.results.map((r) => [r.id, r.match])).toEqual([
+      [CAND2, 88],
+      [CANDIDATE_ID, 50],
+    ]);
+  });
+
+  // Voter answers persist in localStorage across set selections, so the request
+  // can carry answers to sets the voter has since deselected. Those must not be
+  // scored — with skipped questions now counting as 0, they would drag every
+  // candidate down — so the set filter applies to the voter's questions too.
+  test("questionSetIds also restrict which of the voter's questions are scored", async () => {
+    db.query.mockResolvedValueOnce({ rows: [{ id: VALID_UUID }] }); // VALID_UUID2 is outside the selected set
+    db.query.mockResolvedValueOnce({
+      rows: [{ candidate_id: CANDIDATE_ID, question_id: VALID_UUID, value: 2 }],
+    });
+    db.query.mockResolvedValueOnce({
+      rows: [{ id: CANDIDATE_ID, name: "A", photo_url: null, bio: null, party_id: "p1", party_name: "P" }],
+    });
+    db.query.mockResolvedValueOnce({ rows: [] });
+
+    const SET_ID = "990e8400-e29b-41d4-a716-446655440000";
+    const res = await request(app)
+      .post("/api/voter/match")
+      .send({ answers: { [VALID_UUID]: 2, [VALID_UUID2]: 4 }, questionSetIds: [SET_ID] });
+    expect(res.status).toBe(200);
+
+    const [sql, params] = db.query.mock.calls[0];
+    expect(sql).toMatch(/question_set_questions/);
+    expect(params).toEqual([[VALID_UUID, VALID_UUID2], [SET_ID]]);
+    expect(res.body.results[0].match).toBe(100);
+    expect(res.body.questionCount).toBe(1);
+  });
 });
 
 // ─── Response shape ───────────────────────────────────────────────────────────
