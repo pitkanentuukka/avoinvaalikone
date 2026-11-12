@@ -30,12 +30,14 @@ router.post("/match", async (req, res, next) => {
   try {
     const {
       answers,
-      weights = {},
       questionSetIds,
       constituency,
       includeInResearch = true,
       sessionId: clientSessionId,
     } = req.body;
+    // A destructuring default would let null through, like the other optional
+    // fields here null means "not given".
+    const weights = req.body.weights ?? {};
 
     if (!answers || typeof answers !== "object" || Object.keys(answers).length === 0) {
       return res.status(400).json({ error: "Vastaukset vaaditaan" });
@@ -53,6 +55,10 @@ router.post("/match", async (req, res, next) => {
       if (!isValidRange(value, 0, 4)) {
         return res.status(400).json({ error: "Vastaus-arvot tulee olla 0-4" });
       }
+    }
+
+    if (typeof weights !== "object" || Array.isArray(weights)) {
+      return res.status(400).json({ error: "Virheelliset painoarvot" });
     }
 
     // Validate all weight values are in range (0-3) if provided
