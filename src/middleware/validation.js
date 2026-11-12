@@ -45,7 +45,8 @@ function isValidEmail(value) {
  * Shorten text for quoting in an error message
  */
 function excerpt(text, maxLength = 60) {
-  return text.length > maxLength ? `${text.slice(0, maxLength).trimEnd()}…` : text;
+  const chars = Array.from(text); // code points, so an emoji is never split
+  return chars.length > maxLength ? `${chars.slice(0, maxLength).join("").trimEnd()}…` : text;
 }
 
 /**

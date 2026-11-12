@@ -226,11 +226,13 @@ function LoadingState({ text }) {
   );
 }
 
-function ErrorBanner({ message, onRetry }) {
+function ErrorBanner({ message, onRetry, scrollIntoView = false }) {
   const { t } = useTranslation();
   const ref = useRef(null);
-  // Submit buttons often sit at the bottom of long forms; bring the error into view.
-  useEffect(() => { ref.current?.scrollIntoView?.({ behavior: "smooth", block: "nearest" }); }, [message]);
+  // For long forms whose submit button sits at the bottom: bring the error into view.
+  useEffect(() => {
+    if (scrollIntoView) ref.current?.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
+  }, [message, scrollIntoView]);
   return (
     <div ref={ref} style={{
       padding: "14px 20px", borderRadius: "8px", background: palette.dangerLight,
@@ -1326,7 +1328,7 @@ function NgoView() {
         </div>
       )}
       <MarkdownGuide content={ngoGuideContent} label="Ohje kysymysten lähettämiseen" />
-      {error && <ErrorBanner message={error} />}
+      {error && <ErrorBanner message={error} scrollIntoView />}
       <Card>
         <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
           <div>
@@ -1617,7 +1619,7 @@ function RegisterView({ registrationToken, onRegistered }) {
       <h2 style={{ fontSize: "28px", fontWeight: 800, letterSpacing: "-0.02em", margin: "12px 0 8px" }}>{t.registerTitle}</h2>
       <p style={{ color: palette.textMuted, marginBottom: "16px" }}>{t.registerDesc(partyName)}</p>
       <MarkdownGuide content={candidateGuideContent} label="Ohje vastaamiseen" />
-      {error && <ErrorBanner message={error} />}
+      {error && <ErrorBanner message={error} scrollIntoView />}
       <Card style={{ marginBottom: "16px" }}>
         <ProfileFields profile={profile} setField={(k, v) => setProfile((p) => ({ ...p, [k]: v }))} />
       </Card>
@@ -1627,6 +1629,12 @@ function RegisterView({ registrationToken, onRegistered }) {
 }
 
 // The candidate's own page, reached only through their personal link.
+function answersFromProfile(me) {
+  return Object.fromEntries(
+    Object.entries(me.answers || {}).map(([k, v]) => [k, { value: v.value, text: v.explanation || "" }])
+  );
+}
+
 function CandidateView({ candidateToken, justRegistered }) {
   const { t } = useTranslation();
   const [partyName, setPartyName] = useState("");
@@ -1650,11 +1658,7 @@ function CandidateView({ candidateToken, justRegistered }) {
           name: me.name, email: me.email || "", constituency: me.constituency || "",
           photoUrl: me.photoUrl || "", bio: me.bio || "",
         });
-        setAnswers(
-          Object.fromEntries(
-            Object.entries(me.answers || {}).map(([k, v]) => [k, { value: v.value, text: v.explanation || "" }])
-          )
-        );
+        setAnswers(answersFromProfile(me));
       } catch {
         setInvalid(true);
       } finally {
@@ -1685,8 +1689,16 @@ function CandidateView({ candidateToken, justRegistered }) {
       if (Object.keys(apiAnswers).length > 0) {
         const { skipped = [] } = await api.saveOwnAnswers(candidateToken, apiAnswers);
         if (skipped.length > 0) {
-          setAnswers((prev) => Object.fromEntries(Object.entries(prev).filter(([qId]) => !skipped.includes(qId))));
-          setQuestionSets(await api.getQuestionSets());
+          // Those questions are gone. Drop them locally rather than refetching
+          // the public (edge-cached) question list, and reload own answers
+          // (uncached) in case a merge carried one over to the kept question.
+          const isSkipped = (qId) => skipped.includes(qId);
+          setQuestionSets((sets) => sets.map((s) => ({ ...s, questions: (s.questions || []).filter((q) => !isSkipped(q.id)) })));
+          try {
+            setAnswers(answersFromProfile(await api.getOwnProfile(candidateToken)));
+          } catch {
+            setAnswers((prev) => Object.fromEntries(Object.entries(prev).filter(([qId]) => !isSkipped(qId))));
+          }
           setError(t.candidateAnswersSkipped(skipped.length));
           return;
         }
@@ -1734,7 +1746,7 @@ function CandidateView({ candidateToken, justRegistered }) {
         <Button onClick={save} loading={saving} disabled={!canSave}>{t.candidateSaveAnswers}</Button>
       </div>
       <MarkdownGuide content={candidateGuideContent} label="Ohje vastaamiseen" />
-      {error && <ErrorBanner message={error} />}
+      {error && <ErrorBanner message={error} scrollIntoView />}
 
       <Card style={{ marginBottom: "24px" }}>
         <div style={{ fontSize: "14px", fontWeight: 700, marginBottom: "16px" }}>{t.candidateProfile}</div>

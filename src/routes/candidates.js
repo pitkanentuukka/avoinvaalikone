@@ -369,11 +369,15 @@ router.put("/me/:candidateToken/answers", requireCandidateToken, async (req, res
     const invalidValue = [];
     const tooLong = [];
     for (const [questionId, answer] of Object.entries(answers)) {
+      if (answer == null) continue; // nothing to save for this question
       if (!statements.has(questionId)) {
         skipped.push(questionId);
         continue;
       }
-      if (!answer || typeof answer !== "object") continue; // nothing to save for this question
+      if (typeof answer !== "object") {
+        invalidValue.push(statements.get(questionId));
+        continue;
+      }
 
       const value = typeof answer.value === "string" && /^\d$/.test(answer.value) ? Number(answer.value) : answer.value;
       const explanation = answer.explanation ?? "";
@@ -387,9 +391,9 @@ router.put("/me/:candidateToken/answers", requireCandidateToken, async (req, res
     }
     if (invalidValue.length || tooLong.length) {
       const errors = [];
-      const toQuestions = (list) => `${list.length > 1 ? "kysymyksiin" : "kysymykseen"}: ${quoteList(list)}`;
-      if (invalidValue.length) errors.push(`Virheellinen vastaus ${toQuestions(invalidValue)}`);
-      if (tooLong.length) errors.push(`Perustelu on liian pitkä (maksimi: 500 merkkiä) ${toQuestions(tooLong)}`);
+      const inQuestions = (list) => `${list.length > 1 ? "kysymyksissä" : "kysymyksessä"}: ${quoteList(list)}`;
+      if (invalidValue.length) errors.push(`Virheellinen vastaus ${inQuestions(invalidValue)}`);
+      if (tooLong.length) errors.push(`Liian pitkä perustelu (maksimi: 500 merkkiä) ${inQuestions(tooLong)}`);
       return res.status(400).json({ error: errors.join(". ") });
     }
 

@@ -261,9 +261,28 @@ test.describe("UC-CAND-4: Candidate saves own answers (candidate token)", () => 
     expect(res.status()).toBe(400);
   });
 
-  test("invalid answer values are silently skipped", async ({ request }) => {
-    const body = await saveAnswers(request, candidate, { [questions[0].id]: { value: 99, explanation: "" } });
-    expect(body.saved).toBe(0);
+  test("invalid answer value rejects the save and names the question", async ({ request }) => {
+    const { res, body } = await put(request, `/candidates/me/${candidate.token}/answers`, {
+      answers: { [questions[0].id]: { value: 99, explanation: "" }, [questions[1].id]: { value: 3, explanation: "" } },
+    });
+    expect(res.status()).toBe(400);
+    expect(body.error).toContain(questions[0].statement);
+
+    // Nothing was written: the earlier answers stand.
+    const { body: full } = await get(request, `/candidates/${candidate.id}`);
+    expect(full.answers[questions[0].id].value).toBe(0);
+    expect(full.answers[questions[1].id].value).toBe(1);
+  });
+
+  test("too-long explanation rejects the save and names the question", async ({ request }) => {
+    const { res, body } = await put(request, `/candidates/me/${candidate.token}/answers`, {
+      answers: { [questions[0].id]: { value: 2, explanation: "A".repeat(501) } },
+    });
+    expect(res.status()).toBe(400);
+    expect(body.error).toContain(questions[0].statement);
+
+    const { body: full } = await get(request, `/candidates/${candidate.id}`);
+    expect(full.answers[questions[0].id].explanation).toBe("Changed my mind");
   });
 
   test("invalid UUIDs, unknown questions and null answers are skipped", async ({ request }) => {
@@ -273,6 +292,7 @@ test.describe("UC-CAND-4: Candidate saves own answers (candidate token)", () => 
       [questions[1].id]: null,
     });
     expect(body.saved).toBe(0);
+    expect(body.skipped).toEqual(["not-a-uuid", "00000000-0000-0000-0000-000000000099"]);
   });
 });
 

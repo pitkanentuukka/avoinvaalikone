@@ -477,7 +477,7 @@ describe("PUT /api/candidates/me/:candidateToken/answers", () => {
         },
       });
     expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/kysymyksiin/);
+    expect(res.body.error).toMatch(/kysymyksissä/);
     expect(res.body.error).toContain("Ydinvoimaa on lisättävä");
     expect(res.body.error).toContain("Bensaveroa on laskettava");
   });
@@ -515,6 +515,63 @@ describe("PUT /api/candidates/me/:candidateToken/answers", () => {
     expect(res.status).toBe(400);
     expect(res.body.error).toContain(statement.slice(0, 40));
     expect(res.body.error).not.toContain(statement);
+  });
+
+  test("null answer for a missing question is not reported as skipped", async () => {
+    db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
+    const client = buildMockClient();
+    client.query
+      .mockResolvedValueOnce({ rows: [] }) // QUESTION_ID no longer exists
+      .mockResolvedValueOnce({}) // BEGIN
+      .mockResolvedValueOnce({}) // UPDATE timestamp
+      .mockResolvedValueOnce({}); // COMMIT
+
+    const res = await request(app).put(url).send({ answers: { [QUESTION_ID]: null } });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ saved: 0, skipped: [] });
+  });
+
+  test.each([3, "2", true])("non-object answer %p → 400 naming the question", async (answer) => {
+    db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
+    const client = buildMockClient();
+    client.query.mockResolvedValueOnce({ rows: [{ id: QUESTION_ID, statement: "Ydinvoimaa on lisättävä" }] });
+
+    const res = await request(app).put(url).send({ answers: { [QUESTION_ID]: answer } });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("Ydinvoimaa on lisättävä");
+    expect(client.query).toHaveBeenCalledTimes(1);
+  });
+
+  test("a skipped question doesn't let an invalid answer through: 400, nothing saved", async () => {
+    db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
+    const client = buildMockClient();
+    client.query.mockResolvedValueOnce({ rows: [{ id: QUESTION_ID, statement: "Ydinvoimaa on lisättävä" }] }); // QUESTION_ID2 gone
+
+    const res = await request(app)
+      .put(url)
+      .send({ answers: { [QUESTION_ID]: { value: 9 }, [QUESTION_ID2]: { value: 2 } } });
+    expect(res.status).toBe(400);
+    expect(client.query).toHaveBeenCalledTimes(1);
+  });
+
+  test("invalid value and too-long explanation → both reported", async () => {
+    db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
+    const client = buildMockClient();
+    client.query.mockResolvedValueOnce({
+      rows: [
+        { id: QUESTION_ID, statement: "Ydinvoimaa on lisättävä" },
+        { id: QUESTION_ID2, statement: "Bensaveroa on laskettava" },
+      ],
+    });
+
+    const res = await request(app)
+      .put(url)
+      .send({ answers: { [QUESTION_ID]: { value: 9 }, [QUESTION_ID2]: { value: 2, explanation: "a".repeat(501) } } });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe(
+      'Virheellinen vastaus kysymyksessä: "Ydinvoimaa on lisättävä". ' +
+      'Liian pitkä perustelu (maksimi: 500 merkkiä) kysymyksessä: "Bensaveroa on laskettava"'
+    );
   });
 
   test("DB error → ROLLBACK called and client.release() still called", async () => {
