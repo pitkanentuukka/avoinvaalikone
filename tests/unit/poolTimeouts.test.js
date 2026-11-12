@@ -87,6 +87,9 @@ afterAll(async () => {
 });
 
 describe("pool on a connection that never answers", () => {
+  // pg-pool's pool.query releases the client with the error, so this path is
+  // discarded even without the close-on-timeout client; it pins query_timeout
+  // and the error message the client matches on.
   test("a query rejects after the client-side query timeout", async () => {
     const start = Date.now();
     await expect(db.query("SELECT 1")).rejects.toThrow("Query read timeout");
@@ -123,6 +126,26 @@ describe("pool config", () => {
       expect(query_timeout).toBeGreaterThan(statement_timeout);
     } finally {
       await defaults.pool.end();
+    }
+  });
+
+  // docker-compose.yml forwards unset variables as empty strings.
+  test("empty variables from Compose fall back to the defaults", async () => {
+    const empty = loadPool({ PG_QUERY_TIMEOUT_MS: "", PG_STATEMENT_TIMEOUT_MS: "" });
+    try {
+      expect(empty.pool.options.statement_timeout).toBe(10000);
+      expect(empty.pool.options.query_timeout).toBe(15000);
+    } finally {
+      await empty.pool.end();
+    }
+  });
+
+  test("a query timeout not above the statement timeout is warned about", async () => {
+    const low = loadPool({ PG_QUERY_TIMEOUT_MS: "15s", PG_STATEMENT_TIMEOUT_MS: undefined });
+    try {
+      expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("PG_QUERY_TIMEOUT_MS (15)"));
+    } finally {
+      await low.pool.end();
     }
   });
 

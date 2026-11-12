@@ -7,7 +7,7 @@ const max = parseInt(process.env.PG_POOL_MAX || "10", 10);
 
 // Server-side kill switch for runaway queries: one bad plan must not pin
 // pool slots across every replica. Generous vs the ~800ms p95 target.
-// Migrations use their own Client (migrations/run.js) and are unaffected.
+// Migrations use their own Pool (migrations/run.js) and are unaffected.
 const statementTimeout = parseInt(process.env.PG_STATEMENT_TIMEOUT_MS || "10000", 10);
 
 // Client-side backstop for when the server can't answer at all, e.g. a
@@ -19,6 +19,17 @@ const statementTimeout = parseInt(process.env.PG_STATEMENT_TIMEOUT_MS || "10000"
 // statement timeout off, and then the default leaves this one off too.
 const defaultQueryTimeout = statementTimeout > 0 ? statementTimeout + 5000 : 0;
 const queryTimeout = parseInt(process.env.PG_QUERY_TIMEOUT_MS || String(defaultQueryTimeout), 10);
+
+// A typo here is silent otherwise: "abc" parses to NaN, which pg reads as
+// "off", and "15s" to 15 ms, which closes healthy connections mid-query.
+if (Number.isNaN(statementTimeout) || Number.isNaN(queryTimeout)) {
+  console.warn("PG_STATEMENT_TIMEOUT_MS / PG_QUERY_TIMEOUT_MS is not a number; that timeout is off");
+} else if (queryTimeout > 0 && statementTimeout > 0 && queryTimeout <= statementTimeout) {
+  console.warn(
+    `PG_QUERY_TIMEOUT_MS (${queryTimeout}) should be above PG_STATEMENT_TIMEOUT_MS (${statementTimeout}); ` +
+      "slow queries will close their connection instead of getting the server's timeout error"
+  );
+}
 
 const QUERY_TIMEOUT_MESSAGE = "Query read timeout";
 
@@ -73,7 +84,10 @@ const pool = new Pool({
   query_timeout: queryTimeout,
   // TCP keepalive notices a peer that vanished while the connection had
   // nothing unacknowledged in flight: an idle pooled client, or one whose
-  // query was delivered and is waiting for the reply.
+  // query was delivered and is waiting for the reply. Node sets only the
+  // idle delay; probe interval and count come from libuv or the kernel
+  // (75 s × 9 by default on Linux), so this may well be slower than
+  // query_timeout, which is what actually bounds a hung query.
   keepAlive: true,
   keepAliveInitialDelayMillis: 10000,
 });
