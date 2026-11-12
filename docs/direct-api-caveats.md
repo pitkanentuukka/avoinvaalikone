@@ -19,8 +19,8 @@ lowercase ID the database returns.
 - **Match:** an uppercase key is silently left out of scoring and out of
   `questionCount`. An uppercase `answers` key also makes that request's research
   insert into `voter_responses` fail.
-- **Candidate answers:** an answer under an uppercase key is not saved. It is
-  only visible as a lower `saved` count.
+- **Candidate answers:** an answer under an uppercase key is not saved. Its key
+  is returned in `skipped`, as if the question had been deleted or merged.
 
 **Why the frontend is unaffected:** it always sends IDs exactly as the API
 returned them.
