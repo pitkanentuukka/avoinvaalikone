@@ -85,6 +85,16 @@ describe("saveOwnProfile", () => {
     expect(opts.method).toBe("PUT");
     expect(JSON.parse(opts.body)).toEqual({ name: "Eeva", photoUrl: "", answers: { [qId]: { value: 2, explanation: "" } } });
   });
+
+  test("a reply without saved (a backend that ignores answers) is an error", async () => {
+    const { api } = apiWith(jsonResponse(200, { id: "c", name: "Eeva" }));
+    await expect(api.saveOwnProfile("tok", { name: "Eeva" }, {})).rejects.toMatchObject({ answersIgnored: true });
+  });
+
+  test("a reply with saved resolves with saved and skipped", async () => {
+    const { api } = apiWith(jsonResponse(200, { name: "Eeva", saved: 0, skipped: ["x"] }));
+    await expect(api.saveOwnProfile("tok", { name: "Eeva" }, {})).resolves.toMatchObject({ saved: 0, skipped: ["x"] });
+  });
 });
 
 describe("voterMatch", () => {

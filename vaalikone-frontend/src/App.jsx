@@ -1654,10 +1654,7 @@ function CandidateView({ candidateToken, justRegistered, leaveGuardRef }) {
           apiAnswers[qId] = { value: a.value, explanation: a.text || "" };
         }
       }
-      const result = await api.saveOwnProfile(candidateToken, profilePayload(profile), apiAnswers);
-      // A backend that predates the combined save ignores the answers.
-      if (typeof result.saved !== "number") throw new Error(t.candidateAnswersNotSaved);
-      const { skipped = [] } = result;
+      const { skipped = [] } = await api.saveOwnProfile(candidateToken, profilePayload(profile), apiAnswers);
       if (skipped.length > 0) {
         edits.current.saved = editsSaved;
         syncUnsaved();
@@ -1687,7 +1684,7 @@ function CandidateView({ candidateToken, justRegistered, leaveGuardRef }) {
       syncUnsaved();
       setSaved(true);
     } catch (e) {
-      setError(e.message);
+      setError(e.answersIgnored ? t.candidateAnswersNotSaved : e.message);
     } finally {
       setSaving(false);
     }
