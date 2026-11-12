@@ -1,19 +1,68 @@
-const { Pool } = require("pg");
+const { Pool, Client } = require("pg");
 
 // Per-process pool size. With N backend replicas the database sees up to
 // N × PG_POOL_MAX connections; keep the product well under Postgres
 // max_connections (default 100). Prod runs 3 replicas × 10 = 30.
 const max = parseInt(process.env.PG_POOL_MAX || "10", 10);
 
+// Server-side kill switch for runaway queries: one bad plan must not pin
+// pool slots across every replica. Generous vs the ~800ms p95 target.
+// Migrations use their own Client (migrations/run.js) and are unaffected.
+const statementTimeout = parseInt(process.env.PG_STATEMENT_TIMEOUT_MS || "10000", 10);
+
+// Client-side backstop for when the server can't answer at all, e.g. a
+// half-open connection after a network partition: statement_timeout is
+// enforced by the server, so without this a query (and the ROLLBACK after
+// it) waits until the kernel gives up retransmitting, ~15 minutes. The
+// default sits above statement_timeout so a merely slow query still gets
+// the server's own error first.
+const queryTimeout = parseInt(process.env.PG_QUERY_TIMEOUT_MS || String(statementTimeout + 5000), 10);
+
+const QUERY_TIMEOUT_MESSAGE = "Query read timeout";
+
+// pg rejects a timed-out query but keeps it as the connection's active
+// query, so everything sent afterwards (the ROLLBACK, the next request's
+// queries once the client is back in the pool) would queue behind a reply
+// that never comes. A timeout means the connection is presumed dead: close
+// it, so later queries fail at once and release() discards the client.
+class TimeoutClosingClient extends Client {
+  query(...args) {
+    const last = args.length - 1;
+    if (typeof args[last] === "function") {
+      const callback = args[last];
+      args[last] = (err, res) => {
+        this._closeIfTimedOut(err);
+        callback(err, res);
+      };
+    }
+    const result = super.query(...args);
+    if (result && typeof result.catch === "function") {
+      result.catch((err) => this._closeIfTimedOut(err));
+    }
+    return result;
+  }
+
+  _closeIfTimedOut(err) {
+    if (err?.message !== QUERY_TIMEOUT_MESSAGE || this._closedOnTimeout) return;
+    this._closedOnTimeout = true;
+    console.error(`Database query timed out after ${queryTimeout}ms; closing the connection`);
+    this.end().catch(() => {});
+  }
+}
+
 const pool = new Pool({
+  Client: TimeoutClosingClient,
   connectionString: process.env.DATABASE_URL,
   max,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000,
-  // Server-side kill switch for runaway queries: one bad plan must not pin
-  // pool slots across every replica. Generous vs the ~800ms p95 target.
-  // Migrations use their own Client (migrations/run.js) and are unaffected.
-  statement_timeout: parseInt(process.env.PG_STATEMENT_TIMEOUT_MS || "10000", 10),
+  statement_timeout: statementTimeout,
+  query_timeout: queryTimeout,
+  // TCP keepalive notices a peer that vanished while the connection had
+  // nothing unacknowledged in flight: an idle pooled client, or one whose
+  // query was delivered and is waiting for the reply.
+  keepAlive: true,
+  keepAliveInitialDelayMillis: 10000,
 });
 
 // pg-pool only listens for client errors while a client is idle. A connection
