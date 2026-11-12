@@ -15,6 +15,8 @@ async function begin(client) {
 // COMMIT ends the transaction even when it fails: Postgres rolls back an
 // aborted or constraint-violating transaction, and a COMMIT that never
 // reached the server leaves a dead connection with nothing to roll back.
+// (A COMMIT whose response was lost may well have committed; the caller
+// still sees an error, and a ROLLBACK couldn't undo it anyway.)
 async function commit(client) {
   try {
     await client.query("COMMIT");

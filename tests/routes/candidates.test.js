@@ -820,4 +820,25 @@ describe("PUT /api/candidates/me/:candidateToken/answers", () => {
     expect(client.release).toHaveBeenCalled();
     expect(res.status).toBe(500);
   });
+
+  // A failed COMMIT has already ended the transaction (#18).
+  test("COMMIT fails → 500, no ROLLBACK, client released once", async () => {
+    db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
+    const client = buildMockClient();
+    client.query.mockImplementation((sql) => {
+      if (sql === "COMMIT") return Promise.reject(new Error("Connection terminated unexpectedly"));
+      if (/FROM questions/.test(sql)) return Promise.resolve({ rows: [{ id: QUESTION_ID }] });
+      return Promise.resolve({ rows: [], rowCount: 1 });
+    });
+
+    const res = await request(app)
+      .put(url)
+      .send({ answers: { [QUESTION_ID]: { value: 2 } } });
+
+    expect(res.status).toBe(500);
+    const sqls = client.query.mock.calls.map(([sql]) => sql);
+    expect(sqls).toContain("COMMIT");
+    expect(sqls).not.toContain("ROLLBACK");
+    expect(client.release).toHaveBeenCalledTimes(1);
+  });
 });
