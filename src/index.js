@@ -28,6 +28,15 @@ const PORT = process.env.PORT || 3000;
 // collapses every rate-limit bucket into one shared per-proxy bucket.
 app.set('trust proxy', parseInt(process.env.TRUST_PROXY_HOPS || '1', 10));
 
+// Security headers first, so the health check below gets them too.
+app.use(helmet({
+  hsts: {
+    maxAge: 31536000, // 1 year in seconds
+    includeSubDomains: true,
+    preload: true,
+  },
+}));
+
 // Health check. Deliberately no DB roundtrip (Docker/CI probe it frequently).
 // Registered before the HTTPS redirect: the Docker healthcheck calls the
 // container over plain HTTP, and a redirect would send it to PUBLIC_HOST,
@@ -59,13 +68,6 @@ app.use((req, res, next) => {
 });
 
 // ─── Middleware ───
-app.use(helmet({
-  hsts: {
-    maxAge: 31536000, // 1 year in seconds
-    includeSubDomains: true,
-    preload: true,
-  },
-}));
 app.use(
   cors({
     origin: process.env.CORS_ORIGIN || "http://localhost:5173",

@@ -36,7 +36,22 @@ describe("GET /api/health in production over plain HTTP", () => {
     process.env.PUBLIC_HOST = "vaalikone.example.fi";
     const res = await request(app).get("/api/health");
     expect(res.status).toBe(200);
+    expect(res.headers.location).toBeUndefined();
     expect(res.body.status).toBe("ok");
+  });
+
+  test("answers a HEAD probe (wget --spider) without redirecting", async () => {
+    process.env.PUBLIC_HOST = "vaalikone.example.fi";
+    const res = await request(app).head("/api/health");
+    expect(res.status).toBe(200);
+    expect(res.headers.location).toBeUndefined();
+  });
+
+  test("still gets the security headers", async () => {
+    process.env.PUBLIC_HOST = "vaalikone.example.fi";
+    const res = await request(app).get("/api/health");
+    expect(res.headers["strict-transport-security"]).toMatch(/max-age=31536000/);
+    expect(res.headers["x-powered-by"]).toBeUndefined();
   });
 
   test("does not log the missing PUBLIC_HOST error on every probe", async () => {
