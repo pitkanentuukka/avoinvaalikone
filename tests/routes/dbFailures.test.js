@@ -9,8 +9,9 @@ const { resetDbMocks, buildMockClient } = require("../helpers/mockDb");
 // Every route that checks out a transaction client must answer 500 when the
 // pool or the connection fails. Express 4 ignores rejected promises from
 // async handlers, so an uncaught failure hangs the request and crashes the
-// process on unhandledRejection (issue #5). A short timeout turns a hang into
-// a test failure instead of a stuck run.
+// process on unhandledRejection (issue #5). The request timeout turns a hang
+// into a test failure and closes the request, so jest can still exit.
+const REQUEST_TIMEOUT_MS = 2000;
 const TIMEOUT_MS = 3000;
 
 const ADMIN_SECRET = "test-admin-secret";
@@ -88,7 +89,7 @@ describe.each(routes)("$name", ({ setup, send }) => {
     setup?.();
     db.getClient.mockRejectedValue(new Error("timeout exceeded when trying to connect"));
 
-    const res = await send();
+    const res = await send().timeout(REQUEST_TIMEOUT_MS);
     expect(res.status).toBe(500);
   }, TIMEOUT_MS);
 
@@ -97,7 +98,7 @@ describe.each(routes)("$name", ({ setup, send }) => {
     const client = buildMockClient();
     client.query.mockRejectedValue(new Error("Connection terminated unexpectedly"));
 
-    const res = await send();
+    const res = await send().timeout(REQUEST_TIMEOUT_MS);
     expect(res.status).toBe(500);
     expect(client.query).toHaveBeenCalledWith("ROLLBACK");
     expect(client.release).toHaveBeenCalledTimes(1);
