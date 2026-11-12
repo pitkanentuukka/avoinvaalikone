@@ -361,6 +361,7 @@ describe("POST /api/voter/match — response shape", () => {
   test("empty results has same envelope shape as non-empty results", async () => {
     db.query.mockResolvedValueOnce({ rows: [{ id: VALID_UUID }] }); // questions that still exist
     db.query.mockResolvedValueOnce({ rows: [] }); // no candidate_answers
+    db.query.mockResolvedValueOnce({ rows: [] }); // voter_responses INSERT
 
     const res = await request(app)
       .post("/api/voter/match")
@@ -680,6 +681,7 @@ describe("POST /api/voter/match — validation", () => {
   test("valid questionSetIds → question lookup called with $2 param containing set IDs", async () => {
     db.query.mockResolvedValueOnce({ rows: [{ id: VALID_UUID, in_selected_sets: true }] });
     db.query.mockResolvedValueOnce({ rows: [] });
+    db.query.mockResolvedValueOnce({ rows: [] }); // voter_responses INSERT
     const res = await request(app)
       .post("/api/voter/match")
       .send({ answers: { [VALID_UUID]: 2 }, questionSetIds: [VALID_UUID2] });
@@ -695,6 +697,7 @@ describe("POST /api/voter/match — validation", () => {
   test("boundary answer value = 0 → accepted", async () => {
     db.query.mockResolvedValueOnce({ rows: [{ id: VALID_UUID }] }); // questions that still exist
     db.query.mockResolvedValueOnce({ rows: [] });
+    db.query.mockResolvedValueOnce({ rows: [] }); // voter_responses INSERT
     const res = await request(app)
       .post("/api/voter/match")
       .send({ answers: { [VALID_UUID]: 0 } });
@@ -704,6 +707,7 @@ describe("POST /api/voter/match — validation", () => {
   test("boundary answer value = 4 → accepted", async () => {
     db.query.mockResolvedValueOnce({ rows: [{ id: VALID_UUID }] }); // questions that still exist
     db.query.mockResolvedValueOnce({ rows: [] });
+    db.query.mockResolvedValueOnce({ rows: [] }); // voter_responses INSERT
     const res = await request(app)
       .post("/api/voter/match")
       .send({ answers: { [VALID_UUID]: 4 } });
@@ -713,6 +717,7 @@ describe("POST /api/voter/match — validation", () => {
   test("empty candidateIds with questionSetIds filter → still { results: [] } not bare []", async () => {
     db.query.mockResolvedValueOnce({ rows: [{ id: VALID_UUID, in_selected_sets: true }] });
     db.query.mockResolvedValueOnce({ rows: [] }); // no candidate_answers
+    db.query.mockResolvedValueOnce({ rows: [] }); // voter_responses INSERT
     const res = await request(app)
       .post("/api/voter/match")
       .send({ answers: { [VALID_UUID]: 2 }, questionSetIds: [VALID_UUID2] });
@@ -724,6 +729,7 @@ describe("POST /api/voter/match — validation", () => {
   test("empty questionSetIds array → no filter applied, accepted", async () => {
     db.query.mockResolvedValueOnce({ rows: [{ id: VALID_UUID }] }); // questions that still exist
     db.query.mockResolvedValueOnce({ rows: [] });
+    db.query.mockResolvedValueOnce({ rows: [] }); // voter_responses INSERT
     const res = await request(app)
       .post("/api/voter/match")
       .send({ answers: { [VALID_UUID]: 2 }, questionSetIds: [] });

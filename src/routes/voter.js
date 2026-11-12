@@ -143,20 +143,21 @@ router.post("/match", async (req, res, next) => {
       params
     );
 
-    // Fetch candidate info
+    // Fetch candidate info. With no candidate answers (early in an election, or
+    // a narrow constituency filter) there is nothing to rank, but the voter
+    // still answered: fall through so the session is recorded for research and
+    // the response keeps its usual shape.
     const candidateIds = [...new Set(candidateAnswers.map((a) => a.candidate_id))];
-    if (candidateIds.length === 0) {
-      return res.json({ questionCount: scoredQuestionIds.length, results: [] });
-    }
-
-    const { rows: candidates } = await db.query(
-      `SELECT c.id, c.name, c.photo_url, c.bio, c.constituency,
-              p.id AS party_id, p.name AS party_name
-       FROM candidates c
-       JOIN parties p ON p.id = c.party_id
-       WHERE c.id = ANY($1)`,
-      [candidateIds]
-    );
+    const { rows: candidates } = candidateIds.length === 0
+      ? { rows: [] }
+      : await db.query(
+          `SELECT c.id, c.name, c.photo_url, c.bio, c.constituency,
+                  p.id AS party_id, p.name AS party_name
+           FROM candidates c
+           JOIN parties p ON p.id = c.party_id
+           WHERE c.id = ANY($1)`,
+          [candidateIds]
+        );
 
     // Group answers by candidate
     const answersByCandidate = {};
