@@ -70,6 +70,10 @@ test.describe("Candidate and party portal UI", () => {
     await expect(page.getByPlaceholder("esim. Matti Meikäläinen")).toHaveValue("Linkki Ehdokas");
     // Only on first registration is the "save your link" banner shown.
     await expect(page.getByText("Henkilökohtainen linkkisi")).toHaveCount(0);
+
+    // The token is gone from the URL, but a reload reopens the same page.
+    await page.reload();
+    await expect(page.getByPlaceholder("esim. Matti Meikäläinen")).toHaveValue("Linkki Ehdokas");
   });
 
   test("registered candidates appear in the party portal", async ({ page, request }) => {

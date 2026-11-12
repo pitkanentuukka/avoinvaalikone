@@ -21,10 +21,12 @@ function mapKeys(obj, fn) {
 const toCamel = (data) => mapKeys(data, snakeToCamel);
 const _toSnake = (data) => mapKeys(data, camelToSnake);
 
-// The server rejected the token itself. Any other failure (rate limit, server
-// error, network) is temporary, so the views offer a retry instead.
-export function isInvalidLinkError(err) {
-  return [401, 403, 404].includes(err?.status);
+// A failure that may pass: a network error or any HTTP error but 404, which
+// the token routes send for an unknown token. A 403 can come from Cloudflare
+// rather than the app. The token views offer a retry for these and show
+// "invalid link" for anything else.
+export function isTransientError(err) {
+  return err?.network === true || (err?.status !== undefined && err.status !== 404);
 }
 
 // `fetch` and `retryDelayMs` are injectable for the unit tests.
@@ -47,6 +49,9 @@ export function createApi({
         ...rest,
         headers,
         body: body ? JSON.stringify(body) : undefined,
+      }).catch((err) => {
+        err.network = true;
+        throw err;
       });
     let res;
     try {
