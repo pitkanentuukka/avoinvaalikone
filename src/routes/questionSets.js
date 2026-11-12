@@ -1,5 +1,6 @@
 const { Router } = require("express");
 const db = require("../db/pool");
+const { rollback } = require("../db/transaction");
 const { requireAdmin } = require("../middleware/auth");
 const { isValidLength, isValidUrl, isValidEmail, isValidUUID, validateUUIDParam, quoteList } = require("../middleware/validation");
 const { publicCache } = require("../middleware/cacheControl");
@@ -121,8 +122,9 @@ publicRouter.get("/", publicCache(300), microCache(), async (req, res, next) => 
 
 // POST /api/question-sets — submit a new question set
 publicRouter.post("/", async (req, res, next) => {
-  const client = await db.getClient();
+  let client;
   try {
+    client = await db.getClient();
     const { ngoName, ngoEmail, logoUrl, title, questions } = req.body;
 
     if (!ngoName?.trim() || !title?.trim()) {
@@ -212,10 +214,10 @@ publicRouter.post("/", async (req, res, next) => {
 
     res.status(201).json({ ...qs, questions: insertedQuestions });
   } catch (err) {
-    await client.query("ROLLBACK");
+    await rollback(client);
     next(err);
   } finally {
-    client.release();
+    client?.release();
   }
 });
 
@@ -226,8 +228,9 @@ const adminRouter = Router();
 // POST /api/admin/question-sets/merge-questions — link duplicate questions to a canonical one
 // Body: { keepId: "uuid", dropIds: ["uuid", ...] }
 adminRouter.post("/merge-questions", requireAdmin, async (req, res, next) => {
-  const client = await db.getClient();
+  let client;
   try {
+    client = await db.getClient();
     const { keepId, dropIds } = req.body;
 
     if (!isValidUUID(keepId)) {
@@ -276,10 +279,10 @@ adminRouter.post("/merge-questions", requireAdmin, async (req, res, next) => {
     await client.query("COMMIT");
     res.json({ ...question, merged: dropIds.length, sets: setLinks });
   } catch (err) {
-    await client.query("ROLLBACK");
+    await rollback(client);
     next(err);
   } finally {
-    client.release();
+    client?.release();
   }
 });
 
@@ -382,8 +385,9 @@ adminRouter.patch("/:id/reject", requireAdmin, validateUUIDParam("id"), async (r
 
 // PATCH /api/admin/question-sets/:id/review — per-question accept/edit/reject/merge
 adminRouter.patch("/:id/review", requireAdmin, validateUUIDParam("id"), async (req, res, next) => {
-  const client = await db.getClient();
+  let client;
   try {
+    client = await db.getClient();
     const { reviews } = req.body;
     if (!Array.isArray(reviews) || reviews.length === 0) {
       return res.status(400).json({ error: "reviews-kenttä vaaditaan" });
@@ -503,10 +507,10 @@ adminRouter.patch("/:id/review", requireAdmin, validateUUIDParam("id"), async (r
       (err) => console.error("NGO-sähköpostin lähetys epäonnistui:", err)
     );
   } catch (err) {
-    await client.query("ROLLBACK");
+    await rollback(client);
     next(err);
   } finally {
-    client.release();
+    client?.release();
   }
 });
 
@@ -582,8 +586,9 @@ adminRouter.patch("/:id/unhide", requireAdmin, validateUUIDParam("id"), async (r
 
 // POST /api/admin/question-sets/:id/questions — add a question to a staged set
 adminRouter.post("/:id/questions", requireAdmin, validateUUIDParam("id"), async (req, res, next) => {
-  const client = await db.getClient();
+  let client;
   try {
+    client = await db.getClient();
     const { statement } = req.body;
     if (!statement?.trim()) {
       return res.status(400).json({ error: "Väittämä vaaditaan" });
@@ -623,10 +628,10 @@ adminRouter.post("/:id/questions", requireAdmin, validateUUIDParam("id"), async 
     await client.query("COMMIT");
     res.status(201).json({ id: question.id, statement: question.statement, sortOrder });
   } catch (err) {
-    await client.query("ROLLBACK");
+    await rollback(client);
     next(err);
   } finally {
-    client.release();
+    client?.release();
   }
 });
 
@@ -637,8 +642,9 @@ adminRouter.delete(
   validateUUIDParam("id"),
   validateUUIDParam("questionId"),
   async (req, res, next) => {
-    const client = await db.getClient();
+    let client;
     try {
+      client = await db.getClient();
       const { rows: sets } = await client.query(
         "SELECT id, status, hidden FROM question_sets WHERE id = $1",
         [req.params.id]
@@ -664,18 +670,19 @@ adminRouter.delete(
       await client.query("COMMIT");
       res.status(204).end();
     } catch (err) {
-      await client.query("ROLLBACK");
+      await rollback(client);
       next(err);
     } finally {
-      client.release();
+      client?.release();
     }
   }
 );
 
 // DELETE /api/admin/question-sets/:id
 adminRouter.delete("/:id", requireAdmin, validateUUIDParam("id"), async (req, res, next) => {
-  const client = await db.getClient();
+  let client;
   try {
+    client = await db.getClient();
     await client.query("BEGIN");
 
     // Remember which questions this set held so we can clean up any that become orphaned.
@@ -699,10 +706,10 @@ adminRouter.delete("/:id", requireAdmin, validateUUIDParam("id"), async (req, re
     await client.query("COMMIT");
     res.status(204).end();
   } catch (err) {
-    await client.query("ROLLBACK");
+    await rollback(client);
     next(err);
   } finally {
-    client.release();
+    client?.release();
   }
 });
 

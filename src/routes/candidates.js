@@ -1,6 +1,7 @@
 const { Router } = require("express");
 const rateLimit = require("express-rate-limit");
 const db = require("../db/pool");
+const { rollback } = require("../db/transaction");
 const { requirePartyToken, requireCandidateToken, requireRegistrationToken } = require("../middleware/auth");
 const { isValidLength, isValidUrl, isValidEmail, validateUUIDParam, isValidUUID, quoteList } = require("../middleware/validation");
 const { publicCache, noStore } = require("../middleware/cacheControl");
@@ -351,8 +352,9 @@ router.put("/me/:candidateToken/answers", requireCandidateToken, async (req, res
     return res.status(400).json({ error: "Vastaukset vaaditaan" });
   }
 
-  const client = await db.getClient();
+  let client;
   try {
+    client = await db.getClient();
     // Skip questions that no longer exist (merged or deleted while the
     // candidate had the form open) instead of failing the whole save on a
     // foreign-key violation; their ids are returned so the UI can say so.
@@ -417,10 +419,10 @@ router.put("/me/:candidateToken/answers", requireCandidateToken, async (req, res
     await client.query("COMMIT");
     res.json({ saved: toSave.length, skipped });
   } catch (err) {
-    await client.query("ROLLBACK");
+    await rollback(client);
     next(err);
   } finally {
-    client.release();
+    client?.release();
   }
 });
 
