@@ -16,9 +16,21 @@ const pool = new Pool({
   statement_timeout: parseInt(process.env.PG_STATEMENT_TIMEOUT_MS || "10000", 10),
 });
 
-pool.on("error", (err) => {
-  console.error("Unexpected database pool error:", err);
+// pg-pool only listens for client errors while a client is idle. A connection
+// that dies while checked out (DB restart, failover) would emit 'error' with
+// no listener, which throws and crashes the process. pg has already rejected
+// the pending query by then, and the pool discards the client on release().
+// This listener stays attached for the client's lifetime, so it logs idle
+// failures too.
+pool.on("connect", (client) => {
+  client.on("error", (err) => {
+    console.error("Database connection error:", err);
+  });
 });
+
+// pg-pool emits this only for an idle client's error, which the listener
+// above has already logged; a handler must still exist or the emit throws.
+pool.on("error", () => {});
 
 // Warn when the pool is saturated (requests queueing for a connection) —
 // the early signal that PG_POOL_MAX or the replica count needs raising.
