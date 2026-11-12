@@ -74,6 +74,11 @@ test.describe("Candidate and party portal UI", () => {
     // The token is gone from the URL, but a reload reopens the same page.
     await page.reload();
     await expect(page.getByPlaceholder("esim. Matti Meikäläinen")).toHaveValue("Linkki Ehdokas");
+
+    // A fresh visit to the site in the same tab doesn't.
+    await page.goto("/");
+    await expect(page.getByPlaceholder("Linkki tai tunniste")).toBeVisible();
+    await expect(page.getByPlaceholder("esim. Matti Meikäläinen")).toHaveCount(0);
   });
 
   test("a temporary load error offers a retry instead of \"invalid link\"", async ({ page, request }) => {

@@ -2258,7 +2258,9 @@ const sessionStore = (() => {
 let pageLoadLink;
 function readPageLoadLink() {
   if (pageLoadLink !== undefined) return pageLoadLink;
-  const navigationType = window.performance?.getEntriesByType?.("navigation")[0]?.type;
+  const navigationType = window.performance?.getEntriesByType?.("navigation")[0]?.type
+    // Browsers without Navigation Timing Level 2 (Safari before 15).
+    ?? (window.performance?.navigation?.type === 1 ? "reload" : undefined);
   pageLoadLink = readInitialLink(window.location.search, sessionStore, navigationType);
   // Tokens are bearer secrets delivered as magic links. Scrub them from the
   // address bar once read so they don't linger in browser history,
