@@ -1,5 +1,8 @@
 jest.mock("../../src/db/pool");
 jest.mock("../../src/email");
+// Force the in-memory store even if .env sets REDIS_URL: Redis counters would
+// survive between runs and fail open when Redis is down.
+jest.mock("../../src/redis", () => null);
 
 const request = require("supertest");
 const app = require("../../src/index");
@@ -67,5 +70,17 @@ describe("Admin rate limit", () => {
     }
     const res = await req("get", "/api/admin/question-sets");
     expect(res.status).toBe(429);
+  });
+
+  test("the real admin still gets in after failed guesses used up the budget", async () => {
+    const req = client();
+    for (let i = 0; i < ADMIN_LIMIT; i++) {
+      await req("get", "/api/admin/parties").set("Authorization", "Bearer wrong");
+    }
+    const blocked = await req("get", "/api/admin/parties").set("Authorization", "Bearer wrong");
+    expect(blocked.status).toBe(429);
+
+    const res = await req("get", "/api/admin/parties").set("Authorization", `Bearer ${ADMIN_SECRET}`);
+    expect(res.status).toBe(200);
   });
 });
