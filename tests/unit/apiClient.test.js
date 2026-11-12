@@ -107,3 +107,54 @@ describe("voterMatch", () => {
     }
   });
 });
+
+// The token-gated views show "invalid link" only when the server rejected the
+// token; a failure that may pass gets a retry instead.
+describe("isTransientError", () => {
+  let isTransientError;
+  beforeAll(async () => {
+    ({ isTransientError } = await import("../../vaalikone-frontend/src/api.js"));
+  });
+
+  test.each([400, 404])("a %i (malformed or unknown token) is not transient", async (status) => {
+    const { api } = apiWith(jsonResponse(status, {}));
+    expect(isTransientError(await api.getOwnProfile("t").catch((e) => e))).toBe(false);
+  });
+
+  test("an unknown token keeps the server's message and status", async () => {
+    const { api } = apiWith(jsonResponse(404, { error: "Virheellinen ehdokastunniste" }));
+    const err = await api.getOwnProfile("nope").catch((e) => e);
+    expect(err.message).toBe("Virheellinen ehdokastunniste");
+    expect(err.status).toBe(404);
+  });
+
+  // The token routes never send 401/403; behind Cloudflare a 403 is a WAF or
+  // challenge response, which says nothing about the token.
+  test.each([401, 403, 429, 500, 503])("a %i is transient", async (status) => {
+    const { api } = apiWith(jsonResponse(status, {}), jsonResponse(status, {}));
+    const err = await api.getRegistration("t").catch((e) => e);
+    expect(err.status).toBe(status);
+    expect(isTransientError(err)).toBe(true);
+  });
+
+  test("a network error is transient", async () => {
+    const { api } = apiWith(networkError(), networkError());
+    expect(isTransientError(await api.getOwnProfile("t").catch((e) => e))).toBe(true);
+  });
+
+  test("a network error on a request that isn't retried is transient", async () => {
+    const { api } = apiWith(networkError());
+    expect(isTransientError(await api.register("t", {}).catch((e) => e))).toBe(true);
+  });
+
+  test("a 200 whose body can't be read is transient", async () => {
+    const dropped = { ok: true, status: 200, json: async () => { throw new TypeError("network error"); } };
+    const { api } = apiWith(dropped);
+    expect(isTransientError(await api.getOwnProfile("t").catch((e) => e))).toBe(true);
+  });
+
+  // e.g. a response of an unexpected shape: retrying won't help.
+  test("an error that didn't come from the request is not transient", () => {
+    expect(isTransientError(new TypeError("Cannot read properties of undefined (reading 'name')"))).toBe(false);
+  });
+});

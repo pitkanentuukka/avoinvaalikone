@@ -21,6 +21,14 @@ function mapKeys(obj, fn) {
 const toCamel = (data) => mapKeys(data, snakeToCamel);
 const _toSnake = (data) => mapKeys(data, camelToSnake);
 
+// A failure that may pass: a network error or any HTTP error but 404 (the
+// token routes' answer to an unknown token) and 400 (a malformed one). A 403
+// can come from Cloudflare rather than the app. The token views offer a retry
+// for these and show "invalid link" for anything else.
+export function isTransientError(err) {
+  return err?.network === true || (err?.status !== undefined && ![400, 404].includes(err.status));
+}
+
 // `fetch` and `retryDelayMs` are injectable for the unit tests.
 export function createApi({
   base,
@@ -41,6 +49,9 @@ export function createApi({
         ...rest,
         headers,
         body: body ? JSON.stringify(body) : undefined,
+      }).catch((err) => {
+        err.network = true;
+        throw err;
       });
     let res;
     try {
@@ -53,11 +64,21 @@ export function createApi({
       res = await doFetch(); // a failure here is final: at most one retry
     }
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: "Server error" }));
-      throw new Error(err.error || `HTTP ${res.status}`);
+      const data = await res.json().catch(() => ({ error: "Server error" }));
+      const err = new Error(data.error || `HTTP ${res.status}`);
+      err.status = res.status;
+      throw err;
     }
     if (res.status === 204) return null;
-    const data = await res.json();
+    let data;
+    try {
+      data = await res.json();
+    } catch (err) {
+      // The connection dropped mid-body, or something in between (a captive
+      // portal) answered with a non-JSON page.
+      err.network = true;
+      throw err;
+    }
     return toCamel(data);
   }
 
