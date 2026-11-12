@@ -83,7 +83,7 @@ describe("saveOwnProfile", () => {
     const [url, opts] = fetch.mock.calls[0];
     expect(url).toBe("/api/candidates/me/tok");
     expect(opts.method).toBe("PUT");
-    expect(JSON.parse(opts.body)).toEqual({ name: "Eeva", photo_url: "", answers: { [qId]: { value: 2, explanation: "" } } });
+    expect(JSON.parse(opts.body)).toEqual({ name: "Eeva", photoUrl: "", answers: { [qId]: { value: 2, explanation: "" } } });
   });
 });
 

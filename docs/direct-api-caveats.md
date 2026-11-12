@@ -11,6 +11,7 @@ unaffected, and what a fix would look like.
 ## Question UUID keys must be lowercase
 
 **Endpoints:** `POST /api/voter/match` (`answers`, `weights`),
+`PUT /api/candidates/me/:candidateToken` and
 `PUT /api/candidates/me/:candidateToken/answers` (`answers`)
 
 Validation accepts UUIDs in any case, but the routes look answers up by the

@@ -319,35 +319,127 @@ router.get("/me/:candidateToken", requireCandidateToken, async (req, res, next) 
   }
 });
 
-// PUT /api/candidates/me/:candidateToken — update own profile (full replace)
-router.put("/me/:candidateToken", requireCandidateToken, async (req, res, next) => {
-  try {
-    const error = profileError(req.body);
-    if (error) {
-      return res.status(400).json({ error });
-    }
-    const { name, photoUrl, bio, email, constituency } = req.body;
+/**
+ * Validate and upsert a candidate's answers inside the caller's transaction.
+ * answers: { [questionId]: { value: 0-4, explanation?: string } }
+ * Returns { error } (nothing written; the caller rolls back) or { saved, skipped }.
+ */
+async function saveAnswers(client, candidateId, answers) {
+  // Skip questions that no longer exist (merged or deleted while the
+  // candidate had the form open) instead of failing the whole save on a
+  // foreign-key violation; their ids are returned so the UI can say so.
+  // FOR KEY SHARE makes a concurrent delete or merge wait for this save, so
+  // a question can't vanish between this check and the upsert. Every admin
+  // path that deletes questions locks them in id order first (lockQuestions
+  // in questionSets.js), so locking in the same order can't deadlock.
+  const ids = Object.keys(answers).filter(isValidUUID);
+  const { rows: existingRows } = ids.length
+    ? await client.query(
+        "SELECT id, statement FROM questions WHERE id = ANY($1) ORDER BY id FOR KEY SHARE",
+        [ids]
+      )
+    : { rows: [] };
+  const statements = new Map(existingRows.map((r) => [r.id, r.statement]));
 
-    const { rows } = await db.query(
-      `UPDATE candidates
+  // Validate everything up front and reject the whole save if anything is
+  // off, so the candidate never sees "saved" for an answer that wasn't.
+  const toSave = [];
+  const skipped = [];
+  const invalidValue = [];
+  const tooLong = [];
+  for (const [questionId, answer] of Object.entries(answers)) {
+    if (answer == null) continue; // nothing to save for this question
+    if (!statements.has(questionId)) {
+      skipped.push(questionId);
+      continue;
+    }
+    if (typeof answer !== "object") {
+      invalidValue.push(statements.get(questionId));
+      continue;
+    }
+
+    const value = typeof answer.value === "string" && /^\d$/.test(answer.value) ? Number(answer.value) : answer.value;
+    const explanation = answer.explanation ?? "";
+    if (!Number.isInteger(value) || value < 0 || value > 4 || typeof explanation !== "string") {
+      invalidValue.push(statements.get(questionId));
+    } else if (explanation.trim().length > 500) {
+      tooLong.push(statements.get(questionId));
+    } else {
+      toSave.push([questionId, value, explanation.trim()]);
+    }
+  }
+  if (invalidValue.length || tooLong.length) {
+    const errors = [];
+    const inQuestions = (list) => `${list.length > 1 ? "kysymyksissä" : "kysymyksessä"}: ${quoteList(list)}`;
+    if (invalidValue.length) errors.push(`Virheellinen vastaus ${inQuestions(invalidValue)}`);
+    if (tooLong.length) errors.push(`Liian pitkä perustelu (maksimi: 500 merkkiä) ${inQuestions(tooLong)}`);
+    return { error: errors.join(". ") };
+  }
+
+  for (const [questionId, value, explanation] of toSave) {
+    await client.query(
+      `INSERT INTO candidate_answers (candidate_id, question_id, value, explanation)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (candidate_id, question_id)
+       DO UPDATE SET value = $3, explanation = $4, answered_at = now()`,
+      [candidateId, questionId, value, explanation]
+    );
+  }
+  return { saved: toSave.length, skipped };
+}
+
+const UPDATE_PROFILE_SQL = `UPDATE candidates
        SET name = $1, photo_url = $2, bio = $3, email = $4, constituency = $5, updated_at = now()
        WHERE id = $6
-       RETURNING id, name, photo_url, bio, email, constituency, updated_at`,
-      [name.trim(), photoUrl?.trim() || null, bio?.trim() || null, email.trim(), constituency.trim(), req.candidate.id]
-    );
-    res.json(rows[0]);
+       RETURNING id, name, photo_url, bio, email, constituency, updated_at`;
+
+// PUT /api/candidates/me/:candidateToken — update own profile (full replace),
+// and optionally save answers ({ ...profile, answers }, same shape as
+// PUT .../answers) in the same transaction, so a rejected answer doesn't
+// leave the profile change stored behind an error. With answers, the
+// response also carries { saved, skipped }.
+router.put("/me/:candidateToken", requireCandidateToken, async (req, res, next) => {
+  const error = profileError(req.body);
+  if (error) {
+    return res.status(400).json({ error });
+  }
+  const { name, photoUrl, bio, email, constituency, answers } = req.body;
+  if (answers != null && typeof answers !== "object") {
+    return res.status(400).json({ error: "Vastaukset ovat virheellisessä muodossa" });
+  }
+  const params = [name.trim(), photoUrl?.trim() || null, bio?.trim() || null, email.trim(), constituency.trim(), req.candidate.id];
+
+  let client;
+  try {
+    if (answers == null) {
+      const { rows } = await db.query(UPDATE_PROFILE_SQL, params);
+      return res.json(rows[0]);
+    }
+
+    client = await db.getClient();
+    await client.query("BEGIN");
+    const result = await saveAnswers(client, req.candidate.id, answers);
+    if (result.error) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: result.error });
+    }
+    const { rows } = await client.query(UPDATE_PROFILE_SQL, params);
+    await client.query("COMMIT");
+    res.json({ ...rows[0], saved: result.saved, skipped: result.skipped });
   } catch (err) {
+    await rollback(client);
     if (err.code === CHECK_VIOLATION) {
       return res.status(400).json({ error: "Virheellinen vaalipiiri" });
     }
     next(err);
+  } finally {
+    client?.release();
   }
 });
 
 // PUT /api/candidates/me/:candidateToken/answers — save own answers (upsert)
 router.put("/me/:candidateToken/answers", requireCandidateToken, async (req, res, next) => {
   const { answers } = req.body;
-  // answers: { [questionId]: { value: 0-4, explanation?: string } }
   if (!answers || typeof answers !== "object") {
     return res.status(400).json({ error: "Vastaukset vaaditaan" });
   }
@@ -356,76 +448,17 @@ router.put("/me/:candidateToken/answers", requireCandidateToken, async (req, res
   try {
     client = await db.getClient();
     await client.query("BEGIN");
-
-    // Skip questions that no longer exist (merged or deleted while the
-    // candidate had the form open) instead of failing the whole save on a
-    // foreign-key violation; their ids are returned so the UI can say so.
-    // FOR KEY SHARE makes a concurrent delete or merge wait for this save, so
-    // a question can't vanish between this check and the upsert. Every admin
-    // path that deletes questions locks them in id order first (lockQuestions
-    // in questionSets.js), so locking in the same order can't deadlock.
-    const ids = Object.keys(answers).filter(isValidUUID);
-    const { rows: existingRows } = ids.length
-      ? await client.query(
-          "SELECT id, statement FROM questions WHERE id = ANY($1) ORDER BY id FOR KEY SHARE",
-          [ids]
-        )
-      : { rows: [] };
-    const statements = new Map(existingRows.map((r) => [r.id, r.statement]));
-
-    // Validate everything up front and reject the whole save if anything is
-    // off, so the candidate never sees "saved" for an answer that wasn't.
-    const toSave = [];
-    const skipped = [];
-    const invalidValue = [];
-    const tooLong = [];
-    for (const [questionId, answer] of Object.entries(answers)) {
-      if (answer == null) continue; // nothing to save for this question
-      if (!statements.has(questionId)) {
-        skipped.push(questionId);
-        continue;
-      }
-      if (typeof answer !== "object") {
-        invalidValue.push(statements.get(questionId));
-        continue;
-      }
-
-      const value = typeof answer.value === "string" && /^\d$/.test(answer.value) ? Number(answer.value) : answer.value;
-      const explanation = answer.explanation ?? "";
-      if (!Number.isInteger(value) || value < 0 || value > 4 || typeof explanation !== "string") {
-        invalidValue.push(statements.get(questionId));
-      } else if (explanation.trim().length > 500) {
-        tooLong.push(statements.get(questionId));
-      } else {
-        toSave.push([questionId, value, explanation.trim()]);
-      }
-    }
-    if (invalidValue.length || tooLong.length) {
-      const errors = [];
-      const inQuestions = (list) => `${list.length > 1 ? "kysymyksissä" : "kysymyksessä"}: ${quoteList(list)}`;
-      if (invalidValue.length) errors.push(`Virheellinen vastaus ${inQuestions(invalidValue)}`);
-      if (tooLong.length) errors.push(`Liian pitkä perustelu (maksimi: 500 merkkiä) ${inQuestions(tooLong)}`);
+    const result = await saveAnswers(client, req.candidate.id, answers);
+    if (result.error) {
       await client.query("ROLLBACK");
-      return res.status(400).json({ error: errors.join(". ") });
+      return res.status(400).json({ error: result.error });
     }
-
-    for (const [questionId, value, explanation] of toSave) {
-      await client.query(
-        `INSERT INTO candidate_answers (candidate_id, question_id, value, explanation)
-         VALUES ($1, $2, $3, $4)
-         ON CONFLICT (candidate_id, question_id)
-         DO UPDATE SET value = $3, explanation = $4, answered_at = now()`,
-        [req.candidate.id, questionId, value, explanation]
-      );
-    }
-
     await client.query(
       "UPDATE candidates SET updated_at = now() WHERE id = $1",
       [req.candidate.id]
     );
-
     await client.query("COMMIT");
-    res.json({ saved: toSave.length, skipped });
+    res.json(result);
   } catch (err) {
     await rollback(client);
     next(err);

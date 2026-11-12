@@ -119,10 +119,10 @@ export function createApi({
 
     // Candidate-token gated (the candidate's personal link)
     getOwnProfile: (token) => apiFetch(`/candidates/me/${token}`),
-    updateOwnProfile: (token, data) =>
-      apiFetch(`/candidates/me/${token}`, { method: "PUT", body: data }),
-    saveOwnAnswers: (token, answers) =>
-      apiFetch(`/candidates/me/${token}/answers`, { method: "PUT", body: { answers } }),
+    // One request, so the server saves the profile and the answers together
+    // or neither: a rejected answer must not leave the profile change stored.
+    saveOwnProfile: (token, profile, answers) =>
+      apiFetch(`/candidates/me/${token}`, { method: "PUT", body: { ...profile, answers } }),
 
     // Admin
     getParties: (secret) => apiFetch("/admin/parties", { adminSecret: secret }),

@@ -1648,40 +1648,37 @@ function CandidateView({ candidateToken, justRegistered, leaveGuardRef }) {
     const unsent = Object.values(answers).some((a) => a.value === undefined && a.text?.trim());
     const editsSaved = unsent ? edits.current.saved : edits.current.made;
     try {
-      await api.updateOwnProfile(candidateToken, profilePayload(profile));
       const apiAnswers = {};
       for (const [qId, a] of Object.entries(answers)) {
         if (a.value !== undefined) {
           apiAnswers[qId] = { value: a.value, explanation: a.text || "" };
         }
       }
-      if (Object.keys(apiAnswers).length > 0) {
-        const { skipped = [] } = await api.saveOwnAnswers(candidateToken, apiAnswers);
-        if (skipped.length > 0) {
-          edits.current.saved = editsSaved;
-          syncUnsaved();
-          // Those questions are gone. Drop them locally rather than refetching
-          // the public (edge-cached) question list, and reload own answers
-          // (uncached) in case a merge carried one over to the kept question.
-          const isSkipped = (qId) => skipped.includes(qId);
-          setQuestionSets((sets) => sets.map((s) => ({ ...s, questions: (s.questions || []).filter((q) => !isSkipped(q.id)) })));
-          try {
-            const me = await api.getOwnProfile(candidateToken);
-            setAnswers((prev) => {
-              const next = answersFromProfile(me);
-              // Keep explanations typed for questions not rated yet (they weren't
-              // sent), unless a merge has since given the question a server answer.
-              for (const [qId, a] of Object.entries(prev)) {
-                if (a.value === undefined && !isSkipped(qId) && next[qId] === undefined) next[qId] = a;
-              }
-              return next;
-            });
-          } catch {
-            setAnswers((prev) => Object.fromEntries(Object.entries(prev).filter(([qId]) => !isSkipped(qId))));
-          }
-          setError(t.candidateAnswersSkipped(skipped.length));
-          return;
+      const { skipped = [] } = await api.saveOwnProfile(candidateToken, profilePayload(profile), apiAnswers);
+      if (skipped.length > 0) {
+        edits.current.saved = editsSaved;
+        syncUnsaved();
+        // Those questions are gone. Drop them locally rather than refetching
+        // the public (edge-cached) question list, and reload own answers
+        // (uncached) in case a merge carried one over to the kept question.
+        const isSkipped = (qId) => skipped.includes(qId);
+        setQuestionSets((sets) => sets.map((s) => ({ ...s, questions: (s.questions || []).filter((q) => !isSkipped(q.id)) })));
+        try {
+          const me = await api.getOwnProfile(candidateToken);
+          setAnswers((prev) => {
+            const next = answersFromProfile(me);
+            // Keep explanations typed for questions not rated yet (they weren't
+            // sent), unless a merge has since given the question a server answer.
+            for (const [qId, a] of Object.entries(prev)) {
+              if (a.value === undefined && !isSkipped(qId) && next[qId] === undefined) next[qId] = a;
+            }
+            return next;
+          });
+        } catch {
+          setAnswers((prev) => Object.fromEntries(Object.entries(prev).filter(([qId]) => !isSkipped(qId))));
         }
+        setError(t.candidateAnswersSkipped(skipped.length));
+        return;
       }
       edits.current.saved = editsSaved;
       syncUnsaved();
