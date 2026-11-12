@@ -1580,22 +1580,26 @@ function CandidateView({ candidateToken, justRegistered, leaveGuardRef }) {
   // Counts edits, and the edit count the last successful save covered, so
   // leaving the page with unsaved changes can be warned about.
   const edits = useRef({ made: 0, saved: 0 });
+  const [hasUnsaved, setHasUnsaved] = useState(false);
+  const syncUnsaved = () => setHasUnsaved(edits.current.made !== edits.current.saved);
 
+  // In-app navigation unmounts the view without unloading the page.
   useEffect(() => {
-    const hasUnsaved = () => edits.current.made !== edits.current.saved;
-    function warnIfUnsaved(e) {
-      if (!hasUnsaved()) return;
+    leaveGuardRef.current = () => edits.current.made !== edits.current.saved;
+    return () => { leaveGuardRef.current = null; };
+  }, [leaveGuardRef]);
+
+  // Only while there are unsaved changes: in Firefox any beforeunload
+  // listener keeps the page out of the back/forward cache.
+  useEffect(() => {
+    if (!hasUnsaved) return;
+    function warn(e) {
       e.preventDefault();
       e.returnValue = ""; // older browsers need this to show the prompt
     }
-    window.addEventListener("beforeunload", warnIfUnsaved);
-    // In-app navigation unmounts the view without unloading the page.
-    leaveGuardRef.current = hasUnsaved;
-    return () => {
-      window.removeEventListener("beforeunload", warnIfUnsaved);
-      leaveGuardRef.current = null;
-    };
-  }, [leaveGuardRef]);
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [hasUnsaved]);
 
   useEffect(() => {
     async function load() {
@@ -1626,11 +1630,13 @@ function CandidateView({ candidateToken, justRegistered, leaveGuardRef }) {
   function setAnswer(qId, field, val) {
     if (answers[qId]?.[field] === val) return;
     edits.current.made++;
+    setHasUnsaved(true);
     setAnswers((a) => ({ ...a, [qId]: { ...a[qId], [field]: val } }));
   }
 
   function setProfileField(k, v) {
     edits.current.made++;
+    setHasUnsaved(true);
     setProfile((p) => ({ ...p, [k]: v }));
   }
 
@@ -1653,6 +1659,7 @@ function CandidateView({ candidateToken, justRegistered, leaveGuardRef }) {
         const { skipped = [] } = await api.saveOwnAnswers(candidateToken, apiAnswers);
         if (skipped.length > 0) {
           edits.current.saved = editsSaved;
+          syncUnsaved();
           // Those questions are gone. Drop them locally rather than refetching
           // the public (edge-cached) question list, and reload own answers
           // (uncached) in case a merge carried one over to the kept question.
@@ -1677,6 +1684,7 @@ function CandidateView({ candidateToken, justRegistered, leaveGuardRef }) {
         }
       }
       edits.current.saved = editsSaved;
+      syncUnsaved();
       setSaved(true);
     } catch (e) {
       setError(e.message);
@@ -2264,6 +2272,10 @@ export default function App() {
   const [lang, setLang] = useState(DEFAULT_LANG);
   // Set by CandidateView while mounted: true when it has unsaved changes.
   const leaveGuardRef = useRef(null);
+  // Bumped to reset the error boundary when navigating after a crash, even
+  // to the view that crashed.
+  const crashed = useRef(false);
+  const [boundaryResets, setBoundaryResets] = useState(0);
 
   function openLink(link) {
     rememberLink(sessionStore, link);
@@ -2275,6 +2287,10 @@ export default function App() {
   function navigate(next) {
     if (leaveGuardRef.current?.() && !confirmAction(t.candidateUnsavedConfirm)) return;
     rememberLink(sessionStore, null);
+    if (crashed.current) {
+      crashed.current = false;
+      setBoundaryResets((n) => n + 1);
+    }
     setToken(null);
     setJustRegistered(false);
     setView(next);
@@ -2291,7 +2307,11 @@ export default function App() {
         <Header view={view} navigate={navigate} />
         {/* A render error would otherwise unmount the whole app, and with the
             link remembered for reloads, crash again on every reload. */}
-        <Sentry.ErrorBoundary key={`${view}:${token}`} fallback={<ViewCrashed />} onError={() => rememberLink(sessionStore, null)}>
+        <Sentry.ErrorBoundary
+          key={`${view}:${token}:${boundaryResets}`}
+          fallback={<ViewCrashed />}
+          onError={() => { crashed.current = true; rememberLink(sessionStore, null); }}
+        >
           {view === "home" && <HomeView navigate={navigate} openLink={openLink} />}
           {view === "about" && <AboutView />}
           {view === "admin" && <AdminView />}
