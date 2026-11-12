@@ -317,6 +317,102 @@ describe("PUT /api/candidates/me/:candidateToken", () => {
     const params = db.query.mock.calls[1][1];
     expect(params[params.length - 1]).toBe(CANDIDATE_ID);
   });
+
+  // #17: profile and answers are saved together, so a rejected answer
+  // doesn't leave the profile change stored behind an error message.
+  describe("with answers", () => {
+    const isProfileUpdate = ([sql]) => /UPDATE candidates\s+SET name/.test(sql);
+
+    test("invalid answer → 400, profile not updated", async () => {
+      db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
+      // Answered if the route updates the profile outside the transaction.
+      db.query.mockResolvedValueOnce({ rows: [{ id: CANDIDATE_ID, ...PROFILE, bio: "Uusi bio" }] });
+      const client = buildMockClient();
+      client.query
+        .mockResolvedValueOnce({}) // BEGIN
+        .mockResolvedValueOnce({ rows: [{ id: QUESTION_ID, statement: "Ydinvoimaa on lisättävä" }] })
+        .mockResolvedValue({});
+
+      const res = await request(app)
+        .put(url)
+        .send({ ...PROFILE, bio: "Uusi bio", answers: { [QUESTION_ID]: { value: 7 } } });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain("Ydinvoimaa on lisättävä");
+      expect([...db.query.mock.calls, ...client.query.mock.calls].filter(isProfileUpdate)).toHaveLength(0);
+      expect(client.query.mock.calls.map(([sql]) => sql)).toContain("ROLLBACK");
+      expect(client.release).toHaveBeenCalled();
+    });
+
+    test("profile validation error → 400 before any answer is touched", async () => {
+      db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
+      const client = buildMockClient();
+
+      const res = await request(app)
+        .put(url)
+        .send({ ...PROFILE, email: "ei-osoite", answers: { [QUESTION_ID]: { value: 2 } } });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/sähköposti/i);
+      expect(client.query).not.toHaveBeenCalled();
+    });
+
+    test("invalid constituency → 400, answers rolled back", async () => {
+      db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
+      const client = buildMockClient();
+      const checkViolation = Object.assign(new Error("check"), { code: "23514" });
+      client.query.mockImplementation(async (sql) => {
+        if (/^SELECT id, statement FROM questions/.test(sql)) return { rows: [{ id: QUESTION_ID, statement: "S" }] };
+        if (/UPDATE candidates\s+SET name/.test(sql)) throw checkViolation;
+        return {};
+      });
+
+      const res = await request(app)
+        .put(url)
+        .send({ ...PROFILE, constituency: "Atlantis", answers: { [QUESTION_ID]: { value: 2 } } });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/vaalipiiri/i);
+      const sqls = client.query.mock.calls.map(([sql]) => sql);
+      expect(sqls).toContain("ROLLBACK");
+      expect(sqls).not.toContain("COMMIT");
+      expect(client.release).toHaveBeenCalled();
+    });
+
+    test("happy path → profile and answers committed in one transaction", async () => {
+      db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
+      const client = buildMockClient();
+      client.query.mockImplementation(async (sql) => {
+        if (/^SELECT id, statement FROM questions/.test(sql)) return { rows: [{ id: QUESTION_ID, statement: "S" }] };
+        if (/UPDATE candidates\s+SET name/.test(sql)) return { rows: [{ id: CANDIDATE_ID, ...PROFILE, bio: "Bio" }] };
+        return {};
+      });
+
+      const res = await request(app)
+        .put(url)
+        .send({ ...PROFILE, bio: "Bio", answers: { [QUESTION_ID]: { value: 3, explanation: "Koska" }, [QUESTION_ID2]: { value: 1 } } });
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ bio: "Bio", saved: 1, skipped: [QUESTION_ID2] });
+
+      const sqls = client.query.mock.calls.map(([sql]) => sql);
+      expect(sqls[0]).toBe("BEGIN");
+      expect(sqls[sqls.length - 1]).toBe("COMMIT");
+      const profileUpdate = client.query.mock.calls.find(isProfileUpdate);
+      expect(profileUpdate[1][profileUpdate[1].length - 1]).toBe(CANDIDATE_ID);
+      const upsert = client.query.mock.calls.find(([sql]) => /INSERT INTO candidate_answers/.test(sql));
+      expect(upsert[1]).toEqual([CANDIDATE_ID, QUESTION_ID, 3, "Koska"]);
+      // The profile update goes through the transaction, not the pool.
+      expect(db.query.mock.calls.filter(isProfileUpdate)).toHaveLength(0);
+      expect(client.release).toHaveBeenCalled();
+    });
+
+    test.each([["a string", "x"], ["a number", 3]])("answers as %s → 400", async (_, answers) => {
+      db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
+      const client = buildMockClient();
+      const res = await request(app).put(url).send({ ...PROFILE, answers });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/Vastaukset/);
+      expect(client.query).not.toHaveBeenCalled();
+      expect(db.query.mock.calls.filter(isProfileUpdate)).toHaveLength(0);
+    });
+  });
 });
 
 describe("PUT /api/candidates/me/:candidateToken/answers", () => {
