@@ -28,6 +28,21 @@ const PORT = process.env.PORT || 3000;
 // collapses every rate-limit bucket into one shared per-proxy bucket.
 app.set('trust proxy', parseInt(process.env.TRUST_PROXY_HOPS || '1', 10));
 
+// Health check. Deliberately no DB roundtrip (Docker/CI probe it frequently).
+// Registered before the HTTPS redirect: the Docker healthcheck calls the
+// container over plain HTTP, and a redirect would send it to PUBLIC_HOST,
+// where another replica answers for this one.
+// Pool counters give free load visibility during the event, but they leak
+// backend saturation to anyone, so they're only returned to an authenticated
+// admin — the operator curls this with the admin token during the event.
+app.get("/api/health", (req, res) => {
+  const body = { status: "ok", timestamp: new Date().toISOString() };
+  if (isAdminRequest(req)) {
+    body.pool = { total: pool.totalCount, idle: pool.idleCount, waiting: pool.waitingCount };
+  }
+  res.json(body);
+});
+
 // Redirect HTTP to HTTPS in production.
 // Requires PUBLIC_HOST env var — falls back to skipping the redirect rather
 // than trusting the user-supplied Host header (which would be an open redirect).
@@ -115,18 +130,6 @@ const matchLimiter = rateLimit({
 });
 
 // ─── Routes ───
-
-// Health check. Deliberately no DB roundtrip (Docker/CI probe it frequently).
-// Pool counters give free load visibility during the event, but they leak
-// backend saturation to anyone, so they're only returned to an authenticated
-// admin — the operator curls this with the admin token during the event.
-app.get("/api/health", (req, res) => {
-  const body = { status: "ok", timestamp: new Date().toISOString() };
-  if (isAdminRequest(req)) {
-    body.pool = { total: pool.totalCount, idle: pool.idleCount, waiting: pool.waitingCount };
-  }
-  res.json(body);
-});
 
 // Admin routes (with rate limiting)
 app.use("/api/admin/parties", adminLimiter, noStore, partiesRouter);
