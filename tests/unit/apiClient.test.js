@@ -91,4 +91,19 @@ describe("voterMatch", () => {
     await api.voterMatch({ answers: { q: 2 } });
     expect(sentBody(fetch, 1).sessionId).not.toBe(sentBody(fetch, 0).sessionId);
   });
+
+  // Outside secure contexts the server picks the id, so a retry would store a
+  // second research session.
+  test("without crypto.randomUUID it sends no sessionId and is not retried", async () => {
+    const original = Object.getOwnPropertyDescriptor(globalThis, "crypto");
+    Object.defineProperty(globalThis, "crypto", { value: {}, configurable: true });
+    try {
+      const { api, fetch } = apiWith(jsonResponse(502, {}), jsonResponse(200, { results: [] }));
+      await expect(api.voterMatch({ answers: { q: 2 } })).rejects.toThrow("HTTP 502");
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(sentBody(fetch, 0)).not.toHaveProperty("sessionId");
+    } finally {
+      Object.defineProperty(globalThis, "crypto", original);
+    }
+  });
 });

@@ -438,6 +438,28 @@ describe("POST /api/voter/match — voter response storage", () => {
     expect(insertCall[1][0]).toBe(SESSION_ID);
   });
 
+  test("includeInResearch: false ignores a client-supplied sessionId and stores nothing", async () => {
+    db.query.mockResolvedValueOnce({ rows: [{ id: VALID_UUID }] }); // questions that still exist
+    db.query.mockResolvedValueOnce({
+      rows: [{ candidate_id: CANDIDATE_ID, question_id: VALID_UUID, value: 2 }],
+    });
+    db.query.mockResolvedValueOnce({
+      rows: [{ id: CANDIDATE_ID, name: "A", photo_url: null, bio: null, party_id: "p1", party_name: "P" }],
+    });
+
+    const res = await request(app)
+      .post("/api/voter/match")
+      .send({
+        answers: { [VALID_UUID]: 2 },
+        sessionId: "880e8400-e29b-41d4-a716-446655440000",
+        includeInResearch: false,
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.sessionId).toBeNull();
+    expect(db.query).toHaveBeenCalledTimes(3);
+  });
+
   test("research row records the default weight 1 for untouched questions and keeps explicit 0", async () => {
     db.query.mockResolvedValueOnce({ rows: [{ id: VALID_UUID }, { id: VALID_UUID2 }] });
     db.query.mockResolvedValueOnce({

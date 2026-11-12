@@ -74,7 +74,7 @@ Everything lives in `vaalikone-frontend/src/App.jsx` — a single-file React app
 - Multiple view components rendered based on `currentView` state
 - Views: voter quiz, results, admin panel (parties, question set approval), NGO submission form, candidate registration
 
-The `API_BASE` constant at the top of `App.jsx` points to `http://localhost:3000/api` — change this for non-local deployments.
+The `API_BASE` constant at the top of `App.jsx` defaults to same-origin `/api`; override it with `VITE_API_BASE` at build time.
 
 ### Database Schema
 

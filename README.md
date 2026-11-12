@@ -301,7 +301,7 @@ The entire React SPA lives in [vaalikone-frontend/src/App.jsx](vaalikone-fronten
 | Registration | `?register=…` | Candidate self-registration |
 | Candidate | `?candidateToken=…` | Candidate edits own profile and answers |
 
-**API client:** All calls go through `apiFetch()` with automatic snake_case ↔ camelCase conversion. It retries once on `502/503/504` or a network error, but only for `GET`s and requests that opt in with `retry: true` (the match POST). The `API_BASE` constant at the top of `App.jsx` points to `http://localhost:3000/api` — update this for non-local deployments.
+**API client:** All calls go through `apiFetch()` with automatic snake_case ↔ camelCase conversion. It retries once on `502/503/504` or a network error, but only for `GET`s and requests that opt in with `retry: true` (the match POST). The `API_BASE` constant at the top of `App.jsx` defaults to same-origin `/api` (proxied by Vite in development and by nginx in Docker); override it with `VITE_API_BASE` at build time.
 
 **Design:** Source Serif 4 font, forest-green accent (`#2D5A3D`), soft neutral backgrounds. Responsive and mobile-friendly.
 
@@ -336,7 +336,7 @@ npm run test:watch      # Watch mode
 npm run test:coverage   # Coverage report
 ```
 
-Integration tests use `supertest` and a mock database helper. Unit tests cover auth middleware, validation logic and the frontend API client. `npm test` runs Jest with `--experimental-vm-modules` so tests can `import()` the frontend's ES modules.
+Integration tests use `supertest` and a mock database helper. Unit tests cover auth middleware, validation logic and the frontend API client. `npm test` runs Jest with `--experimental-vm-modules` so tests can `import()` the frontend's ES modules. Running Jest any other way (`npx jest`, an IDE runner) needs the same flag, e.g. `NODE_OPTIONS=--experimental-vm-modules npx jest tests/unit/apiClient.test.js`; without it `apiClient.test.js` fails.
 
 ---
 
