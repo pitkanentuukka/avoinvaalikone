@@ -320,11 +320,12 @@ router.get("/me/:candidateToken", requireCandidateToken, async (req, res, next) 
 });
 
 /**
- * Validate and upsert a candidate's answers inside the caller's transaction.
+ * Lock and validate a candidate's answers inside the caller's transaction;
+ * writes nothing (upsertAnswers does).
  * answers: { [questionId]: { value: 0-4, explanation?: string } }
- * Returns { error } (nothing written; the caller rolls back) or { saved, skipped }.
+ * Returns { error } (the caller rolls back) or { toSave, skipped }.
  */
-async function saveAnswers(client, candidateId, answers) {
+async function checkAnswers(client, answers) {
   // Skip questions that no longer exist (merged or deleted while the
   // candidate had the form open) instead of failing the whole save on a
   // foreign-key violation; their ids are returned so the UI can say so.
@@ -375,7 +376,11 @@ async function saveAnswers(client, candidateId, answers) {
     if (tooLong.length) errors.push(`Liian pitkä perustelu (maksimi: 500 merkkiä) ${inQuestions(tooLong)}`);
     return { error: errors.join(". ") };
   }
+  return { toSave, skipped };
+}
 
+/** Upsert the rows checkAnswers() returned in toSave. */
+async function upsertAnswers(client, candidateId, toSave) {
   for (const [questionId, value, explanation] of toSave) {
     await client.query(
       `INSERT INTO candidate_answers (candidate_id, question_id, value, explanation)
@@ -385,7 +390,6 @@ async function saveAnswers(client, candidateId, answers) {
       [candidateId, questionId, value, explanation]
     );
   }
-  return { saved: toSave.length, skipped };
 }
 
 const UPDATE_PROFILE_SQL = `UPDATE candidates
@@ -418,19 +422,23 @@ router.put("/me/:candidateToken", requireCandidateToken, async (req, res, next) 
 
     client = await db.getClient();
     await client.query("BEGIN");
-    const result = await saveAnswers(client, req.candidate.id, answers);
+    const result = await checkAnswers(client, answers);
     if (result.error) {
       await client.query("ROLLBACK");
       return res.status(400).json({ error: result.error });
     }
+    // Profile before the answers, so a candidate removed by their party since
+    // the token lookup gets a 404 here rather than an FK violation on the
+    // upsert. Questions are still locked before the candidate row, as on
+    // every other save path.
     const { rows } = await client.query(UPDATE_PROFILE_SQL, params);
     if (!rows.length) {
-      // Removed by their party since the token lookup: don't report a save.
       await client.query("ROLLBACK");
       return res.status(404).json({ error: "Virheellinen ehdokastunniste" });
     }
+    await upsertAnswers(client, req.candidate.id, result.toSave);
     await client.query("COMMIT");
-    res.json({ ...rows[0], saved: result.saved, skipped: result.skipped });
+    res.json({ ...rows[0], saved: result.toSave.length, skipped: result.skipped });
   } catch (err) {
     await rollback(client);
     if (err.code === CHECK_VIOLATION) {
@@ -453,17 +461,18 @@ router.put("/me/:candidateToken/answers", requireCandidateToken, async (req, res
   try {
     client = await db.getClient();
     await client.query("BEGIN");
-    const result = await saveAnswers(client, req.candidate.id, answers);
+    const result = await checkAnswers(client, answers);
     if (result.error) {
       await client.query("ROLLBACK");
       return res.status(400).json({ error: result.error });
     }
+    await upsertAnswers(client, req.candidate.id, result.toSave);
     await client.query(
       "UPDATE candidates SET updated_at = now() WHERE id = $1",
       [req.candidate.id]
     );
     await client.query("COMMIT");
-    res.json(result);
+    res.json({ saved: result.toSave.length, skipped: result.skipped });
   } catch (err) {
     await rollback(client);
     next(err);

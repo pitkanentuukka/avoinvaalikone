@@ -445,6 +445,24 @@ describe("PUT /api/candidates/me/:candidateToken", () => {
       expect(client.release).toHaveBeenCalled();
     });
 
+    test("candidate gone, with answers rated → 404 before any answer is written", async () => {
+      db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
+      const client = buildMockClient();
+      const fkViolation = Object.assign(new Error("fk"), { code: "23503" });
+      client.query.mockImplementation(async (sql) => {
+        if (/^SELECT id, statement FROM questions/.test(sql)) return { rows: [{ id: QUESTION_ID, statement: "S" }] };
+        if (/UPDATE candidates\s+SET name/.test(sql)) return { rows: [] };
+        if (/INSERT INTO candidate_answers/.test(sql)) throw fkViolation;
+        return {};
+      });
+
+      const res = await request(app).put(url).send({ ...PROFILE, answers: { [QUESTION_ID]: { value: 2 } } });
+      expect(res.status).toBe(404);
+      const sqls = client.query.mock.calls.map(([sql]) => sql);
+      expect(sqls.some((sql) => /INSERT INTO candidate_answers/.test(sql))).toBe(false);
+      expect(sqls).toContain("ROLLBACK");
+    });
+
     test.each([["a string", "x"], ["a number", 3], ["an array", []]])("answers as %s → 400", async (_, answers) => {
       db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
       const client = buildMockClient();
