@@ -69,9 +69,6 @@ jobs:
       - name: Run migrations
         run: npm run migrate
 
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium
-
       - name: Start backend
         run: |
           npm start &
