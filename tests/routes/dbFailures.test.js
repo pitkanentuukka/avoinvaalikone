@@ -25,6 +25,8 @@ const CANDIDATE_AUTH = {
   party_name: "Vihreät",
 };
 
+const STAGED_SET = { rows: [{ id: SET_ID, status: "approved", hidden: true }] };
+
 const admin = (req) => req.set("Authorization", `Bearer ${ADMIN_SECRET}`);
 
 const routes = [
@@ -68,12 +70,16 @@ const routes = [
   },
   {
     name: "POST /api/admin/question-sets/:id/questions",
+    // The staged-set check runs before BEGIN.
+    beforeBegin: [STAGED_SET],
     send: () =>
       admin(request(app).post(`/api/admin/question-sets/${SET_ID}/questions`))
         .send({ statement: "Uusi väittämä" }),
   },
   {
     name: "DELETE /api/admin/question-sets/:id/questions/:questionId",
+    // The staged-set check runs before BEGIN.
+    beforeBegin: [STAGED_SET],
     send: () => admin(request(app).delete(`/api/admin/question-sets/${SET_ID}/questions/${QUESTION_ID}`)),
   },
   {
@@ -95,7 +101,7 @@ afterEach(() => {
   console.error.mockRestore();
 });
 
-describe.each(routes)("$name", ({ setup, send }) => {
+describe.each(routes)("$name", ({ setup, send, beforeBegin = [] }) => {
   test("pool timeout in getClient → 500", async () => {
     setup?.();
     db.getClient.mockRejectedValue(new Error("timeout exceeded when trying to connect"));
@@ -104,14 +110,30 @@ describe.each(routes)("$name", ({ setup, send }) => {
     expect(res.status).toBe(500);
   }, TIMEOUT_MS);
 
-  test("dead connection (ROLLBACK fails too) → 500, rollback attempted, client released", async () => {
+  test("connection dies mid-transaction (ROLLBACK fails too) → 500, rollback attempted, client released", async () => {
+    setup?.();
+    const client = buildMockClient();
+    for (const result of beforeBegin) client.query.mockResolvedValueOnce(result);
+    client.query.mockImplementation((sql) =>
+      sql === "BEGIN" ? Promise.resolve({}) : Promise.reject(new Error("Connection terminated unexpectedly"))
+    );
+
+    const res = await send().timeout(REQUEST_TIMEOUT_MS);
+    expect(res.status).toBe(500);
+    expect(client.query).toHaveBeenCalledWith("BEGIN");
+    expect(client.query).toHaveBeenCalledWith("ROLLBACK");
+    expect(client.release).toHaveBeenCalledTimes(1);
+  }, TIMEOUT_MS);
+
+  // Issue #18: no stray ROLLBACK for a failure before BEGIN.
+  test("connection dead from the start → 500, no ROLLBACK, client released", async () => {
     setup?.();
     const client = buildMockClient();
     client.query.mockRejectedValue(new Error("Connection terminated unexpectedly"));
 
     const res = await send().timeout(REQUEST_TIMEOUT_MS);
     expect(res.status).toBe(500);
-    expect(client.query).toHaveBeenCalledWith("ROLLBACK");
+    expect(client.query).not.toHaveBeenCalledWith("ROLLBACK");
     expect(client.release).toHaveBeenCalledTimes(1);
   }, TIMEOUT_MS);
 });
