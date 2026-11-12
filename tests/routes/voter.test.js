@@ -589,6 +589,42 @@ describe("POST /api/voter/match — validation", () => {
     expect(db.query).not.toHaveBeenCalled();
   });
 
+  test("weights: null counts as no weights", async () => {
+    // Scores a candidate and stores research rows, so null reaches weightFor too.
+    // Q1: voter=4, cand=2 → similarity 0.5, default weight → 50%
+    db.query.mockResolvedValueOnce({ rows: [{ id: VALID_UUID }] }); // questions that still exist
+    db.query.mockResolvedValueOnce({
+      rows: [{ candidate_id: CANDIDATE_ID, question_id: VALID_UUID, value: 2 }],
+    });
+    db.query.mockResolvedValueOnce({
+      rows: [{ id: CANDIDATE_ID, name: "A", photo_url: null, bio: null, party_id: "p1", party_name: "P" }],
+    });
+    db.query.mockResolvedValueOnce({ rows: [] });
+
+    const res = await request(app)
+      .post("/api/voter/match")
+      .send({ answers: { [VALID_UUID]: 4 }, weights: null });
+
+    expect(res.status).toBe(200);
+    expect(res.body.results[0].match).toBe(50);
+    const insertCall = db.query.mock.calls[3];
+    expect(insertCall[0]).toMatch(/INSERT INTO voter_responses/);
+    expect(insertCall[1].slice(1)).toEqual([VALID_UUID, 4, 1]);
+  });
+
+  test.each([
+    ["a number", 2],
+    ["a string", "2"],
+    ["an array", []],
+  ])("weights as %s → 400", async (_, weights) => {
+    const res = await request(app)
+      .post("/api/voter/match")
+      .send({ answers: { [VALID_UUID]: 2 }, weights });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/painoarvot/i);
+    expect(db.query).not.toHaveBeenCalled();
+  });
+
   test("invalid UUID in questionSetIds → 400", async () => {
     const res = await request(app)
       .post("/api/voter/match")

@@ -95,3 +95,20 @@ aren't linked to the browser still holds.
 **Fix:** store a keyed hash of the client id, such as an HMAC under a server
 secret shared by all replicas. Retries would still collide, but the stored key
 would be neither client-chosen nor client-known.
+
+## Non-integer match answers and weights are truncated
+
+**Endpoint:** `POST /api/voter/match` (`answers`, `weights`)
+
+`isValidRange` checks `parseInt(value, 10)`, not the value itself, and scoring
+and the research insert read values the same way. So a non-integer is accepted
+and silently cut down: `2.9` and `"2abc"` count as 2, `[3]` as 3, `"0x3"` as 0,
+and `-0.5` as 0. A string of digits such as `"2"` is read as its number.
+
+**Why the frontend is unaffected:** answers and weights come from the index of
+the button the voter clicked, so it only ever sends integers 0–4 and 0–3, and
+the copy it saves in localStorage keeps them as such.
+
+**Fix:** require `Number.isInteger(value)` in range, as
+`PUT /api/candidates/me/:candidateToken/answers` already does. Decide first
+whether to keep accepting digit strings.
