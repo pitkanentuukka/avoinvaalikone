@@ -43,10 +43,13 @@ function rememberedLink(storage) {
 }
 
 // The link to open on page load: one in the URL (`search`) wins and replaces
-// any remembered one; otherwise the remembered one, if any.
-export function readInitialLink(search, storage) {
+// any remembered one. Otherwise the remembered one, but only on a reload
+// (`navigationType`, from the Navigation Timing API): sessionStorage outlives
+// visits to other sites in the same tab, so on a shared computer the next
+// person to type the address would land in someone else's portal.
+export function readInitialLink(search, storage, navigationType) {
   const link = tokenLinkFromParams(new URLSearchParams(search));
-  if (!link) return rememberedLink(storage);
+  if (!link && navigationType === "reload") return rememberedLink(storage);
   rememberLink(storage, link);
   return link;
 }

@@ -2253,18 +2253,25 @@ const sessionStore = (() => {
   try { return window.sessionStorage; } catch { return null; }
 })();
 
+// Read once per page load: a second read (StrictMode runs state initializers
+// twice) would find the URL already scrubbed and forget the link.
+let pageLoadLink;
+function readPageLoadLink() {
+  if (pageLoadLink !== undefined) return pageLoadLink;
+  const navigationType = window.performance?.getEntriesByType?.("navigation")[0]?.type;
+  pageLoadLink = readInitialLink(window.location.search, sessionStore, navigationType);
+  // Tokens are bearer secrets delivered as magic links. Scrub them from the
+  // address bar once read so they don't linger in browser history,
+  // bookmarks, or anything else that copies the URL. The open link is kept
+  // in the tab's sessionStorage instead, so a reload can reopen it.
+  if (tokenLinkFromParams(new URLSearchParams(window.location.search))) {
+    window.history.replaceState({}, "", window.location.pathname);
+  }
+  return pageLoadLink;
+}
+
 export default function App() {
-  const [initialLink] = useState(() => {
-    const link = readInitialLink(window.location.search, sessionStore);
-    // Tokens are bearer secrets delivered as magic links. Scrub them from the
-    // address bar once read so they don't linger in browser history,
-    // bookmarks, or anything else that copies the URL. The open link is kept
-    // in the tab's sessionStorage instead, so a reload can reopen it.
-    if (tokenLinkFromParams(new URLSearchParams(window.location.search))) {
-      window.history.replaceState({}, "", window.location.pathname);
-    }
-    return link;
-  });
+  const [initialLink] = useState(readPageLoadLink);
 
   const [view, setView] = useState(initialLink?.view || "home");
   const [token, setToken] = useState(initialLink?.token || null);
