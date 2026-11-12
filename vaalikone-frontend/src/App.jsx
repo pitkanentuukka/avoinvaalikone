@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, createContext, useContext } from "react";
+import { useState, useEffect, useMemo, useRef, useId, createContext, useContext } from "react";
 import { marked } from "marked";
 import translations from "./translations";
 import voterGuideContent from "./guides/voter-guide.md?raw";
@@ -226,10 +226,15 @@ function LoadingState({ text }) {
   );
 }
 
-function ErrorBanner({ message, onRetry }) {
+function ErrorBanner({ message, onRetry, scrollIntoView = false }) {
   const { t } = useTranslation();
+  const ref = useRef(null);
+  // For long forms whose submit button sits at the bottom: bring the error into view.
+  useEffect(() => {
+    if (scrollIntoView) ref.current?.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
+  }, [message, scrollIntoView]);
   return (
-    <div style={{
+    <div ref={ref} style={{
       padding: "14px 20px", borderRadius: "8px", background: palette.dangerLight,
       border: `1px solid #E8C0BA`, color: palette.danger, fontSize: "14px",
       display: "flex", justifyContent: "space-between", alignItems: "center",
@@ -313,14 +318,25 @@ function ScaleInput({ value, onChange }) {
   );
 }
 
-function TextArea({ value, onChange, placeholder, rows = 3 }) {
-  return (
-    <textarea value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} rows={rows}
+function TextArea({ value, onChange, placeholder, rows = 3, maxLength }) {
+  const counterId = useId();
+  const textarea = (
+    <textarea value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} rows={rows} maxLength={maxLength}
+      aria-describedby={maxLength ? counterId : undefined}
       style={{
         width: "100%", padding: "12px 14px", borderRadius: "6px", border: `1px solid ${palette.border}`,
         fontFamily: "'Source Serif 4', Georgia, serif", fontSize: "14px", resize: "vertical",
         background: palette.surface, color: palette.text, outline: "none", boxSizing: "border-box",
       }} />
+  );
+  if (!maxLength) return textarea;
+  return (
+    <div>
+      {textarea}
+      <div id={counterId} style={{ textAlign: "right", fontSize: "12px", color: (value ?? "").length >= maxLength ? palette.danger : palette.textLight }}>
+        {(value ?? "").length} / {maxLength}
+      </div>
+    </div>
   );
 }
 
@@ -1314,7 +1330,7 @@ function NgoView() {
         </div>
       )}
       <MarkdownGuide content={ngoGuideContent} label="Ohje kysymysten lähettämiseen" />
-      {error && <ErrorBanner message={error} />}
+      {error && <ErrorBanner message={error} scrollIntoView />}
       <Card>
         <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
           <div>
@@ -1344,7 +1360,7 @@ function NgoView() {
             {questions.map((q, i) => (
               <div key={i} style={{ display: "flex", gap: "8px", marginBottom: "8px", alignItems: "start" }}>
                 <span style={{ color: palette.textLight, fontSize: "13px", marginTop: "10px", minWidth: "20px" }}>{i + 1}.</span>
-                <div style={{ flex: 1 }}><TextArea value={q} onChange={(v) => updateQuestion(i, v)} placeholder={t.ngoStatementPlaceholder} rows={2} /></div>
+                <div style={{ flex: 1 }}><TextArea value={q} onChange={(v) => updateQuestion(i, v)} placeholder={t.ngoStatementPlaceholder} rows={2} maxLength={500} /></div>
                 {questions.length > 1 && (
                   <button onClick={() => removeQuestion(i)} style={{ background: "none", border: "none", color: palette.textLight, cursor: "pointer", fontSize: "18px", marginTop: "8px" }}>×</button>
                 )}
@@ -1443,7 +1459,7 @@ function ProfileFields({ profile, setField }) {
       </div>
       <div>
         <label style={labelStyle}>{t.candidateBio}</label>
-        <TextArea value={profile.bio} onChange={(v) => setField("bio", v)} placeholder={t.candidateBioPlaceholder} rows={4} />
+        <TextArea value={profile.bio} onChange={(v) => setField("bio", v)} placeholder={t.candidateBioPlaceholder} rows={4} maxLength={1000} />
       </div>
     </div>
   );
@@ -1605,7 +1621,7 @@ function RegisterView({ registrationToken, onRegistered }) {
       <h2 style={{ fontSize: "28px", fontWeight: 800, letterSpacing: "-0.02em", margin: "12px 0 8px" }}>{t.registerTitle}</h2>
       <p style={{ color: palette.textMuted, marginBottom: "16px" }}>{t.registerDesc(partyName)}</p>
       <MarkdownGuide content={candidateGuideContent} label="Ohje vastaamiseen" />
-      {error && <ErrorBanner message={error} />}
+      {error && <ErrorBanner message={error} scrollIntoView />}
       <Card style={{ marginBottom: "16px" }}>
         <ProfileFields profile={profile} setField={(k, v) => setProfile((p) => ({ ...p, [k]: v }))} />
       </Card>
@@ -1615,6 +1631,12 @@ function RegisterView({ registrationToken, onRegistered }) {
 }
 
 // The candidate's own page, reached only through their personal link.
+function answersFromProfile(me) {
+  return Object.fromEntries(
+    Object.entries(me.answers || {}).map(([k, v]) => [k, { value: v.value, text: v.explanation || "" }])
+  );
+}
+
 function CandidateView({ candidateToken, justRegistered }) {
   const { t } = useTranslation();
   const [partyName, setPartyName] = useState("");
@@ -1638,11 +1660,7 @@ function CandidateView({ candidateToken, justRegistered }) {
           name: me.name, email: me.email || "", constituency: me.constituency || "",
           photoUrl: me.photoUrl || "", bio: me.bio || "",
         });
-        setAnswers(
-          Object.fromEntries(
-            Object.entries(me.answers || {}).map(([k, v]) => [k, { value: v.value, text: v.explanation || "" }])
-          )
-        );
+        setAnswers(answersFromProfile(me));
       } catch {
         setInvalid(true);
       } finally {
@@ -1671,7 +1689,30 @@ function CandidateView({ candidateToken, justRegistered }) {
         }
       }
       if (Object.keys(apiAnswers).length > 0) {
-        await api.saveOwnAnswers(candidateToken, apiAnswers);
+        const { skipped = [] } = await api.saveOwnAnswers(candidateToken, apiAnswers);
+        if (skipped.length > 0) {
+          // Those questions are gone. Drop them locally rather than refetching
+          // the public (edge-cached) question list, and reload own answers
+          // (uncached) in case a merge carried one over to the kept question.
+          const isSkipped = (qId) => skipped.includes(qId);
+          setQuestionSets((sets) => sets.map((s) => ({ ...s, questions: (s.questions || []).filter((q) => !isSkipped(q.id)) })));
+          try {
+            const me = await api.getOwnProfile(candidateToken);
+            setAnswers((prev) => {
+              const next = answersFromProfile(me);
+              // Keep explanations typed for questions not rated yet (they weren't
+              // sent), unless a merge has since given the question a server answer.
+              for (const [qId, a] of Object.entries(prev)) {
+                if (a.value === undefined && !isSkipped(qId) && next[qId] === undefined) next[qId] = a;
+              }
+              return next;
+            });
+          } catch {
+            setAnswers((prev) => Object.fromEntries(Object.entries(prev).filter(([qId]) => !isSkipped(qId))));
+          }
+          setError(t.candidateAnswersSkipped(skipped.length));
+          return;
+        }
       }
       setSaved(true);
     } catch (e) {
@@ -1716,7 +1757,7 @@ function CandidateView({ candidateToken, justRegistered }) {
         <Button onClick={save} loading={saving} disabled={!canSave}>{t.candidateSaveAnswers}</Button>
       </div>
       <MarkdownGuide content={candidateGuideContent} label="Ohje vastaamiseen" />
-      {error && <ErrorBanner message={error} />}
+      {error && <ErrorBanner message={error} scrollIntoView />}
 
       <Card style={{ marginBottom: "24px" }}>
         <div style={{ fontSize: "14px", fontWeight: 700, marginBottom: "16px" }}>{t.candidateProfile}</div>
@@ -1737,7 +1778,7 @@ function CandidateView({ candidateToken, justRegistered }) {
               </div>
               <ScaleInput value={answers[q.id]?.value} onChange={(v) => setAnswer(q.id, "value", v)} />
               <div style={{ marginTop: "12px" }}>
-                <TextArea value={answers[q.id]?.text || ""} onChange={(v) => setAnswer(q.id, "text", v)} placeholder={t.candidateExplainPlaceholder} rows={2} />
+                <TextArea value={answers[q.id]?.text || ""} onChange={(v) => setAnswer(q.id, "text", v)} placeholder={t.candidateExplainPlaceholder} rows={2} maxLength={500} />
               </div>
             </Card>
           ))}

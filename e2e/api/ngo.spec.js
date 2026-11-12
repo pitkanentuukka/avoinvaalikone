@@ -105,15 +105,19 @@ test.describe("UC-NGO: Question set submission", () => {
     expect(res.status()).toBe(400);
   });
 
-  test("long question statement is silently skipped", async ({ request }) => {
+  test("long question statement rejects the submission", async ({ request }) => {
+    const title = `LongQ ${Date.now()}`;
     const { res, body } = await post(request, "/question-sets", {
       ngoName: "Test",
-      title: `LongQ ${Date.now()}`,
+      title,
       questions: ["Normal question", "A".repeat(501)],
     });
-    expect(res.status()).toBe(201);
-    // The too-long statement should be skipped
-    expect(body.questions).toHaveLength(1);
+    expect(res.status()).toBe(400);
+    expect(body.error).toMatch(/liian pitkä/i);
+
+    // No set was created
+    const { body: sets } = await get(request, "/admin/question-sets", adminHeaders());
+    expect(sets.some((s) => s.title === title)).toBe(false);
   });
 });
 

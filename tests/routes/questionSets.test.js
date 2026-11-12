@@ -1,8 +1,10 @@
 jest.mock("../../src/db/pool");
+jest.mock("../../src/email");
 
 const request = require("supertest");
 const app = require("../../src/index");
 const db = require("../../src/db/pool");
+const email = require("../../src/email");
 const { resetDbMocks, buildMockClient } = require("../helpers/mockDb");
 
 const ADMIN_SECRET = "test-admin-secret";
@@ -15,6 +17,11 @@ beforeAll(() => {
 
 beforeEach(() => {
   resetDbMocks();
+  // Real sends would log to email_log through the mocked db.query and steal
+  // later tests' mock results (when .env enables SMTP locally).
+  for (const fn of Object.values(email)) {
+    if (jest.isMockFunction(fn)) fn.mockReset().mockResolvedValue();
+  }
 });
 
 // ─── GET /api/question-sets ───────────────────────────────────────────────────
@@ -157,6 +164,64 @@ describe("POST /api/question-sets", () => {
       .send({ ngoName: "TestiJärjestö", title: "Sarja", questions: [{ statement: "Väittämä 1" }] });
     expect(res.status).toBe(201);
     expect(client.release).toHaveBeenCalled();
+  });
+
+  test("statement over 500 characters → 400 naming it, nothing created", async () => {
+    const client = buildMockClient();
+    const long = "Pitkä väittämä " + "a".repeat(500);
+    const res = await request(app)
+      .post("/api/question-sets")
+      .send({ ngoName: "TestiJärjestö", title: "Sarja", questions: ["Väittämä 1", long] });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/liian pitkä/i);
+    expect(res.body.error).toContain("Pitkä väittämä");
+    expect(res.body.error).not.toContain("Väittämä 1");
+    expect(client.query).not.toHaveBeenCalled();
+    expect(client.release).toHaveBeenCalled();
+  });
+
+  test("over-long statement in object form → 400; several → plural message", async () => {
+    const client = buildMockClient();
+    const res = await request(app)
+      .post("/api/question-sets")
+      .send({
+        ngoName: "TestiJärjestö",
+        title: "Sarja",
+        questions: [{ statement: "Eka " + "a".repeat(500) }, { statement: "Toka " + "b".repeat(500) }],
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/Väittämät ovat liian pitkiä/);
+    expect(res.body.error).toContain("Eka");
+    expect(res.body.error).toContain("Toka");
+    expect(client.query).not.toHaveBeenCalled();
+  });
+
+  test("statement of exactly 500 characters → 201", async () => {
+    const client = buildMockClient();
+    const qs = { id: VALID_UUID, ngo_name: "TestiJärjestö", title: "Sarja", status: "pending" };
+    const stmt = "a".repeat(500);
+    client.query
+      .mockResolvedValueOnce({}) // BEGIN
+      .mockResolvedValueOnce({ rows: [qs] }) // INSERT question_set
+      .mockResolvedValueOnce({ rows: [{ id: "q1", statement: stmt }] }) // INSERT question
+      .mockResolvedValueOnce({}) // INSERT question_set_questions
+      .mockResolvedValueOnce({}); // COMMIT
+
+    const res = await request(app)
+      .post("/api/question-sets")
+      .send({ ngoName: "TestiJärjestö", title: "Sarja", questions: [stmt] });
+    expect(res.status).toBe(201);
+    expect(res.body.questions).toHaveLength(1);
+  });
+
+  test("no non-empty statements → 400, no empty question set created", async () => {
+    const client = buildMockClient();
+    const res = await request(app)
+      .post("/api/question-sets")
+      .send({ ngoName: "TestiJärjestö", title: "Sarja", questions: ["   ", ""] });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/väittämä/i);
+    expect(client.query).not.toHaveBeenCalled();
   });
 
   test("DB error mid-transaction → ROLLBACK called and client.release() called", async () => {

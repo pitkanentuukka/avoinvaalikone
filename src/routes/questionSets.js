@@ -1,7 +1,7 @@
 const { Router } = require("express");
 const db = require("../db/pool");
 const { requireAdmin } = require("../middleware/auth");
-const { isValidLength, isValidUrl, isValidEmail, isValidUUID, validateUUIDParam } = require("../middleware/validation");
+const { isValidLength, isValidUrl, isValidEmail, isValidUUID, validateUUIDParam, quoteList } = require("../middleware/validation");
 const { publicCache } = require("../middleware/cacheControl");
 const microCache = require("../middleware/microCache");
 const {
@@ -160,6 +160,24 @@ publicRouter.post("/", async (req, res, next) => {
       return res.status(400).json({ error: "Liian monta väittämää (maksimi: 50)" });
     }
 
+    // Validate every statement before creating anything, so an over-long one
+    // is reported instead of silently dropped.
+    const statements = [];
+    const tooLong = [];
+    for (let i = 0; i < questions.length; i++) {
+      const stmt = questions[i]?.statement || questions[i]; // accept string or object
+      if (typeof stmt !== "string" || !stmt.trim()) continue;
+      if (stmt.trim().length > 500) tooLong.push(stmt.trim());
+      else statements.push({ statement: stmt.trim(), sortOrder: i + 1 });
+    }
+    if (tooLong.length) {
+      const subject = tooLong.length > 1 ? "Väittämät ovat liian pitkiä" : "Väittämä on liian pitkä";
+      return res.status(400).json({ error: `${subject} (maksimi: 500 merkkiä): ${quoteList(tooLong)}` });
+    }
+    if (statements.length === 0) {
+      return res.status(400).json({ error: "Vähintään yksi väittämä vaaditaan" });
+    }
+
     await client.query("BEGIN");
 
     const { rows: setRows } = await client.query(
@@ -171,26 +189,18 @@ publicRouter.post("/", async (req, res, next) => {
     const qs = setRows[0];
 
     const insertedQuestions = [];
-    for (let i = 0; i < questions.length; i++) {
-      const stmt = questions[i]?.statement || questions[i]; // accept string or object
-      if (typeof stmt !== "string" || !stmt.trim()) continue;
-
-      // Validate statement length
-      if (!isValidLength(stmt, 500)) {
-        continue;
-      }
-
+    for (const { statement, sortOrder } of statements) {
       // Each submitted question starts as its own canonical question linked to this set.
       const { rows: [question] } = await client.query(
         `INSERT INTO questions (statement) VALUES ($1) RETURNING id, statement`,
-        [stmt.trim()]
+        [statement]
       );
       await client.query(
         `INSERT INTO question_set_questions (question_set_id, question_id, sort_order)
          VALUES ($1, $2, $3)`,
-        [qs.id, question.id, i + 1]
+        [qs.id, question.id, sortOrder]
       );
-      insertedQuestions.push({ id: question.id, statement: question.statement, sortOrder: i + 1 });
+      insertedQuestions.push({ id: question.id, statement: question.statement, sortOrder });
     }
 
     await client.query("COMMIT");

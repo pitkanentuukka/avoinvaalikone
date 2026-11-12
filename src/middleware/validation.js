@@ -42,6 +42,21 @@ function isValidEmail(value) {
 }
 
 /**
+ * Shorten text for quoting in an error message
+ */
+function excerpt(text, maxLength = 60) {
+  const chars = Array.from(text); // code points, so an emoji is never split
+  return chars.length > maxLength ? `${chars.slice(0, maxLength).join('').trimEnd()}…` : text;
+}
+
+/**
+ * Join quoted excerpts of texts for an error message
+ */
+function quoteList(texts) {
+  return texts.map((t) => `"${excerpt(t)}"`).join(', ');
+}
+
+/**
  * Validate array of UUIDs from query parameter
  */
 function validateUUIDArray(arr) {
@@ -91,5 +106,7 @@ module.exports = {
   isValidEmail,
   validateUUIDArray,
   validateUUIDParam,
+  excerpt,
+  quoteList,
   validateBodyField,
 };
