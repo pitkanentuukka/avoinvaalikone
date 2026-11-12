@@ -2183,9 +2183,11 @@ function VoterView() {
                 {activeQuestions.map((q) => {
                   const ca = c.answers?.[q.id];
                   const va = voterAnswers[q.id];
-                  if (!ca) return null;
-                  const agree = ca.value === va;
-                  const close = Math.abs(ca.value - va) <= 1;
+                  // A question the candidate skipped counts as full disagreement in
+                  // the match, so show it rather than leaving the score unexplained.
+                  if (!ca && va === undefined) return null;
+                  const agree = ca && ca.value === va;
+                  const close = ca && Math.abs(ca.value - va) <= 1;
                   const explanation = candidateDetails[c.id]?.answers?.[q.id]?.explanation;
                   return (
                     <div key={q.id} style={{ marginBottom: "16px" }}>
@@ -2193,7 +2195,7 @@ function VoterView() {
                       <div style={{ display: "flex", gap: "16px", fontSize: "13px", flexWrap: "wrap" }}>
                         <span style={{ color: palette.textMuted }}>{t.voterYou}: <strong style={{ color: palette.text }}>{labels[va]}</strong></span>
                         <span style={{ color: agree ? palette.accent : close ? palette.warn : palette.danger }}>
-                          {t.voterCandidate}: <strong>{labels[ca.value]}</strong>{agree && " ✓"}
+                          {t.voterCandidate}: <strong>{ca ? labels[ca.value] : t.voterCandidateNoAnswer}</strong>{agree && " ✓"}
                         </span>
                       </div>
                       {explanation && (

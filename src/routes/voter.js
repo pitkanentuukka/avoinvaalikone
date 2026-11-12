@@ -89,11 +89,14 @@ router.post("/match", async (req, res, next) => {
       : await db.query("SELECT id FROM questions WHERE id = ANY($1)", [allQuestionIds]);
     const voterQuestionIds = existingRows.map((r) => r.id);
     if (voterQuestionIds.length === 0) {
-      return res.json({ sessionId: null, results: [] });
+      return res.json({ sessionId: null, questionCount: 0, results: [] });
     }
-    const scoredQuestionIds = hasSetFilter
+    // The DB returns IDs in lowercase; an answer sent under another spelling of
+    // the key has no value here and is left out of scoring (and questionCount).
+    const scoredQuestionIds = (hasSetFilter
       ? existingRows.filter((r) => r.in_selected_sets).map((r) => r.id)
-      : voterQuestionIds;
+      : voterQuestionIds
+    ).filter((id) => answers[id] !== undefined);
 
     const params = [scoredQuestionIds];
 
@@ -120,7 +123,7 @@ router.post("/match", async (req, res, next) => {
     // Fetch candidate info
     const candidateIds = [...new Set(candidateAnswers.map((a) => a.candidate_id))];
     if (candidateIds.length === 0) {
-      return res.json({ results: [] });
+      return res.json({ questionCount: scoredQuestionIds.length, results: [] });
     }
 
     const { rows: candidates } = await db.query(

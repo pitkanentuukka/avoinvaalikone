@@ -168,7 +168,7 @@ describe("POST /api/voter/match — algorithm", () => {
       .post("/api/voter/match")
       .send({ answers: { [VALID_UUID]: 2 } });
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ results: [] });
+    expect(res.body).toEqual({ questionCount: 1, results: [] });
   });
 
   test("two candidates → sorted descending by match", async () => {
@@ -293,6 +293,38 @@ describe("POST /api/voter/match — algorithm", () => {
     expect(params).toEqual([[VALID_UUID, VALID_UUID2], [SET_ID]]);
     expect(res.body.results[0].match).toBe(100);
     expect(res.body.questionCount).toBe(1);
+  });
+
+  test("every answer in a deselected set → nothing scored, empty results with questionCount 0", async () => {
+    db.query.mockResolvedValueOnce({ rows: [{ id: VALID_UUID, in_selected_sets: false }] });
+    db.query.mockResolvedValueOnce({ rows: [] }); // no candidate answers for an empty question list
+
+    const res = await request(app)
+      .post("/api/voter/match")
+      .send({ answers: { [VALID_UUID]: 2 }, questionSetIds: [VALID_UUID2] });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ questionCount: 0, results: [] });
+    expect(db.query.mock.calls[1][1]).toEqual([[]]);
+  });
+
+  // The DB hands back lowercase IDs, so an uppercase answer key finds no value
+  // and is left out of scoring; it must not inflate the "X/Y" denominator either.
+  test("an answer key the scoring can't read is not counted in questionCount", async () => {
+    db.query.mockResolvedValueOnce({ rows: [{ id: VALID_UUID }, { id: VALID_UUID2 }] });
+    db.query.mockResolvedValueOnce({
+      rows: [{ candidate_id: CANDIDATE_ID, question_id: VALID_UUID, value: 2 }],
+    });
+    db.query.mockResolvedValueOnce({
+      rows: [{ id: CANDIDATE_ID, name: "A", photo_url: null, bio: null, party_id: "p1", party_name: "P" }],
+    });
+    db.query.mockResolvedValueOnce({ rows: [] });
+
+    const res = await request(app)
+      .post("/api/voter/match")
+      .send({ answers: { [VALID_UUID]: 2, [VALID_UUID2.toUpperCase()]: 4 } });
+    expect(res.status).toBe(200);
+    expect(res.body.questionCount).toBe(1);
+    expect(res.body.results[0]).toMatchObject({ match: 100, answeredCount: 1 });
   });
 });
 
@@ -453,7 +485,7 @@ describe("POST /api/voter/match — stale question IDs", () => {
       .post("/api/voter/match")
       .send({ answers: { [VALID_UUID]: 2 } });
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ sessionId: null, results: [] });
+    expect(res.body).toEqual({ sessionId: null, questionCount: 0, results: [] });
     expect(db.query).toHaveBeenCalledTimes(1);
   });
 });

@@ -44,12 +44,15 @@ function scoreCandidate(answers, weights, questionIds, candidateAnswers) {
 }
 
 // Sort order for match results: best match first, then the candidate who
-// answered more of the voter's questions, then by name so equal results always
-// come out in the same order.
+// answered more of the voter's questions, then by name (and id, for namesakes)
+// so equal results always come out in the same order. Ranking uses the rounded
+// match the voter sees, so two candidates shown at the same percentage are
+// ordered by coverage rather than by a difference the voter can't see.
 function compareResults(a, b) {
   return b.match - a.match
     || b.answeredCount - a.answeredCount
-    || a.name.localeCompare(b.name, "fi");
+    || a.name.localeCompare(b.name, "fi")
+    || a.id.localeCompare(b.id);
 }
 
 module.exports = { DEFAULT_WEIGHT, weightFor, scoreCandidate, compareResults };

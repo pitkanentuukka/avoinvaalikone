@@ -75,4 +75,12 @@ describe("compareResults", () => {
       { name: "Wahlroos", match: 50, answeredCount: 2 },
     ])).toEqual(["Aalto", "Wahlroos", "Östman"]);
   });
+
+  test("namesakes with equal match and answeredCount → ordered by id", () => {
+    const results = [
+      { id: "b", name: "Matti Virtanen", match: 50, answeredCount: 2 },
+      { id: "a", name: "Matti Virtanen", match: 50, answeredCount: 2 },
+    ];
+    expect([...results].sort(compareResults).map((r) => r.id)).toEqual(["a", "b"]);
+  });
 });
