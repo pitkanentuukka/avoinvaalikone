@@ -1,6 +1,6 @@
 const { Router } = require("express");
 const db = require("../db/pool");
-const { rollback } = require("../db/transaction");
+const { begin, commit, rollback } = require("../db/transaction");
 const { requireAdmin } = require("../middleware/auth");
 const { isValidLength, isValidUrl, isValidEmail, isValidUUID, validateUUIDParam, quoteList } = require("../middleware/validation");
 const { publicCache } = require("../middleware/cacheControl");
@@ -194,7 +194,7 @@ publicRouter.post("/", async (req, res, next) => {
       return res.status(400).json({ error: "Vähintään yksi väittämä vaaditaan" });
     }
 
-    await client.query("BEGIN");
+    await begin(client);
 
     const { rows: setRows } = await client.query(
       `INSERT INTO question_sets (ngo_name, ngo_email, logo_url, title, status)
@@ -219,7 +219,7 @@ publicRouter.post("/", async (req, res, next) => {
       insertedQuestions.push({ id: question.id, statement: question.statement, sortOrder });
     }
 
-    await client.query("COMMIT");
+    await commit(client);
 
     // Fire-and-forget: don't block the response if email fails
     sendNewQuestionSetNotification(qs).catch((err) =>
@@ -260,13 +260,13 @@ adminRouter.post("/merge-questions", requireAdmin, async (req, res, next) => {
       return res.status(400).json({ error: "Kysymystä ei voi yhdistää itseensä" });
     }
 
-    await client.query("BEGIN");
+    await begin(client);
 
     // Verify every referenced question exists.
     const allIds = [keepId, ...dropIds];
     const found = await lockQuestions(client, allIds);
     if (found.length !== allIds.length) {
-      await client.query("ROLLBACK");
+      await rollback(client);
       return res.status(404).json({ error: "Kysymystä ei löytynyt" });
     }
 
@@ -287,7 +287,7 @@ adminRouter.post("/merge-questions", requireAdmin, async (req, res, next) => {
       [keepId]
     );
 
-    await client.query("COMMIT");
+    await commit(client);
     res.json({ ...question, merged: dropIds.length, sets: setLinks });
   } catch (err) {
     await rollback(client);
@@ -404,24 +404,24 @@ adminRouter.patch("/:id/review", requireAdmin, validateUUIDParam("id"), async (r
       return res.status(400).json({ error: "reviews-kenttä vaaditaan" });
     }
 
-    await client.query("BEGIN");
+    await begin(client);
 
     const { rows: sets } = await client.query(
       "SELECT * FROM question_sets WHERE id = $1 FOR UPDATE",
       [req.params.id]
     );
     if (sets.length === 0) {
-      await client.query("ROLLBACK");
+      await rollback(client);
       return res.status(404).json({ error: "Kysymyssarjaa ei löytynyt" });
     }
     // Validate edits and merge targets
     for (const r of reviews) {
       if (r.editedStatement != null && !isValidLength(r.editedStatement, 500)) {
-        await client.query("ROLLBACK");
+        await rollback(client);
         return res.status(400).json({ error: "Muokattu väittämä on liian pitkä (maksimi: 500 merkkiä)" });
       }
       if (r.duplicateOf != null && !isValidUUID(r.duplicateOf)) {
-        await client.query("ROLLBACK");
+        await rollback(client);
         return res.status(400).json({ error: "Virheellinen kaksoiskappaleen tunniste" });
       }
     }
@@ -507,7 +507,7 @@ adminRouter.patch("/:id/review", requireAdmin, validateUUIDParam("id"), async (r
     );
     const updatedSet = updatedRows[0];
 
-    await client.query("COMMIT");
+    await commit(client);
 
     res.json(updatedSet);
 
@@ -627,7 +627,7 @@ adminRouter.post("/:id/questions", requireAdmin, validateUUIDParam("id"), async 
       return res.status(409).json({ error: "Kysymyksiä voi lisätä vain julkaisemattomiin kysymyssarjoihin" });
     }
 
-    await client.query("BEGIN");
+    await begin(client);
 
     const { rows: [{ max }] } = await client.query(
       "SELECT COALESCE(MAX(sort_order), 0) AS max FROM question_set_questions WHERE question_set_id = $1",
@@ -644,7 +644,7 @@ adminRouter.post("/:id/questions", requireAdmin, validateUUIDParam("id"), async 
       [req.params.id, question.id, sortOrder]
     );
 
-    await client.query("COMMIT");
+    await commit(client);
     res.status(201).json({ id: question.id, statement: question.statement, sortOrder });
   } catch (err) {
     await rollback(client);
@@ -675,18 +675,18 @@ adminRouter.delete(
         return res.status(409).json({ error: "Kysymyksiä voi poistaa vain julkaisemattomista kysymyssarjoista" });
       }
 
-      await client.query("BEGIN");
+      await begin(client);
       const { rowCount } = await client.query(
         "DELETE FROM question_set_questions WHERE question_id = $1 AND question_set_id = $2",
         [req.params.questionId, req.params.id]
       );
       if (rowCount === 0) {
-        await client.query("ROLLBACK");
+        await rollback(client);
         return res.status(404).json({ error: "Kysymystä ei löytynyt" });
       }
       // Drop the canonical question if it's no longer used by any set.
       await deleteOrphanQuestions(client, [req.params.questionId]);
-      await client.query("COMMIT");
+      await commit(client);
       res.status(204).end();
     } catch (err) {
       await rollback(client);
@@ -702,7 +702,7 @@ adminRouter.delete("/:id", requireAdmin, validateUUIDParam("id"), async (req, re
   let client;
   try {
     client = await db.getClient();
-    await client.query("BEGIN");
+    await begin(client);
 
     // Remember which questions this set held so we can clean up any that become orphaned.
     const { rows: linked } = await client.query(
@@ -715,14 +715,14 @@ adminRouter.delete("/:id", requireAdmin, validateUUIDParam("id"), async (req, re
       [req.params.id]
     );
     if (rowCount === 0) {
-      await client.query("ROLLBACK");
+      await rollback(client);
       return res.status(404).json({ error: "Kysymyssarjaa ei löytynyt" });
     }
 
     // Set deletion cascaded the join rows; remove questions no other set still shares.
     await deleteOrphanQuestions(client, linked.map((l) => l.question_id));
 
-    await client.query("COMMIT");
+    await commit(client);
     res.status(204).end();
   } catch (err) {
     await rollback(client);

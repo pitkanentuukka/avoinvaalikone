@@ -1,6 +1,7 @@
 const path = require("path");
 require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 const { Pool } = require("pg");
+const { begin, commit, rollback } = require("../src/db/transaction");
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
@@ -8,7 +9,7 @@ async function seed() {
   const client = await pool.connect();
 
   try {
-    await client.query("BEGIN");
+    await begin(client);
 
     // ─── Parties ───
     const { rows: parties } = await client.query(`
@@ -152,10 +153,10 @@ async function seed() {
     }
     console.log(`✓ Inserted ${answerRows.length} candidate answers`);
 
-    await client.query("COMMIT");
+    await commit(client);
     console.log("\n✓ Seed completed successfully");
   } catch (err) {
-    await client.query("ROLLBACK");
+    await rollback(client);
     console.error("✗ Seed failed:", err.message);
     process.exit(1);
   } finally {

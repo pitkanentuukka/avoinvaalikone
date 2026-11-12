@@ -1,7 +1,7 @@
 const { Router } = require("express");
 const rateLimit = require("express-rate-limit");
 const db = require("../db/pool");
-const { rollback } = require("../db/transaction");
+const { begin, commit, rollback } = require("../db/transaction");
 const { requirePartyToken, requireCandidateToken, requireRegistrationToken } = require("../middleware/auth");
 const { isValidLength, isValidUrl, isValidEmail, validateUUIDParam, isValidUUID, quoteList } = require("../middleware/validation");
 const { publicCache, noStore } = require("../middleware/cacheControl");
@@ -421,10 +421,10 @@ router.put("/me/:candidateToken", requireCandidateToken, async (req, res, next) 
     }
 
     client = await db.getClient();
-    await client.query("BEGIN");
+    await begin(client);
     const result = await checkAnswers(client, answers);
     if (result.error) {
-      await client.query("ROLLBACK");
+      await rollback(client);
       return res.status(400).json({ error: result.error });
     }
     // Profile before the answers, so a candidate removed by their party since
@@ -433,11 +433,11 @@ router.put("/me/:candidateToken", requireCandidateToken, async (req, res, next) 
     // PUT .../answers; the admin delete/merge paths lock questions first too.
     const { rows } = await client.query(UPDATE_PROFILE_SQL, params);
     if (!rows.length) {
-      await client.query("ROLLBACK");
+      await rollback(client);
       return res.status(404).json({ error: "Virheellinen ehdokastunniste" });
     }
     await upsertAnswers(client, req.candidate.id, result.toSave);
-    await client.query("COMMIT");
+    await commit(client);
     res.json({ ...rows[0], saved: result.toSave.length, skipped: result.skipped });
   } catch (err) {
     await rollback(client);
@@ -460,10 +460,10 @@ router.put("/me/:candidateToken/answers", requireCandidateToken, async (req, res
   let client;
   try {
     client = await db.getClient();
-    await client.query("BEGIN");
+    await begin(client);
     const result = await checkAnswers(client, answers);
     if (result.error) {
-      await client.query("ROLLBACK");
+      await rollback(client);
       return res.status(400).json({ error: result.error });
     }
     // Candidate row before the answers, the same order as PUT /me with
@@ -474,11 +474,11 @@ router.put("/me/:candidateToken/answers", requireCandidateToken, async (req, res
     );
     if (!rowCount) {
       // Removed by their party since the token lookup.
-      await client.query("ROLLBACK");
+      await rollback(client);
       return res.status(404).json({ error: "Virheellinen ehdokastunniste" });
     }
     await upsertAnswers(client, req.candidate.id, result.toSave);
-    await client.query("COMMIT");
+    await commit(client);
     res.json({ saved: result.toSave.length, skipped: result.skipped });
   } catch (err) {
     await rollback(client);
