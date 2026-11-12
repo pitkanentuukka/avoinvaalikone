@@ -404,7 +404,7 @@ router.put("/me/:candidateToken", requireCandidateToken, async (req, res, next) 
     return res.status(400).json({ error });
   }
   const { name, photoUrl, bio, email, constituency, answers } = req.body;
-  if (answers != null && typeof answers !== "object") {
+  if (answers != null && (typeof answers !== "object" || Array.isArray(answers))) {
     return res.status(400).json({ error: "Vastaukset ovat virheellisessä muodossa" });
   }
   const params = [name.trim(), photoUrl?.trim() || null, bio?.trim() || null, email.trim(), constituency.trim(), req.candidate.id];
@@ -424,6 +424,11 @@ router.put("/me/:candidateToken", requireCandidateToken, async (req, res, next) 
       return res.status(400).json({ error: result.error });
     }
     const { rows } = await client.query(UPDATE_PROFILE_SQL, params);
+    if (!rows.length) {
+      // Removed by their party since the token lookup: don't report a save.
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Virheellinen ehdokastunniste" });
+    }
     await client.query("COMMIT");
     res.json({ ...rows[0], saved: result.saved, skipped: result.skipped });
   } catch (err) {

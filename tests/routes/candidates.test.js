@@ -403,7 +403,49 @@ describe("PUT /api/candidates/me/:candidateToken", () => {
       expect(client.release).toHaveBeenCalled();
     });
 
-    test.each([["a string", "x"], ["a number", 3]])("answers as %s → 400", async (_, answers) => {
+    test("nothing rated (answers: {}) → profile saved in the transaction", async () => {
+      db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
+      const client = buildMockClient();
+      client.query.mockImplementation(async (sql) =>
+        /UPDATE candidates\s+SET name/.test(sql) ? { rows: [{ id: CANDIDATE_ID, ...PROFILE }] } : {}
+      );
+
+      const res = await request(app).put(url).send({ ...PROFILE, answers: {} });
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ name: PROFILE.name, saved: 0, skipped: [] });
+      const sqls = client.query.mock.calls.map(([sql]) => sql);
+      expect(sqls[0]).toBe("BEGIN");
+      expect(sqls[sqls.length - 1]).toBe("COMMIT");
+      expect(sqls.some((sql) => /candidate_answers/.test(sql))).toBe(false);
+    });
+
+    test("answers: null → plain profile update", async () => {
+      db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
+      db.query.mockResolvedValueOnce({ rows: [{ id: CANDIDATE_ID, ...PROFILE }] });
+      const client = buildMockClient();
+
+      const res = await request(app).put(url).send({ ...PROFILE, answers: null });
+      expect(res.status).toBe(200);
+      expect(res.body.name).toBe(PROFILE.name);
+      expect(res.body).not.toHaveProperty("saved");
+      expect(client.query).not.toHaveBeenCalled();
+    });
+
+    // A candidate removed by their party between the token lookup and the save.
+    test("candidate gone by the time of the update → 404, rolled back", async () => {
+      db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
+      const client = buildMockClient();
+      client.query.mockImplementation(async (sql) => (/UPDATE candidates\s+SET name/.test(sql) ? { rows: [] } : {}));
+
+      const res = await request(app).put(url).send({ ...PROFILE, answers: {} });
+      expect(res.status).toBe(404);
+      const sqls = client.query.mock.calls.map(([sql]) => sql);
+      expect(sqls).toContain("ROLLBACK");
+      expect(sqls).not.toContain("COMMIT");
+      expect(client.release).toHaveBeenCalled();
+    });
+
+    test.each([["a string", "x"], ["a number", 3], ["an array", []]])("answers as %s → 400", async (_, answers) => {
       db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
       const client = buildMockClient();
       const res = await request(app).put(url).send({ ...PROFILE, answers });
