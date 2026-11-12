@@ -20,6 +20,16 @@ pool.on("error", (err) => {
   console.error("Unexpected database pool error:", err);
 });
 
+// pg-pool only listens for client errors while a client is idle. A connection
+// that dies while checked out (DB restart, failover) would emit 'error' with
+// no listener and crash the process; with this listener the pending query
+// rejects instead, and the pool discards the client on release().
+pool.on("connect", (client) => {
+  client.on("error", (err) => {
+    console.error("Database connection error:", err);
+  });
+});
+
 // Warn when the pool is saturated (requests queueing for a connection) —
 // the early signal that PG_POOL_MAX or the replica count needs raising.
 const saturationLogger = setInterval(() => {

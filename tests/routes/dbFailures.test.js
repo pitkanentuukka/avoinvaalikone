@@ -18,7 +18,11 @@ const SET_ID = "550e8400-e29b-41d4-a716-446655440000";
 const QUESTION_ID = "660e8400-e29b-41d4-a716-446655440000";
 const QUESTION_ID2 = "770e8400-e29b-41d4-a716-446655440000";
 const CANDIDATE_TOKEN = "c".repeat(48);
-const CANDIDATE_AUTH = { id: SET_ID, party_id: QUESTION_ID2, party_name: "Vihreät" };
+const CANDIDATE_AUTH = {
+  id: "880e8400-e29b-41d4-a716-446655440000",
+  party_id: "990e8400-e29b-41d4-a716-446655440000",
+  party_name: "Vihreät",
+};
 
 const admin = (req) => req.set("Authorization", `Bearer ${ADMIN_SECRET}`);
 
@@ -88,13 +92,14 @@ describe.each(routes)("$name", ({ setup, send }) => {
     expect(res.status).toBe(500);
   }, TIMEOUT_MS);
 
-  test("dead connection (ROLLBACK fails too) → 500 and client released", async () => {
+  test("dead connection (ROLLBACK fails too) → 500, rollback attempted, client released", async () => {
     setup?.();
     const client = buildMockClient();
     client.query.mockRejectedValue(new Error("Connection terminated unexpectedly"));
 
     const res = await send();
     expect(res.status).toBe(500);
+    expect(client.query).toHaveBeenCalledWith("ROLLBACK");
     expect(client.release).toHaveBeenCalledTimes(1);
   }, TIMEOUT_MS);
 });
