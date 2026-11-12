@@ -35,8 +35,8 @@ router.post("/match", async (req, res, next) => {
       includeInResearch = true,
       sessionId: clientSessionId,
     } = req.body;
-    // A destructuring default would let null through, like the other optional
-    // fields here null means "not given".
+    // A destructuring default would let null through. Like the other optional
+    // fields here, null means "not given".
     const weights = req.body.weights ?? {};
 
     if (!answers || typeof answers !== "object" || Object.keys(answers).length === 0) {
