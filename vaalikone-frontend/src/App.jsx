@@ -207,10 +207,12 @@ function ScaleInput({ value, onChange }) {
   );
 }
 
-function TextArea({ value, onChange, placeholder, rows = 3, maxLength }) {
+// A field needs an accessible name: either `id` matching a visible label's
+// htmlFor (see Field), or `ariaLabel`. A placeholder isn't one.
+function TextArea({ value, onChange, placeholder, rows = 3, maxLength, id, ariaLabel }) {
   const counterId = useId();
   const textarea = (
-    <textarea value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} rows={rows} maxLength={maxLength}
+    <textarea id={id} aria-label={ariaLabel} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} rows={rows} maxLength={maxLength}
       aria-describedby={maxLength ? counterId : undefined}
       style={{
         width: "100%", padding: "12px 14px", borderRadius: "6px", border: `1px solid ${palette.border}`,
@@ -229,14 +231,25 @@ function TextArea({ value, onChange, placeholder, rows = 3, maxLength }) {
   );
 }
 
-function Input({ value, onChange, placeholder, type = "text" }) {
+function Input({ value, onChange, placeholder, type = "text", id, ariaLabel }) {
   return (
-    <input type={type} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
+    <input id={id} aria-label={ariaLabel} type={type} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
       style={{
         width: "100%", padding: "10px 14px", borderRadius: "6px", border: `1px solid ${palette.border}`,
         fontFamily: "'Source Serif 4', Georgia, serif", fontSize: "14px",
         background: palette.surface, color: palette.text, outline: "none", boxSizing: "border-box",
       }} />
+  );
+}
+
+// A visible label tied to its field: `children` is called with the id the field must use.
+function Field({ label, children }) {
+  const id = useId();
+  return (
+    <div>
+      <label htmlFor={id} style={labelStyle}>{label}</label>
+      {children(id)}
+    </div>
   );
 }
 
@@ -284,9 +297,10 @@ function NgoLogo({ src, name, size = 40 }) {
 
 // ─── Language Selector ───
 function LanguageSelector() {
-  const { lang, setLang } = useTranslation();
+  const { lang, setLang, t } = useTranslation();
   return (
     <select
+      aria-label={t.languageSelectLabel}
       value={lang}
       onChange={(e) => setLang(e.target.value)}
       style={{
@@ -417,7 +431,7 @@ function HomeView({ navigate, openLink }) {
           <div style={{ fontWeight: 700, fontSize: "16px", marginBottom: "8px" }}>{t.homeCandidateTitle}</div>
           <div style={{ fontSize: "13px", color: palette.textMuted, marginBottom: "12px" }}>{t.homeCandidateDesc}</div>
           <div style={{ display: "flex", gap: "8px" }}>
-            <Input value={tokenInput} onChange={setTokenInput} placeholder={t.homeCandidatePlaceholder} />
+            <Input value={tokenInput} onChange={setTokenInput} placeholder={t.homeCandidatePlaceholder} ariaLabel={t.homeCandidatePlaceholder} />
             <Button onClick={go} disabled={!tokenInput.trim()} style={{ flexShrink: 0 }}>{t.homeGo}</Button>
           </div>
         </Card>
@@ -776,7 +790,7 @@ function AdminView() {
         <h2 style={{ fontSize: "24px", fontWeight: 800, marginBottom: "8px" }}>{t.adminLoginTitle}</h2>
         <p style={{ color: palette.textMuted, marginBottom: "24px", fontSize: "14px" }}>{t.adminLoginDesc}</p>
         {error && <ErrorBanner message={error} />}
-        <Input value={adminSecret} onChange={setAdminSecret} placeholder={t.adminPasswordPlaceholder} type="password" />
+        <Input value={adminSecret} onChange={setAdminSecret} placeholder={t.adminPasswordPlaceholder} ariaLabel={t.adminPasswordPlaceholder} type="password" />
         <div style={{ marginTop: "12px" }}>
           <Button onClick={login} loading={loading} disabled={!adminSecret}>{t.adminLogin}</Button>
         </div>
@@ -895,6 +909,7 @@ function AdminView() {
                           ) : mergeTargets.length > 0 && !isEditing ? (
                             <select
                               value=""
+                              aria-label={t.adminMarkDuplicate}
                               onChange={(e) => e.target.value && setDuplicateOf(qs.id, q.id, e.target.value)}
                               style={{ marginTop: "8px", width: "100%", boxSizing: "border-box", fontSize: "12px", padding: "5px 6px", borderRadius: "4px", border: `1px solid ${palette.border}`, fontFamily: "inherit", background: palette.surface, color: palette.textMuted }}
                             >
@@ -912,6 +927,7 @@ function AdminView() {
                             value={editedStatement ?? q.statement}
                             onChange={(e) => setEditedStatement(qs.id, q.id, e.target.value)}
                             placeholder={t.adminEditQuestionPlaceholder}
+                            aria-label={t.adminEditQuestionLabel}
                             rows={2}
                             style={{ marginTop: "8px", width: "100%", boxSizing: "border-box", fontSize: "13px", padding: "6px 8px", borderRadius: "4px", border: `1px solid ${palette.border}`, resize: "vertical", fontFamily: "inherit" }}
                           />
@@ -921,6 +937,7 @@ function AdminView() {
                             value={qState.reason ?? ""}
                             onChange={(e) => setRejectionReason(qs.id, q.id, e.target.value)}
                             placeholder={t.adminRejectionReasonPlaceholder}
+                            aria-label={t.adminRejectionReasonLabel}
                             rows={2}
                             style={{ marginTop: "8px", width: "100%", boxSizing: "border-box", fontSize: "13px", padding: "6px 8px", borderRadius: "4px", border: `1px solid ${palette.border}`, resize: "vertical", fontFamily: "inherit" }}
                           />
@@ -965,6 +982,7 @@ function AdminView() {
                       value={newQuestionText[qs.id] ?? ""}
                       onChange={(e) => setNewQuestionText((prev) => ({ ...prev, [qs.id]: e.target.value }))}
                       placeholder={t.adminNewQuestionPlaceholder}
+                      aria-label={t.adminNewQuestionLabel}
                       rows={2}
                       style={{ flex: 1, fontSize: "13px", padding: "6px 8px", borderRadius: "4px", border: `1px solid ${palette.border}`, resize: "vertical", fontFamily: "inherit" }}
                     />
@@ -1009,7 +1027,7 @@ function AdminView() {
               const selected = mergeSelection.includes(q.id);
               return (
                 <div key={q.id} style={{ display: "flex", alignItems: "flex-start", gap: "10px", padding: "8px 0", borderBottom: `1px solid ${palette.border}` }}>
-                  <input type="checkbox" checked={selected} onChange={() => toggleMergeSelect(q.id)} style={{ marginTop: "3px", flexShrink: 0 }} />
+                  <input type="checkbox" aria-label={q.statement} checked={selected} onChange={() => toggleMergeSelect(q.id)} style={{ marginTop: "3px", flexShrink: 0 }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: "13px" }}>{q.statement}</div>
                     <div style={{ fontSize: "11px", color: palette.textLight }}>{t.adminMergeInSets} {q.setTitles.join(", ")}</div>
@@ -1078,7 +1096,7 @@ function AdminView() {
                       <span style={{ color: palette.textMuted }}> · {c.constituency} · {c.email || t.partyNoEmail} · {c.answerCount} {t.candidateAnswered}</span>
                       {c.email && <div style={{ fontSize: "12px", marginTop: "2px" }}>{emailStatus(c)}</div>}
                     </div>
-                    <CopyField value={candidateLink(c.token)} />
+                    <CopyField value={candidateLink(c.token)} label={t.adminCandidateLinkLabel(c.name)} />
                   </div>
                 ))}
                 {partyCandidates[p.id].length > 0 && (
@@ -1101,8 +1119,8 @@ function AdminView() {
         <Card style={{ marginTop: "16px" }}>
           <div style={{ fontSize: "14px", fontWeight: 600, marginBottom: "12px" }}>{t.adminAddParty}</div>
           <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-            <div style={{ flex: 1, minWidth: "180px" }}><Input value={newPartyName} onChange={setNewPartyName} placeholder={t.adminPartyNamePlaceholder} /></div>
-            <div style={{ flex: 1, minWidth: "180px" }}><Input value={newPartyEmail} onChange={setNewPartyEmail} placeholder={t.adminPartyEmailPlaceholder} type="email" /></div>
+            <div style={{ flex: 1, minWidth: "180px" }}><Input value={newPartyName} onChange={setNewPartyName} placeholder={t.adminPartyNamePlaceholder} ariaLabel={t.adminPartyNamePlaceholder} /></div>
+            <div style={{ flex: 1, minWidth: "180px" }}><Input value={newPartyEmail} onChange={setNewPartyEmail} placeholder={t.adminPartyEmailPlaceholder} ariaLabel={t.adminPartyEmailPlaceholder} type="email" /></div>
             <Button onClick={addParty} disabled={!newPartyName.trim()} loading={actionLoading === "new-party"}>{t.adminAdd}</Button>
           </div>
         </Card>
@@ -1119,6 +1137,7 @@ function NgoView() {
   const [logoUrl, setLogoUrl] = useState("");
   const [title, setTitle] = useState("");
   const [questions, setQuestions] = useState([""]);
+  const statementsLabelId = useId();
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -1222,36 +1241,32 @@ function NgoView() {
       {error && <ErrorBanner message={error} scrollIntoView />}
       <Card>
         <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-          <div>
-            <label style={{ fontSize: "13px", fontWeight: 600, display: "block", marginBottom: "6px" }}>{t.ngoOrgName}</label>
-            <Input value={ngoName} onChange={setNgoName} placeholder={t.ngoOrgNamePlaceholder} />
-          </div>
-          <div>
-            <label style={{ fontSize: "13px", fontWeight: 600, display: "block", marginBottom: "6px" }}>{t.ngoContactEmail}</label>
-            <Input value={ngoEmail} onChange={setNgoEmail} placeholder={t.ngoContactEmailPlaceholder} type="email" />
-          </div>
-          <div>
-            <label style={{ fontSize: "13px", fontWeight: 600, display: "block", marginBottom: "6px" }}>{t.ngoLogoUrl}</label>
-            <Input value={logoUrl} onChange={setLogoUrl} placeholder={t.ngoLogoUrlPlaceholder} />
+          <Field label={t.ngoOrgName}>{(id) => (
+            <Input id={id} value={ngoName} onChange={setNgoName} placeholder={t.ngoOrgNamePlaceholder} />
+          )}</Field>
+          <Field label={t.ngoContactEmail}>{(id) => (
+            <Input id={id} value={ngoEmail} onChange={setNgoEmail} placeholder={t.ngoContactEmailPlaceholder} type="email" />
+          )}</Field>
+          <Field label={t.ngoLogoUrl}>{(id) => <>
+            <Input id={id} value={logoUrl} onChange={setLogoUrl} placeholder={t.ngoLogoUrlPlaceholder} />
             {logoUrl && (
               <div style={{ marginTop: "8px", display: "flex", alignItems: "center", gap: "8px" }}>
                 <NgoLogo src={logoUrl} name={ngoName} size={36} />
                 <span style={{ fontSize: "12px", color: palette.textLight }}>{t.preview}</span>
               </div>
             )}
-          </div>
-          <div>
-            <label style={{ fontSize: "13px", fontWeight: 600, display: "block", marginBottom: "6px" }}>{t.ngoSetTitle}</label>
-            <Input value={title} onChange={setTitle} placeholder={t.ngoSetTitlePlaceholder} />
-          </div>
-          <div>
-            <label style={{ fontSize: "13px", fontWeight: 600, display: "block", marginBottom: "10px" }}>{t.ngoStatementsLabel} ({questions.filter((q) => q.trim()).length})</label>
+          </>}</Field>
+          <Field label={t.ngoSetTitle}>{(id) => (
+            <Input id={id} value={title} onChange={setTitle} placeholder={t.ngoSetTitlePlaceholder} />
+          )}</Field>
+          <div role="group" aria-labelledby={statementsLabelId}>
+            <div id={statementsLabelId} style={{ fontSize: "13px", fontWeight: 600, marginBottom: "10px" }}>{t.ngoStatementsLabel} ({questions.filter((q) => q.trim()).length})</div>
             {questions.map((q, i) => (
               <div key={i} style={{ display: "flex", gap: "8px", marginBottom: "8px", alignItems: "start" }}>
                 <span style={{ color: palette.textLight, fontSize: "13px", marginTop: "10px", minWidth: "20px" }}>{i + 1}.</span>
-                <div style={{ flex: 1 }}><TextArea value={q} onChange={(v) => updateQuestion(i, v)} placeholder={t.ngoStatementPlaceholder} rows={2} maxLength={500} /></div>
+                <div style={{ flex: 1 }}><TextArea value={q} onChange={(v) => updateQuestion(i, v)} placeholder={t.ngoStatementPlaceholder} ariaLabel={t.ngoStatementLabel(i + 1)} rows={2} maxLength={500} /></div>
                 {questions.length > 1 && (
-                  <button onClick={() => removeQuestion(i)} style={{ background: "none", border: "none", color: palette.textLight, cursor: "pointer", fontSize: "18px", marginTop: "8px" }}>×</button>
+                  <button onClick={() => removeQuestion(i)} aria-label={t.ngoRemoveStatementLabel(i + 1)} style={{ background: "none", border: "none", color: palette.textLight, cursor: "pointer", fontSize: "18px", marginTop: "8px" }}>×</button>
                 )}
               </div>
             ))}
@@ -1318,7 +1333,7 @@ function ViewCrashed() {
   );
 }
 
-function CopyField({ value }) {
+function CopyField({ value, label }) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   async function copy() {
@@ -1330,7 +1345,7 @@ function CopyField({ value }) {
   }
   return (
     <div style={{ display: "flex", gap: "8px" }}>
-      <input readOnly value={value} onFocus={(e) => e.target.select()} style={{ ...selectStyle, fontFamily: "monospace", fontSize: "12px" }} />
+      <input readOnly aria-label={label} value={value} onFocus={(e) => e.target.select()} style={{ ...selectStyle, fontFamily: "monospace", fontSize: "12px" }} />
       <Button variant="secondary" size="sm" onClick={copy} style={{ flexShrink: 0 }}>{copied ? t.copied : t.copy}</Button>
     </div>
   );
@@ -1341,35 +1356,30 @@ function ProfileFields({ profile, setField }) {
   const { t } = useTranslation();
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-      <div>
-        <label style={labelStyle}>{t.candidateFullName} *</label>
-        <Input value={profile.name} onChange={(v) => setField("name", v)} placeholder={t.candidateFullNamePlaceholder} />
-      </div>
-      <div>
-        <label style={labelStyle}>{t.candidateEmailLabel} *</label>
-        <Input value={profile.email} onChange={(v) => setField("email", v)} placeholder={t.candidateEmailPlaceholder} type="email" />
-      </div>
-      <div>
-        <label style={labelStyle}>{t.candidateConstituencyLabel} *</label>
-        <select value={profile.constituency} onChange={(e) => setField("constituency", e.target.value)} style={selectStyle}>
+      <Field label={`${t.candidateFullName} *`}>{(id) => (
+        <Input id={id} value={profile.name} onChange={(v) => setField("name", v)} placeholder={t.candidateFullNamePlaceholder} />
+      )}</Field>
+      <Field label={`${t.candidateEmailLabel} *`}>{(id) => (
+        <Input id={id} value={profile.email} onChange={(v) => setField("email", v)} placeholder={t.candidateEmailPlaceholder} type="email" />
+      )}</Field>
+      <Field label={`${t.candidateConstituencyLabel} *`}>{(id) => (
+        <select id={id} value={profile.constituency} onChange={(e) => setField("constituency", e.target.value)} style={selectStyle}>
           <option value="">{t.candidateConstituencyPlaceholder}</option>
           {FI_CONSTITUENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
-      </div>
-      <div>
-        <label style={labelStyle}>{t.candidatePhotoUrl}</label>
-        <Input value={profile.photoUrl} onChange={(v) => setField("photoUrl", v)} placeholder={t.candidatePhotoUrlPlaceholder} />
+      )}</Field>
+      <Field label={t.candidatePhotoUrl}>{(id) => <>
+        <Input id={id} value={profile.photoUrl} onChange={(v) => setField("photoUrl", v)} placeholder={t.candidatePhotoUrlPlaceholder} />
         {profile.photoUrl && (
           <div style={{ marginTop: "8px", display: "flex", alignItems: "center", gap: "10px" }}>
             <Avatar src={profile.photoUrl} name={profile.name} size={48} />
             <span style={{ fontSize: "12px", color: palette.textLight }}>{t.preview}</span>
           </div>
         )}
-      </div>
-      <div>
-        <label style={labelStyle}>{t.candidateBio}</label>
-        <TextArea value={profile.bio} onChange={(v) => setField("bio", v)} placeholder={t.candidateBioPlaceholder} rows={4} maxLength={1000} />
-      </div>
+      </>}</Field>
+      <Field label={t.candidateBio}>{(id) => (
+        <TextArea id={id} value={profile.bio} onChange={(v) => setField("bio", v)} placeholder={t.candidateBioPlaceholder} rows={4} maxLength={1000} />
+      )}</Field>
     </div>
   );
 }
@@ -1463,7 +1473,7 @@ function PartyView({ partyToken }) {
       <Card style={{ marginBottom: "24px" }}>
         <div style={{ fontSize: "14px", fontWeight: 700, marginBottom: "6px" }}>{t.partyRegistrationLinkTitle}</div>
         <p style={{ fontSize: "13px", color: palette.textMuted, margin: "0 0 12px", lineHeight: 1.6 }}>{t.partyRegistrationLinkDesc}</p>
-        <CopyField value={registrationLink(data.party.registrationToken)} />
+        <CopyField value={registrationLink(data.party.registrationToken)} label={t.partyRegistrationLinkTitle} />
         <div style={{ marginTop: "12px" }}>
           <Button variant="ghost" size="sm" onClick={rotate} loading={busy === "rotate"}>{t.partyRotateLink}</Button>
         </div>
@@ -1567,7 +1577,7 @@ function AnswerCard({ question: q, number, answer, setAnswer }) {
       </div>
       <ScaleInput value={answer?.value} onChange={(v) => setAnswer(q.id, "value", v)} />
       <div style={{ marginTop: "12px" }}>
-        <TextArea value={answer?.text || ""} onChange={(v) => setAnswer(q.id, "text", v)} placeholder={t.candidateExplainPlaceholder} rows={2} maxLength={500} />
+        <TextArea value={answer?.text || ""} onChange={(v) => setAnswer(q.id, "text", v)} placeholder={t.candidateExplainPlaceholder} ariaLabel={t.candidateExplainLabel(q.statement)} rows={2} maxLength={500} />
       </div>
     </Card>
   );
@@ -1730,7 +1740,7 @@ function CandidateView({ candidateToken, justRegistered, leaveGuardRef }) {
         <div style={{ padding: "16px 20px", borderRadius: "8px", background: palette.accentLight, border: "1px solid #C5D9CC", marginBottom: "24px" }}>
           <div style={{ fontSize: "14px", fontWeight: 700, marginBottom: "6px" }}>{t.candidateLinkTitle}</div>
           <p style={{ fontSize: "13px", color: palette.text, margin: "0 0 12px", lineHeight: 1.6 }}>{t.candidateLinkDesc}</p>
-          <CopyField value={candidateLink(candidateToken)} />
+          <CopyField value={candidateLink(candidateToken)} label={t.candidateLinkTitle} />
         </div>
       )}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", marginBottom: "24px", flexWrap: "wrap", gap: "12px" }}>
@@ -1821,11 +1831,12 @@ function revokeConsent() {
 // The voter's optional constituency filter on the question set selection step.
 function ConstituencyFilter({ value, onChange }) {
   const { t } = useTranslation();
+  const id = useId();
   return (
     <div style={{ marginBottom: "24px" }}>
-      <label style={{ fontSize: "13px", fontWeight: 600, display: "block", marginBottom: "6px" }}>{t.voterConstituencyLabel}</label>
-      <p style={{ fontSize: "13px", color: palette.textMuted, marginBottom: "8px", marginTop: 0 }}>{t.voterConstituencyDesc}</p>
-      <select value={value} onChange={(e) => onChange(e.target.value)} style={selectStyle}>
+      <label htmlFor={id} style={labelStyle}>{t.voterConstituencyLabel}</label>
+      <p id={`${id}-desc`} style={{ fontSize: "13px", color: palette.textMuted, marginBottom: "8px", marginTop: 0 }}>{t.voterConstituencyDesc}</p>
+      <select id={id} aria-describedby={`${id}-desc`} value={value} onChange={(e) => onChange(e.target.value)} style={selectStyle}>
         <option value="">{t.voterConstituencyAll}</option>
         {FI_CONSTITUENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
       </select>

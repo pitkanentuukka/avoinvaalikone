@@ -1,5 +1,13 @@
 const translations = {
   fi: {
+    languageSelectLabel: "Kieli",
+    ngoStatementLabel: (n) => `Väittämä ${n}`,
+    ngoRemoveStatementLabel: (n) => `Poista väittämä ${n}`,
+    candidateExplainLabel: (statement) => `Perustelu väittämään: ${statement}`,
+    adminCandidateLinkLabel: (name) => `Ehdokkaan ${name} henkilökohtainen linkki`,
+    adminEditQuestionLabel: "Muokattu väittämä",
+    adminRejectionReasonLabel: "Hylkäämisen syy",
+    adminNewQuestionLabel: "Uusi väittämä",
     // Scale labels
     stronglyDisagree: "Täysin eri mieltä",
     disagree: "Eri mieltä",
@@ -253,6 +261,14 @@ const translations = {
   },
 
   en: {
+    languageSelectLabel: "Language",
+    ngoStatementLabel: (n) => `Statement ${n}`,
+    ngoRemoveStatementLabel: (n) => `Remove statement ${n}`,
+    candidateExplainLabel: (statement) => `Explanation for: ${statement}`,
+    adminCandidateLinkLabel: (name) => `Personal link for ${name}`,
+    adminEditQuestionLabel: "Edited statement",
+    adminRejectionReasonLabel: "Reason for rejection",
+    adminNewQuestionLabel: "New statement",
     // Scale labels
     stronglyDisagree: "Strongly disagree",
     disagree: "Disagree",
