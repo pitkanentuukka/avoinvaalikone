@@ -242,6 +242,10 @@ A *question set* is one organization's themed bundle of statements — the core 
 }
 ```
 
+Saving answers is all-or-nothing: an invalid `value` (integer 0–4) or an `explanation` over 500 characters rejects the whole request with a 400 naming the question(s). Answers for questions that no longer exist (merged or deleted) are skipped, and the response lists their keys: `{ "saved": 2, "skipped": ["question-uuid"] }`.
+
+Question UUID keys must be **lowercase**, as the API returns them. An uppercase key doesn't match the database ID, so that answer is reported in `skipped` even though the question exists. The frontend always sends lowercase. Direct API clients must too, until keys are normalised server-side.
+
 ---
 
 ### Voter Match
