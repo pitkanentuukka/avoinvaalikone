@@ -341,11 +341,11 @@ Integration tests use `supertest` and a mock database helper. Unit tests cover a
 
 | Scope | Limit | Window |
 |-------|-------|--------|
-| Admin endpoints | 30 req | 15 min |
+| Admin endpoints (requests without a valid admin secret) | 30 req | 15 min |
 | NGO submissions | 20 req | 15 min |
 | Voter match | 60 req | 1 min |
 
-Rate limiting is skipped in development (`NODE_ENV=development`) for admin endpoints.
+Rate limiting is skipped in development (`NODE_ENV=development`) for admin endpoints. The admin limit only counts requests that lack a valid `ADMIN_SECRET`, so it slows down guessing the secret without throttling a logged-in admin.
 
 ---
 

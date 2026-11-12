@@ -58,7 +58,7 @@ docker compose down                       # Stop all services
   - `src/routes/voter.js` — match computation: weighted similarity scoring (answers 0–4 scale, weights 0–3)
 
 **Rate limiting** (skipped in development for admin endpoints):
-- Admin: 30 req / 15 min
+- Admin: 30 req / 15 min, counting only requests without a valid `ADMIN_SECRET` (brute-force protection; an authenticated admin is never throttled)
 - NGO submissions: 20 req / 15 min
 - Voter match: 60 req / 1 min
 
