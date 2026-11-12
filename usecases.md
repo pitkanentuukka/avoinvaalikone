@@ -239,7 +239,7 @@ Admins manage parties and moderate question sets. All admin endpoints require `A
 - Duplicate party name -> 409 (unique constraint on `name`)
 - Token is auto-generated and unique
 - Missing or invalid admin token -> 401 / 403
-- Rate limited: 30 requests per 15 minutes (production only)
+- Rate limited: 30 requests per 15 minutes without a valid admin token (production only)
 
 ### UC-ADMIN-3: Delete a Party
 
@@ -327,7 +327,7 @@ These apply across all user categories and should be tested as part of E2E scena
 
 ### CC-2: Rate Limiting
 
-- Admin endpoints: 30 req / 15 min (skipped in non-production)
+- Admin endpoints: 30 req / 15 min, counting only requests without a valid admin token (skipped in non-production)
 - NGO submission: 20 req / 15 min
 - Voter match: 60 req / 1 min
 - Exceeding limits -> 429 with Finnish error message
