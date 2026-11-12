@@ -101,10 +101,11 @@ vaalikone/
 │   └── seed.js               # Sample data
 ├── tests/
 │   ├── routes/               # Integration tests (supertest)
-│   └── unit/                 # Unit tests (auth, validation)
+│   └── unit/                 # Unit tests (auth, validation, frontend API client)
 ├── vaalikone-frontend/
 │   ├── src/
-│   │   ├── App.jsx           # Entire SPA — views, components, API client
+│   │   ├── App.jsx           # Entire SPA — views, components
+│   │   ├── api.js            # API client
 │   │   └── main.jsx
 │   ├── Dockerfile            # Multi-stage Nginx build
 │   └── nginx.conf
@@ -261,13 +262,15 @@ Question UUID keys must be **lowercase**, as the API returns them. An uppercase 
 {
   "answers": { "question-uuid": 4 },
   "weights": { "question-uuid": 3 },
-  "questionSetIds": ["set-uuid"]
+  "questionSetIds": ["set-uuid"],
+  "sessionId": "session-uuid"
 }
 ```
 
 - `answers` — voter values 0–4 per question UUID (required)
 - `weights` — importance weights 0–3 per question UUID (optional, default 1)
 - `questionSetIds` — restrict to specific sets (optional). Only the voter's answers to questions in these sets are scored.
+- `sessionId` — key for the anonymous research rows (optional; generated server-side if absent). Send a fresh UUID per submission and resend the same one when retrying, so a retry after a lost response stores no second session.
 
 Question UUIDs in `answers` and `weights` must be **lowercase**, as the API returns them, and direct clients should always send `questionSetIds`. See [docs/direct-api-caveats.md](docs/direct-api-caveats.md) for what happens otherwise. That file lists all API behaviour the frontend never triggers but direct API clients can.
 
@@ -284,7 +287,7 @@ The weighted similarities are averaged over all of the voter's questions and ret
 
 ## Frontend
 
-The entire React SPA lives in [vaalikone-frontend/src/App.jsx](vaalikone-frontend/src/App.jsx). View routing is URL-param based (`?view=...`).
+The entire React SPA lives in [vaalikone-frontend/src/App.jsx](vaalikone-frontend/src/App.jsx), apart from the API client in [vaalikone-frontend/src/api.js](vaalikone-frontend/src/api.js). View routing is URL-param based (`?view=...`).
 
 | View | URL | Purpose |
 |------|-----|---------|
@@ -298,7 +301,7 @@ The entire React SPA lives in [vaalikone-frontend/src/App.jsx](vaalikone-fronten
 | Registration | `?register=…` | Candidate self-registration |
 | Candidate | `?candidateToken=…` | Candidate edits own profile and answers |
 
-**API client:** All calls go through `apiFetch()` with automatic snake_case ↔ camelCase conversion. The `API_BASE` constant at the top of `App.jsx` points to `http://localhost:3000/api` — update this for non-local deployments.
+**API client:** All calls go through `apiFetch()` with automatic snake_case ↔ camelCase conversion. It retries once on `502/503/504` or a network error, but only for `GET`s and requests that opt in with `retry: true` (the match POST). The `API_BASE` constant at the top of `App.jsx` points to `http://localhost:3000/api` — update this for non-local deployments.
 
 **Design:** Source Serif 4 font, forest-green accent (`#2D5A3D`), soft neutral backgrounds. Responsive and mobile-friendly.
 
@@ -333,7 +336,7 @@ npm run test:watch      # Watch mode
 npm run test:coverage   # Coverage report
 ```
 
-Integration tests use `supertest` and a mock database helper. Unit tests cover auth middleware and validation logic.
+Integration tests use `supertest` and a mock database helper. Unit tests cover auth middleware, validation logic and the frontend API client. `npm test` runs Jest with `--experimental-vm-modules` so tests can `import()` the frontend's ES modules.
 
 ---
 

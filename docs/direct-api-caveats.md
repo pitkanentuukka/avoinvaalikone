@@ -60,3 +60,18 @@ the one window where the frontend can hit this.
 
 **Fix:** score only questions in at least one approved, visible set, whether or
 not `questionSetIds` is given.
+
+## A reused match `sessionId` merges submissions
+
+**Endpoint:** `POST /api/voter/match` (`sessionId`)
+
+The research insert is `ON CONFLICT DO NOTHING` on `(session_id, question_id)`.
+A client that sends the same `sessionId` with different answers gets one
+research session: answers to questions already stored under that id are
+silently dropped, and answers to new questions are added to it.
+
+**Why the frontend is unaffected:** it generates a fresh `sessionId` for every
+submission and reuses it only for the one retry of that same request.
+
+**Fix:** none needed for retries. If direct clients need it, reject a
+`sessionId` that already has rows with different answers.

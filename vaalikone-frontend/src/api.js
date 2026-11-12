@@ -27,8 +27,13 @@ export function createApi({
   fetch: fetchImpl = (...args) => globalThis.fetch(...args),
   retryDelayMs = 1000,
 }) {
+  // One retry on transient upstream errors (rolling deploy restarting a
+  // replica), for GETs and for requests that pass `retry: true` because a
+  // repeat is harmless. Any other request may already have taken effect when
+  // its response was lost, so a retry could repeat its side effect.
   async function apiFetch(path, options = {}) {
-    const { body, adminSecret, ...rest } = options;
+    const { body, adminSecret, retry, ...rest } = options;
+    const retryable = retry ?? (rest.method ?? "GET").toUpperCase() === "GET";
     const headers = { "Content-Type": "application/json", ...rest.headers };
     if (adminSecret) headers["Authorization"] = `Bearer ${adminSecret}`;
     const doFetch = () =>
@@ -40,16 +45,12 @@ export function createApi({
     let res;
     try {
       res = await doFetch();
-      // One retry on transient upstream errors (rolling deploy restarting a
-      // replica). Safe for the match POST too: its insert is ON CONFLICT DO
-      // NOTHING, so a duplicate submission is a no-op server-side.
-      if ([502, 503, 504].includes(res.status)) {
-        await new Promise((r) => setTimeout(r, retryDelayMs));
-        res = await doFetch();
-      }
-    } catch {
+    } catch (err) {
+      if (!retryable) throw err;
+    }
+    if (retryable && (!res || [502, 503, 504].includes(res.status))) {
       await new Promise((r) => setTimeout(r, retryDelayMs));
-      res = await doFetch();
+      res = await doFetch(); // a failure here is final: at most one retry
     }
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: "Server error" }));
@@ -66,7 +67,20 @@ export function createApi({
     getCandidates: () => apiFetch("/candidates"),
     getCandidate: (id) => apiFetch(`/candidates/${id}`),
     submitQuestionSet: (data) => apiFetch("/question-sets", { method: "POST", body: data }),
-    voterMatch: (data) => apiFetch("/voter/match", { method: "POST", body: data }),
+    // Retryable because each submission gets its own sessionId and the retry
+    // reuses it: the research insert is ON CONFLICT DO NOTHING on
+    // (session_id, question_id), so a retry after a lost response stores
+    // nothing new. crypto.randomUUID is missing outside secure contexts
+    // (plain-HTTP non-localhost); the server then picks the id and the
+    // request isn't retried.
+    voterMatch: (data) => {
+      const sessionId = globalThis.crypto?.randomUUID?.();
+      return apiFetch("/voter/match", {
+        method: "POST",
+        body: { ...data, sessionId },
+        retry: Boolean(sessionId),
+      });
+    },
 
     // Party-token gated (secretary's management access)
     getPartyOverview: (token) => apiFetch(`/candidates/party/${token}`),
