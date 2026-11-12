@@ -46,7 +46,8 @@ function rememberedLink(storage) {
 // any remembered one. Otherwise the remembered one, but only on a reload
 // (`navigationType`, from the Navigation Timing API): sessionStorage outlives
 // visits to other sites in the same tab, so on a shared computer the next
-// person to type the address would land in someone else's portal.
+// person to type the address would land in someone else's portal. Back and
+// Forward (and reopened tabs) are excluded on purpose for the same reason.
 export function readInitialLink(search, storage, navigationType) {
   const link = tokenLinkFromParams(new URLSearchParams(search));
   if (!link && navigationType === "reload") return rememberedLink(storage);
