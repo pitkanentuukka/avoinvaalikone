@@ -159,6 +159,48 @@ describe("POST /api/question-sets", () => {
     expect(client.release).toHaveBeenCalled();
   });
 
+  test("statement over 500 characters → 400 naming it, nothing created", async () => {
+    const client = buildMockClient();
+    const long = "Pitkä väittämä " + "a".repeat(500);
+    const res = await request(app)
+      .post("/api/question-sets")
+      .send({ ngoName: "TestiJärjestö", title: "Sarja", questions: ["Väittämä 1", long] });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/liian pitkä/i);
+    expect(res.body.error).toContain("Pitkä väittämä");
+    expect(res.body.error).not.toContain("Väittämä 1");
+    expect(client.query).not.toHaveBeenCalled();
+    expect(client.release).toHaveBeenCalled();
+  });
+
+  test("statement of exactly 500 characters → 201", async () => {
+    const client = buildMockClient();
+    const qs = { id: VALID_UUID, ngo_name: "TestiJärjestö", title: "Sarja", status: "pending" };
+    const stmt = "a".repeat(500);
+    client.query
+      .mockResolvedValueOnce({}) // BEGIN
+      .mockResolvedValueOnce({ rows: [qs] }) // INSERT question_set
+      .mockResolvedValueOnce({ rows: [{ id: "q1", statement: stmt }] }) // INSERT question
+      .mockResolvedValueOnce({}) // INSERT question_set_questions
+      .mockResolvedValueOnce({}); // COMMIT
+
+    const res = await request(app)
+      .post("/api/question-sets")
+      .send({ ngoName: "TestiJärjestö", title: "Sarja", questions: [stmt] });
+    expect(res.status).toBe(201);
+    expect(res.body.questions).toHaveLength(1);
+  });
+
+  test("no non-empty statements → 400, no empty question set created", async () => {
+    const client = buildMockClient();
+    const res = await request(app)
+      .post("/api/question-sets")
+      .send({ ngoName: "TestiJärjestö", title: "Sarja", questions: ["   ", ""] });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/väittämä/i);
+    expect(client.query).not.toHaveBeenCalled();
+  });
+
   test("DB error mid-transaction → ROLLBACK called and client.release() called", async () => {
     const client = buildMockClient();
     const dbErr = new Error("DB failure");

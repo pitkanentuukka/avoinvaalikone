@@ -370,6 +370,85 @@ describe("PUT /api/candidates/me/:candidateToken/answers", () => {
     expect(res.body).toEqual({ saved: 0 });
   });
 
+  test("explanation over 500 characters → 400 naming the question, nothing saved", async () => {
+    db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
+    const client = buildMockClient();
+    client.query.mockResolvedValueOnce({
+      rows: [
+        { id: QUESTION_ID, statement: "Ydinvoimaa on lisättävä" },
+        { id: QUESTION_ID2, statement: "Bensaveroa on laskettava" },
+      ],
+    });
+
+    const res = await request(app)
+      .put(url)
+      .send({
+        answers: {
+          [QUESTION_ID]: { value: 2, explanation: "a".repeat(501) },
+          [QUESTION_ID2]: { value: 4, explanation: "Lyhyt" },
+        },
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/liian pitkä/i);
+    expect(res.body.error).toContain("Ydinvoimaa on lisättävä");
+    expect(res.body.error).not.toContain("Bensaveroa");
+    // The whole save is rejected: no transaction, no upserts.
+    expect(client.query).toHaveBeenCalledTimes(1);
+    expect(client.release).toHaveBeenCalled();
+  });
+
+  test("explanation of exactly 500 characters is saved", async () => {
+    db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
+    const client = buildMockClient();
+    client.query
+      .mockResolvedValueOnce({ rows: [{ id: QUESTION_ID, statement: "Ydinvoimaa on lisättävä" }] })
+      .mockResolvedValueOnce({}) // BEGIN
+      .mockResolvedValueOnce({}) // UPSERT
+      .mockResolvedValueOnce({}) // UPDATE timestamp
+      .mockResolvedValueOnce({}); // COMMIT
+
+    const res = await request(app)
+      .put(url)
+      .send({ answers: { [QUESTION_ID]: { value: 2, explanation: "a".repeat(500) } } });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ saved: 1 });
+  });
+
+  test.each([5, -1, "abc", null])("invalid value %p → 400 naming the question, nothing saved", async (value) => {
+    db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
+    const client = buildMockClient();
+    client.query.mockResolvedValueOnce({
+      rows: [
+        { id: QUESTION_ID, statement: "Ydinvoimaa on lisättävä" },
+        { id: QUESTION_ID2, statement: "Bensaveroa on laskettava" },
+      ],
+    });
+
+    const res = await request(app)
+      .put(url)
+      .send({ answers: { [QUESTION_ID]: { value: 3 }, [QUESTION_ID2]: { value } } });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/virheellinen/i);
+    expect(res.body.error).toContain("Bensaveroa on laskettava");
+    expect(res.body.error).not.toContain("Ydinvoimaa");
+    expect(client.query).toHaveBeenCalledTimes(1);
+    expect(client.release).toHaveBeenCalled();
+  });
+
+  test("long question statements are shortened in the error message", async () => {
+    db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
+    const client = buildMockClient();
+    const statement = "Väittämä ".repeat(50).trim();
+    client.query.mockResolvedValueOnce({ rows: [{ id: QUESTION_ID, statement }] });
+
+    const res = await request(app)
+      .put(url)
+      .send({ answers: { [QUESTION_ID]: { value: 2, explanation: "a".repeat(501) } } });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain(statement.slice(0, 40));
+    expect(res.body.error).not.toContain(statement);
+  });
+
   test("DB error → ROLLBACK called and client.release() still called", async () => {
     db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
     const client = buildMockClient();
