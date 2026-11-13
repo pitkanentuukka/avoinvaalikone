@@ -35,3 +35,24 @@ describe("docker-compose.yml backend environment", () => {
     );
   });
 });
+
+// log_min_duration_statement logs each slow statement with its bind
+// parameters by default, and the token lookups in src/middleware/auth.js bind
+// the token: a slow one (election-night load) would write a working bearer
+// secret to the db container log (issue #36).
+describe("docker-compose.yml db command", () => {
+  function dbSettings() {
+    const text = fs.readFileSync(path.join(__dirname, "../../docker-compose.yml"), "utf8");
+    const db = text.slice(text.search(/^ {2}db:\s*$/m));
+    const command = db.slice(0, db.search(/^ {4}environment:/m));
+    return Object.fromEntries([...command.matchAll(/"-c",\s*"([a-z_]+)=([^"]*)"/g)].map((m) => [m[1], m[2]]));
+  }
+
+  test("logs slow statements (parser sanity check)", () => {
+    expect(dbSettings().log_min_duration_statement).toBe("250");
+  });
+
+  test("leaves bind parameters (tokens) out of the slow-statement log", () => {
+    expect(dbSettings().log_parameter_max_length).toBe("0");
+  });
+});

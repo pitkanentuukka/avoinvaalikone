@@ -13,13 +13,16 @@ services:
     container_name: vaalikone-db
     restart: unless-stopped
     # Modest tuning for the read-mostly hot dataset; log_min_duration_statement
-    # surfaces slow queries in the container logs.
+    # surfaces slow queries in the container logs. log_parameter_max_length=0
+    # keeps their bind parameters out: the token lookups bind party,
+    # registration and candidate tokens, which are bearer secrets (issue #36).
     command:
       [
         "postgres",
         "-c", "shared_buffers=256MB",
         "-c", "effective_cache_size=768MB",
         "-c", "log_min_duration_statement=250",
+        "-c", "log_parameter_max_length=0",
       ]
     environment:
       POSTGRES_USER: vaalikone

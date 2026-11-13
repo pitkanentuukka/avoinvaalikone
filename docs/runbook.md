@@ -28,6 +28,7 @@ the workflow's "Build & restart services" step with an earlier checkout.
 | Slow `/api/*` GETs + high DB load | Edge cache not serving | `scripts/verify-edge-cache.sh` — if DYNAMIC, recreate the Cloudflare Cache Rule (docs/scaling.md) |
 | `statement timeout` errors | A query hit `PG_STATEMENT_TIMEOUT_MS` (10 s) | Find and fix the query; the timeout is protective, don't just raise it |
 | Backend restart loops | Migration failure (runs on every start) | `docker compose logs backend`, fix the migration, redeploy |
+| 502/504 from the site | A proxy can't reach the next hop | Caddy and nginx don't log upstream errors (they'd log tokens, #36). `docker compose ps` for a down container; `docker compose logs frontend`: `upstream_status=502` with no `urt` = a backend refused or is gone, 504 / a high `urt` = hung. No line there = Caddy couldn't reach the frontend |
 
 Health/load at a glance: `curl -s -H "Authorization: Bearer $ADMIN_SECRET" https://avoinvaalikone.fi/api/health`
 — pool counters (`waiting > 0` = saturation; only returned for the admin
