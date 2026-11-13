@@ -131,3 +131,13 @@ describe("the URI the access log records", () => {
     expect(evaluate(input)[uriVar]).toBe(input);
   });
 });
+
+// nginx's error lines carry the raw request line ("request: GET
+// /api/candidates/me/<token> …") and the upstream URL, in a format that can't
+// be changed. A backend restart writes one for every proxied request in
+// flight, so only levels above "error" may be logged.
+test("the error log doesn't record request-level errors", () => {
+  const m = conf.match(/error_log\s+\S+\s+(\w+)\s*;/);
+  expect(m).not.toBeNull();
+  expect(["crit", "alert", "emerg"]).toContain(m[1]);
+});
