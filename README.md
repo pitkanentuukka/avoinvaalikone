@@ -346,9 +346,9 @@ Integration tests use `supertest` and a mock database helper. Unit tests cover a
 |-------|-------|--------|
 | Admin endpoints (requests without a valid admin secret) | 30 req | 15 min |
 | NGO submissions | 20 req | 15 min |
-| Voter match | 60 req | 1 min |
+| Voter match | 300 req (`RATE_LIMIT_MATCH_MAX`) | 1 min |
 
-Rate limiting is skipped in development (`NODE_ENV=development`) for admin endpoints. The admin limit only counts requests that lack a valid `ADMIN_SECRET`, so it slows down guessing the secret without throttling a logged-in admin.
+All three limits apply only when `NODE_ENV=production`; otherwise they are skipped. The voter match default leaves room for many voters behind one carrier CGNAT address; raise `RATE_LIMIT_MATCH_MAX` if they hit 429s, or for load tests (see `docs/scaling.md`). The admin limit only counts requests that lack a valid `ADMIN_SECRET`, so it slows down guessing the secret without throttling a logged-in admin.
 
 ---
 
