@@ -5,18 +5,25 @@
 const STORAGE_KEY = "vaalikone_link";
 const TOKEN_VIEWS = ["candidate", "register", "party"];
 
+// Real tokens are hex, so whitespace in one is a pasting or line-wrapping
+// accident. The browser used to drop tabs and newlines from the request path;
+// now that tokens are encoded (api.js) they would reach the server and miss.
+export function cleanToken(token) {
+  return token ? token.replace(/\s+/g, "") : token;
+}
+
 // Map magic-link query params to the view they open. Candidate links win over
 // the others so an old link carrying several params lands somewhere sensible.
 export function tokenLinkFromParams(params) {
-  const candidateToken = params.get("candidateToken");
+  const candidateToken = cleanToken(params.get("candidateToken"));
   if (candidateToken) return { view: "candidate", token: candidateToken };
   // Answering links sent before personal links existed
   // (?view=candidate&partyToken=…&candidateId=…). They carry the party token,
   // which now opens the secretary's portal — never open it from one of these.
   if (params.get("candidateId")) return { view: "legacy", token: null };
-  const registrationToken = params.get("register");
+  const registrationToken = cleanToken(params.get("register"));
   if (registrationToken) return { view: "register", token: registrationToken };
-  const partyToken = params.get("partyToken");
+  const partyToken = cleanToken(params.get("partyToken"));
   if (partyToken) return { view: "party", token: partyToken };
   return null;
 }

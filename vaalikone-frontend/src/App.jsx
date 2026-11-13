@@ -3,7 +3,7 @@ import { marked } from "marked";
 import * as Sentry from "@sentry/react";
 import translations from "./translations";
 import { createApi, isTransientError } from "./api";
-import { readInitialLink, rememberLink, tokenLinkFromParams } from "./tokenLinks";
+import { cleanToken, readInitialLink, rememberLink, tokenLinkFromParams } from "./tokenLinks";
 import voterGuideContent from "./guides/voter-guide.md?raw";
 import candidateGuideContent from "./guides/candidate-guide.md?raw";
 import adminGuideContent from "./guides/admin-guide.md?raw";
@@ -2267,7 +2267,7 @@ function tokenLinkFromInput(value) {
       if (link) return link;
     } catch { /* not a URL — fall through to a bare token */ }
   }
-  return { view: "party", token: text };
+  return { view: "party", token: cleanToken(text) };
 }
 
 // Null where storage is blocked; even reading the property can throw then.

@@ -27,7 +27,7 @@ const _toSnake = (data) => mapKeys(data, camelToSnake);
 //
 // Encoding isn't enough for dot segments: `.` and `..` survive it, browsers
 // resolve them even as %2E, and nginx picks its location after decoding %2F,
-// so `../..` arrives as `/` and gets index.html. An empty value merges two
+// so enough `..` parts climb out of /api/ and get index.html. An empty value merges two
 // segments. No real token or id is any of these, so such a value (or one that
 // can't be encoded, a lone surrogate) gives null and apiFetch refuses it as an
 // invalid link. Returning null rather than throwing keeps the refusal a

@@ -200,11 +200,11 @@ describe("path parameters", () => {
     ["saveOwnProfile", (api, t) => api.saveOwnProfile(t, {}, {}), "/api/candidates/me/T"],
   ];
 
-  test.each(tokenCalls)("%s sends # and %% in the token encoded", async (_, call, expected) => {
+  test.each(tokenCalls)("%s sends #, %%, / and \\ in the token encoded", async (_, call, expected) => {
     const { api, fetch } = apiWith(jsonResponse(404, {}));
-    await call(api, "a#b%zz/c?d").catch(() => {});
+    await call(api, "a#b%zz/c?d\\e").catch(() => {});
     expect(fetch).toHaveBeenCalledTimes(1);
-    expect(sentPath(fetch)).toBe(expected.replace("T", "a%23b%25zz%2Fc%3Fd"));
+    expect(sentPath(fetch)).toBe(expected.replace("T", "a%23b%25zz%2Fc%3Fd%5Ce"));
   });
 
   // encodeURIComponent leaves dots alone, and browsers resolve %2E%2E as ..
