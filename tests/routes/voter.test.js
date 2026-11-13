@@ -294,23 +294,26 @@ describe("POST /api/voter/match — algorithm", () => {
     expect(params).toEqual([[VALID_UUID, VALID_UUID2], [SET_ID]]);
     expect(res.body.results[0].match).toBe(100);
     expect(res.body.questionCount).toBe(1);
+
+    // A research session is the questionnaire that was matched: the answer to
+    // the deselected set is not recorded under it (issue #23).
+    const insertCall = db.query.mock.calls.find(([q]) => /INSERT INTO voter_responses/.test(q));
+    expect(insertCall[1].slice(1)).toEqual([VALID_UUID, 2, 1]);
   });
 
-  test("every answer in a deselected set → nothing scored, empty results with questionCount 0", async () => {
+  test("every answer in a deselected set → nothing scored or recorded, sessionId null", async () => {
     db.query.mockResolvedValueOnce({ rows: [{ id: VALID_UUID, in_selected_sets: false }] });
     db.query.mockResolvedValueOnce({ rows: [] }); // no candidate answers for an empty question list
-    db.query.mockResolvedValueOnce({ rows: [] }); // voter_responses INSERT
+    db.query.mockResolvedValueOnce({ rows: [] }); // must stay unused: no voter_responses INSERT
 
     const res = await request(app)
       .post("/api/voter/match")
       .send({ answers: { [VALID_UUID]: 2 }, questionSetIds: [VALID_UUID2] });
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ sessionId: expect.stringMatching(UUID_RE), questionCount: 0, results: [] });
-    expect(db.query.mock.calls[1][1]).toEqual([[]]);
-    // The voter still answered the question, so it is recorded for research
-    // like any other answer outside the selected sets.
-    expect(db.query.mock.calls[2][0]).toMatch(/INSERT INTO voter_responses/);
-    expect(db.query.mock.calls[2][1].slice(1)).toEqual([VALID_UUID, 2, 1]);
+    expect(res.body).toEqual({ sessionId: null, questionCount: 0, results: [] });
+    // None of the answers were part of the match, so there is no session to
+    // record (issue #23).
+    expect(db.query.mock.calls.some(([q]) => /INSERT INTO voter_responses/.test(q))).toBe(false);
   });
 
   // The DB hands back lowercase IDs, so an uppercase answer key finds no value
@@ -331,6 +334,11 @@ describe("POST /api/voter/match — algorithm", () => {
     expect(res.status).toBe(200);
     expect(res.body.questionCount).toBe(1);
     expect(res.body.results[0]).toMatchObject({ match: 100, answeredCount: 1 });
+
+    // The unread key has no value, so it is not recorded either; it used to
+    // reach the insert as NaN and make the whole insert fail.
+    const insertCall = db.query.mock.calls.find(([q]) => /INSERT INTO voter_responses/.test(q));
+    expect(insertCall[1].slice(1)).toEqual([VALID_UUID, 2, 1]);
   });
 });
 
