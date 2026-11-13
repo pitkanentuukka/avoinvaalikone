@@ -749,8 +749,9 @@ describe("PUT /api/candidates/me/:candidateToken/answers", () => {
   // A question deleted or merged between the existence check and the upsert
   // must end up in `skipped`, not a foreign-key violation (#16): the check runs
   // inside the transaction and key-share locks the rows, so a concurrent delete
-  // waits for the save. The lock is taken in id order, the same order the merge
-  // endpoint locks in, so the two can't deadlock.
+  // waits for the save. The lock is taken in id order, the same order every
+  // question delete path locks in (merge, reject, set and link removal), so
+  // they can't deadlock.
   test("existence check runs inside the transaction and locks the questions in id order", async () => {
     db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
     const client = buildMockClient();
