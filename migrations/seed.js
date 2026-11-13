@@ -6,9 +6,10 @@ const { begin, commit, rollback } = require("../src/db/transaction");
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
 async function seed() {
-  const client = await pool.connect();
+  let client;
 
   try {
+    client = await pool.connect();
     await begin(client);
 
     // ─── Parties ───
@@ -158,9 +159,11 @@ async function seed() {
   } catch (err) {
     await rollback(client);
     console.error("✗ Seed failed:", err.message);
-    process.exit(1);
+    // Not process.exit(1): that would end the process before `finally`
+    // releases the client and closes the pool.
+    process.exitCode = 1;
   } finally {
-    client.release();
+    if (client) client.release();
     await pool.end();
   }
 }

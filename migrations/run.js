@@ -55,7 +55,10 @@ async function migrate() {
     }
   } catch (err) {
     console.error("✗ Migration failed:", err.message);
-    process.exit(1);
+    // Not process.exit(1): that would end the process before `finally`
+    // unlocks, releases the client and closes the pool. The non-zero exit
+    // code still stops the Dockerfile's `run.js && exec node src/index.js`.
+    process.exitCode = 1;
   } finally {
     if (client) {
       await client
