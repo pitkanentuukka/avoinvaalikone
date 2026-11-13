@@ -332,7 +332,8 @@ async function checkAnswers(client, answers) {
   // FOR KEY SHARE makes a concurrent delete or merge wait for this save, so
   // a question can't vanish between this check and the upsert. Every admin
   // path that deletes questions locks them in id order first (lockQuestions
-  // in questionSets.js), so locking in the same order can't deadlock.
+  // or deleteOrphanQuestions in questionSets.js), so locking in the same
+  // order can't deadlock.
   const ids = Object.keys(answers).filter(isValidUUID);
   const { rows: existingRows } = ids.length
     ? await client.query(
