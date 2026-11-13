@@ -1,7 +1,8 @@
 jest.mock("../../src/db/pool");
 jest.mock("../../src/email");
-// Force the in-memory store even if .env sets REDIS_URL: Redis counters would
-// survive between runs and fail open when Redis is down.
+// Keep the in-memory store even if REDIS_URL is set (tests/setupEnv.js blanks
+// it): Redis counters would survive between runs and fail open when Redis is
+// down.
 jest.mock("../../src/redis", () => null);
 
 const request = require("supertest");
