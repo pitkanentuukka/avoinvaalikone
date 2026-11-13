@@ -203,6 +203,25 @@ describe("POST /api/question-sets", () => {
     expect(res.body.questions).toHaveLength(1);
   });
 
+  test.each([null, ""])("ngoEmail and logoUrl %p → 201, stored as null", async (value) => {
+    const client = buildMockClient();
+    const qs = { id: VALID_UUID, ngo_name: "TestiJärjestö", title: "Sarja", status: "pending" };
+    client.query
+      .mockResolvedValueOnce({}) // BEGIN
+      .mockResolvedValueOnce({ rows: [qs] }) // INSERT question_set
+      .mockResolvedValueOnce({ rows: [{ id: "q1", statement: "Väittämä 1" }] }) // INSERT question
+      .mockResolvedValueOnce({}) // INSERT question_set_questions
+      .mockResolvedValueOnce({}); // COMMIT
+
+    const res = await request(app)
+      .post("/api/question-sets")
+      .send({ ngoName: "TestiJärjestö", title: "Sarja", ngoEmail: value, logoUrl: value, questions: ["Väittämä 1"] });
+    expect(res.status).toBe(201);
+    const [, setParams] = client.query.mock.calls[1];
+    expect(setParams[1]).toBeNull();
+    expect(setParams[2]).toBeNull();
+  });
+
   test("no non-empty statements → 400, no empty question set created", async () => {
     const res = await request(app)
       .post("/api/question-sets")

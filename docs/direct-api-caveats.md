@@ -127,3 +127,24 @@ is rated), so it always takes the transactional branch.
 
 **Fix:** return 404 when the update matches no row, as the `answers` branch
 does.
+
+## Review items: loose checks on `rejected`, `rejectionReason` and empty edits
+
+**Endpoint:** `PATCH /api/admin/question-sets/:id/review` (`reviews[]`)
+
+- `rejected` is tested for truthiness, so any truthy value rejects the
+  question. That includes the string `"false"`.
+- `rejectionReason` is never type- or length-checked. It is only used in the
+  email to the NGO, which is sent after the response. A non-string is
+  interpolated as-is (an object becomes `[object Object]`), and a very long one
+  is sent in full.
+- `editedStatement: ""` is rejected with the "liian pitkä" (too long) message.
+  `isValidLength` treats an empty string as invalid.
+
+**Why the frontend is unaffected:** it sends `rejected` as a boolean and
+`rejectionReason` as a string (`""` when no reason is given). It includes
+`editedStatement` only when it is non-empty and differs from the original.
+
+**Fix:** require a boolean `rejected`, and a string `rejectionReason` with a
+length limit. Treat `editedStatement: ""` as "no edit", or reject it with its
+own message.
