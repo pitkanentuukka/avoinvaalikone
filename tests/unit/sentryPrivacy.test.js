@@ -16,6 +16,8 @@ const TEST_DSN = "http://public@127.0.0.1:1/1";
 const QUESTION_ID = "3b9d7c1e-5f2a-4e8b-9c6d-1a2b3c4d5e6f";
 const CONSTITUENCY = "Lapin vaalipiiri";
 const DB_ERROR = "connection terminated unexpectedly";
+// Behind the production proxies the client address arrives in headers.
+const CLIENT_IP = "203.0.113.7";
 
 let app;
 let db;
@@ -51,6 +53,8 @@ test("an error during a voter match doesn't send the voter's answers to Sentry",
 
   const res = await request(app)
     .post("/api/voter/match")
+    .set("X-Forwarded-For", CLIENT_IP)
+    .set("X-Real-IP", CLIENT_IP)
     .send({
       answers: { [QUESTION_ID]: 4 },
       weights: { [QUESTION_ID]: 3 },
@@ -71,4 +75,8 @@ test("an error during a voter match doesn't send the voter's answers to Sentry",
   const serialized = JSON.stringify(event);
   expect(serialized).not.toContain(QUESTION_ID);
   expect(serialized).not.toContain(CONSTITUENCY);
+  // Nor anything that could link the event to the voter (sendDefaultPii is
+  // off, so the SDK drops IP headers and the address).
+  expect(serialized).not.toContain(CLIENT_IP);
+  expect(event.user?.ip_address).toBeUndefined();
 });
