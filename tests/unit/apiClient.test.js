@@ -208,8 +208,11 @@ describe("path parameters", () => {
   });
 
   // encodeURIComponent leaves dots alone, and browsers resolve %2E%2E as ..
-  // too, so these can't be sent as a segment at all. No real token is one.
-  test.each(tokenCalls.flatMap(([name, call]) => ["..", ".", ""].map((t) => [name, JSON.stringify(t), call, t])))(
+  // too, so these can't be sent as a segment at all. nginx picks its location
+  // after decoding %2F, so `../..` encoded would still climb out of /api/.
+  // A lone surrogate can't be encoded. No real token is any of these.
+  const badTokens = ["..", ".", "", "../../..", "x/..", "./x", "\uD800"];
+  test.each(tokenCalls.flatMap(([name, call]) => badTokens.map((t) => [name, JSON.stringify(t), call, t])))(
     "%s with token %s is refused without a request, as an invalid link",
     async (_, __, call, token) => {
       const { api, fetch } = apiWith(jsonResponse(200, []));
@@ -220,10 +223,23 @@ describe("path parameters", () => {
     },
   );
 
+  test.each([
+    ["sendCandidateLink's candidate id", (api) => api.sendCandidateLink("tok", "..")],
+    ["removeCandidate's candidate id", (api) => api.removeCandidate("tok", "")],
+    ["an admin id", (api) => api.deleteParty("secret", "..")],
+    ["getCandidate's id", (api) => api.getCandidate("\uD800")],
+  ])("%s is checked too, as a rejection rather than a throw", async (_, call) => {
+    const { api, fetch } = apiWith(jsonResponse(200, {}));
+    let promise;
+    expect(() => { promise = call(api); }).not.toThrow();
+    await expect(promise).rejects.toThrow("Virheellinen linkki");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   test("ids are encoded too", async () => {
     const { api, fetch } = apiWith(jsonResponse(200, {}));
-    await api.getCandidate("x/../y");
-    expect(sentPath(fetch)).toBe("/api/candidates/x%2F..%2Fy");
+    await api.getCandidate("x/y#z");
+    expect(sentPath(fetch)).toBe("/api/candidates/x%2Fy%23z");
   });
 
   test("a real token goes through unchanged", async () => {

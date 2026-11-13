@@ -24,16 +24,26 @@ const _toSnake = (data) => mapKeys(data, camelToSnake);
 // Builds an API path with each interpolated value (a token or an id) encoded
 // as one path segment. Unencoded, the browser would resolve the URL before
 // sending it: `..` climbs a level, `#` cuts the path short.
+//
+// Encoding isn't enough for dot segments: `.` and `..` survive it, browsers
+// resolve them even as %2E, and nginx picks its location after decoding %2F,
+// so `../..` arrives as `/` and gets index.html. An empty value merges two
+// segments. No real token or id is any of these, so such a value (or one that
+// can't be encoded, a lone surrogate) gives null and apiFetch refuses it as an
+// invalid link. Returning null rather than throwing keeps the refusal a
+// rejected promise.
 function path(strings, ...values) {
-  return strings.reduce((out, str, i) => out + encodeURIComponent(values[i - 1]) + str);
-}
-
-// `.` and `..` survive encodeURIComponent, and browsers resolve them (even as
-// %2E) before sending; an empty value merges two segments. No real token or id
-// is any of these, so apiFetch refuses them as an invalid link rather than let
-// the request reach another endpoint.
-function hasBadSegment(p) {
-  return p.split("?")[0].split("/").slice(1).some((s) => s === "" || s === "." || s === "..");
+  let out = strings[0];
+  for (let i = 0; i < values.length; i++) {
+    const value = String(values[i]);
+    if (value === "" || value.split("/").some((part) => part === "." || part === "..")) return null;
+    try {
+      out += encodeURIComponent(value) + strings[i + 1];
+    } catch {
+      return null;
+    }
+  }
+  return out;
 }
 
 // A failure that may pass: a network error or any HTTP error but 404 (the
@@ -55,7 +65,7 @@ export function createApi({
   // repeat is harmless. Any other request may already have taken effect when
   // its response was lost, so a retry could repeat its side effect.
   async function apiFetch(urlPath, options = {}) {
-    if (hasBadSegment(urlPath)) throw new Error("Virheellinen linkki"); // no status: not transient
+    if (urlPath === null) throw new Error("Virheellinen linkki"); // no status: not transient
     const { body, adminSecret, retry, ...rest } = options;
     const retryable = retry ?? (rest.method ?? "GET").toUpperCase() === "GET";
     const headers = { "Content-Type": "application/json", ...rest.headers };
