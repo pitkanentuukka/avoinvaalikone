@@ -23,7 +23,7 @@ match rate limit for the duration of the test, since all k6 traffic comes from
 one IP:
 
 ```bash
-RATE_LIMIT_MATCH_MAX=100000   # in .env / compose env, then restart backend
+RATE_LIMIT_MATCH_MAX=100000   # in .env, then `docker compose … up -d backend` (not `restart`)
 ```
 
 **Never load-test through Cloudflare** (`https://avoinvaalikone.fi`): you would

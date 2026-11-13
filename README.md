@@ -255,7 +255,7 @@ Question UUID keys must be **lowercase**, as the API returns them. An uppercase 
 
 | Method | Path | Auth | Rate limit |
 |--------|------|------|------------|
-| POST | `/api/voter/match` | None | 60 / min |
+| POST | `/api/voter/match` | None | 300 / min (`RATE_LIMIT_MATCH_MAX`) |
 
 ```json
 // Request
@@ -323,6 +323,7 @@ The entire React SPA lives in [vaalikone-frontend/src/App.jsx](vaalikone-fronten
 | `SMTP_FROM` | `noreply@vaalikone.fi` | Sender address |
 | `SMTP_USER` | — | SMTP username (optional) |
 | `SMTP_PASS` | — | SMTP password (optional) |
+| `RATE_LIMIT_MATCH_MAX` | `300` | Voter match requests per IP per minute (production only) |
 
 In Docker Compose, `mailpit` provides a local SMTP server (port 1025) and web UI at http://localhost:8025, and `CORS_ORIGIN` is overridden to `http://localhost:80` to match the containerized frontend.
 

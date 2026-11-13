@@ -254,7 +254,7 @@ Quick reference:
 
 ```bash
 # On the server, against localhost (bypasses Cloudflare — measures origin only)
-RATE_LIMIT_MATCH_MAX=100000 docker compose ... restart backend  # disable rate limit for test
+RATE_LIMIT_MATCH_MAX=100000 docker compose ... up -d backend  # disable rate limit for test
 k6 run -e BASE_URL=http://localhost scripts/loadtest/voter-flow.js
 ```
 
@@ -287,6 +287,6 @@ Cloudflare's DDoS/bot mitigation against your own IP.
 | Situation | Action |
 |-----------|--------|
 | Admin approves/hides a question set and it needs to be visible immediately | Cloudflare dashboard → Caching → Purge by URL → `https://avoinvaalikone.fi/api/question-sets` |
-| Voters behind one carrier IP getting 429 | Raise `RATE_LIMIT_MATCH_MAX` in `.env` and `docker compose restart backend` |
+| Voters behind one carrier IP getting 429 | Raise `RATE_LIMIT_MATCH_MAX` in `.env` and `docker compose … up -d backend` (`restart` keeps the old environment) |
 | DB pool exhaustion (`waiting > 0`) | Raise `PG_POOL_MAX` (keep `replicas × PG_POOL_MAX` under 100) and restart |
 | One backend replica unhealthy | `docker compose restart backend` — nginx re-resolves DNS within 10 s |
