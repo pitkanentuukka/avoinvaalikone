@@ -61,6 +61,7 @@ const cases = [
   ["POST /:id/questions: numeric statement", () => addQuestion({ statement: 1 }), /Väittämä vaaditaan/],
   ["review: null review item", () => review({ reviews: [null] }), /Virheellinen kysymyksen tunniste/],
   ["review: string review item", () => review({ reviews: ["x"] }), /Virheellinen kysymyksen tunniste/],
+  ["review: array review item", () => review({ reviews: [[QUESTION_ID]] }), /Virheellinen kysymyksen tunniste/],
   ["review: missing questionId", () => review({ reviews: [{ rejected: true }] }), /Virheellinen kysymyksen tunniste/],
   ["review: invalid questionId", () => review({ reviews: [{ questionId: "x", rejected: true }] }), /Virheellinen kysymyksen tunniste/],
   ["review: numeric editedStatement", () => review({ reviews: [{ questionId: QUESTION_ID, editedStatement: 1 }] }), /Muokattu väittämä on virheellinen/],
