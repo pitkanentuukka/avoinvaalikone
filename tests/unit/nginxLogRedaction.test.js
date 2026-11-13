@@ -74,7 +74,9 @@ function parseMaps() {
       if (key === "default") fallback = value;
       else if (key.startsWith("~*")) entries.push({ re: new RegExp(key.slice(2), "i"), value });
       else if (key.startsWith("~")) entries.push({ re: new RegExp(key.slice(1)), value });
-      else entries.push({ exact: key, value });
+      // nginx tries exact keys before any regex, whatever their order in the
+      // file; evaluate() only knows file order.
+      else throw new Error(`map $${target}: exact key "${key}" isn't supported by this emulator`);
     }
     return { source, target, entries, fallback };
   });
@@ -96,10 +98,6 @@ function evaluate(requestUri) {
     if (input === undefined) throw new Error(`map reads $${source}, which isn't defined before it`);
     let out;
     for (const entry of entries) {
-      if (entry.exact !== undefined) {
-        if (entry.exact === input) { out = interpolate(entry.value, vars); break; }
-        continue;
-      }
       const m = input.match(entry.re);
       if (m) { out = interpolate(entry.value, { ...vars, ...m.groups }); break; }
     }
@@ -183,8 +181,9 @@ describe("the URI the access log records", () => {
 // nginx's error lines carry the raw request line ("request: GET
 // /api/candidates/me/<token> …") and the upstream URL, in a format that can't
 // be changed. A backend restart writes one for every proxied request in
-// flight, so only levels above "error" may be logged.
-test("the error log doesn't record request-level errors", () => {
+// flight, so only levels above "error" may be logged. (Resource exhaustion
+// still logs at alert/crit with the request line; see nginx.conf.)
+test("the error log skips upstream and other request-level errors", () => {
   const logs = findAll("error_log");
   expect(logs).toHaveLength(1);
   expect(["crit", "alert", "emerg"]).toContain(logs[0].args[1]);
