@@ -15,14 +15,15 @@ git push origin main         # CI redeploys the reverted tree
 
 Migrations are **forward-only** (`migration_history` table): never delete or edit
 an applied migration — write a new compensating migration instead. If a deploy is
-stuck and CI is unavailable, SSH to the box and run the compose up command from
-the workflow's "Build & restart services" step with an earlier checkout.
+stuck and CI is unavailable, rsync an earlier checkout to the box (as the
+workflow's "Rsync to server" step does) and run `sh /opt/vaalikone/scripts/deploy.sh`
+there. Not a bare `compose up`: it doesn't pick up a changed Caddyfile.
 
 ## Incident quick reference
 
 | Symptom | Meaning | Action |
 |---|---|---|
-| `DB pool saturated: … waiting=N` in backend logs | Queries queueing for connections | Check for slow queries (db logs, `log_min_duration_statement=250`; bind parameters and error DETAIL lines are left out, as they'd log tokens, #36); dials: `PG_POOL_MAX`, backend `replicas`, `RATE_LIMIT_MATCH_MAX` |
+| `DB pool saturated: … waiting=N` in backend logs | Queries queueing for connections | Check for slow queries (db logs, `log_min_duration_statement=250`; bind parameters are left out, and errors are logged terse, without DETAIL/HINT/CONTEXT (so a deadlock shows no process or query detail), as they'd log tokens, #36); dials: `PG_POOL_MAX`, backend `replicas`, `RATE_LIMIT_MATCH_MAX` |
 | `Redis error:` / `Redis connect failed:` | Shared rate-limit store down | No action needed short-term: limiters fall back to per-process (effective limits ×3). Restart redis when convenient |
 | Lots of 429s on `/api/voter/match` | Rate limit too tight for CGNAT crowds | Raise `RATE_LIMIT_MATCH_MAX` in `/opt/vaalikone/.env`, `docker compose … up -d backend` |
 | Slow `/api/*` GETs + high DB load | Edge cache not serving | `scripts/verify-edge-cache.sh` — if DYNAMIC, recreate the Cloudflare Cache Rule (docs/scaling.md) |

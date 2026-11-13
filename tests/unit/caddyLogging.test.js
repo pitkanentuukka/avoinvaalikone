@@ -60,7 +60,7 @@ function globalOptions() {
 // response") above INFO, and current Caddy versions attach the request, URI
 // included. handle_errors can't catch it: the handler panics instead.
 test("the default log leaves out reverse_proxy's own messages", () => {
-  expect(globalOptions()).toMatch(/^\s*log\s+default\s*\{[^}]*^\s*exclude\b[^\n]*\bhttp\.handlers\.reverse_proxy\b/m);
+  expect(globalOptions()).toMatch(/^\s*log\s+default\s*\{[^}]*^\s*exclude\b[^\n]*\bhttp\.handlers\.reverse_proxy(?=\s|$)/m);
 });
 
 // At DEBUG, the errors handle_errors answers are logged again, with the URI.

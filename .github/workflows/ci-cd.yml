@@ -122,18 +122,10 @@ jobs:
             --exclude='.claude' \
             ./ root@80.69.172.220:/opt/vaalikone/
 
-      # `up -d` leaves caddy running when only the Caddyfile changed, and
-      # `caddy reload` wouldn't help: rsync replaces the file, and the
-      # single-file bind mount keeps the old one. So restart caddy (a second
-      # or so offline) whenever the Caddyfile it runs differs from the
-      # deployed one.
+      # Also restarts caddy when the Caddyfile changed (see the script).
       - name: Build & restart services
         run: |
-          ssh -i ~/.ssh/deploy_key root@80.69.172.220 'cd /opt/vaalikone \
-            && dc="docker compose -f docker-compose.yml -f docker-compose.prod.yml" \
-            && $dc up --build -d \
-            && { $dc exec -T caddy cat /etc/caddy/Caddyfile | cmp -s - Caddyfile \
-                 || { echo "Caddyfile changed, restarting caddy"; $dc restart caddy; }; }'
+          ssh -i ~/.ssh/deploy_key root@80.69.172.220 "sh /opt/vaalikone/scripts/deploy.sh"
 
       - name: Verify deployment
         run: |
