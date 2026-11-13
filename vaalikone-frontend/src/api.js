@@ -21,6 +21,31 @@ function mapKeys(obj, fn) {
 const toCamel = (data) => mapKeys(data, snakeToCamel);
 const _toSnake = (data) => mapKeys(data, camelToSnake);
 
+// Builds an API path with each interpolated value (a token or an id) encoded
+// as one path segment. Unencoded, the browser would resolve the URL before
+// sending it: `..` climbs a level, `#` cuts the path short.
+//
+// Encoding isn't enough for dot segments: `.` and `..` survive it, browsers
+// resolve them even as %2E, and nginx picks its location after decoding %2F,
+// so enough `..` parts climb out of /api/ and get index.html. An empty value merges two
+// segments. No real token or id is any of these, so such a value (or one that
+// can't be encoded, a lone surrogate) gives null and apiFetch refuses it as an
+// invalid link. Returning null rather than throwing keeps the refusal a
+// rejected promise.
+function path(strings, ...values) {
+  let out = strings[0];
+  for (let i = 0; i < values.length; i++) {
+    const value = String(values[i]);
+    if (value === "" || value.split("/").some((part) => part === "." || part === "..")) return null;
+    try {
+      out += encodeURIComponent(value) + strings[i + 1];
+    } catch {
+      return null;
+    }
+  }
+  return out;
+}
+
 // A failure that may pass: a network error or any HTTP error but 404 (the
 // token routes' answer to an unknown token) and 400 (a malformed one). A 403
 // can come from Cloudflare rather than the app. The token views offer a retry
@@ -39,13 +64,14 @@ export function createApi({
   // replica), for GETs and for requests that pass `retry: true` because a
   // repeat is harmless. Any other request may already have taken effect when
   // its response was lost, so a retry could repeat its side effect.
-  async function apiFetch(path, options = {}) {
+  async function apiFetch(urlPath, options = {}) {
+    if (urlPath === null) throw new Error("Virheellinen linkki"); // no status: not transient
     const { body, adminSecret, retry, ...rest } = options;
     const retryable = retry ?? (rest.method ?? "GET").toUpperCase() === "GET";
     const headers = { "Content-Type": "application/json", ...rest.headers };
     if (adminSecret) headers["Authorization"] = `Bearer ${adminSecret}`;
     const doFetch = () =>
-      fetchImpl(`${base}${path}`, {
+      fetchImpl(`${base}${urlPath}`, {
         ...rest,
         headers,
         body: body ? JSON.stringify(body) : undefined,
@@ -86,7 +112,7 @@ export function createApi({
     // Public
     getQuestionSets: () => apiFetch("/question-sets"),
     getCandidates: () => apiFetch("/candidates"),
-    getCandidate: (id) => apiFetch(`/candidates/${id}`),
+    getCandidate: (id) => apiFetch(path`/candidates/${id}`),
     submitQuestionSet: (data) => apiFetch("/question-sets", { method: "POST", body: data }),
     // Retryable because each submission gets its own sessionId and the retry
     // reuses it: the research insert is ON CONFLICT DO NOTHING on
@@ -104,27 +130,27 @@ export function createApi({
     },
 
     // Party-token gated (secretary's management access)
-    getPartyOverview: (token) => apiFetch(`/candidates/party/${token}`),
+    getPartyOverview: (token) => apiFetch(path`/candidates/party/${token}`),
     rotateRegistrationLink: (token) =>
-      apiFetch(`/candidates/party/${token}/registration-token`, { method: "POST" }),
+      apiFetch(path`/candidates/party/${token}/registration-token`, { method: "POST" }),
     sendCandidateLink: (token, id) =>
-      apiFetch(`/candidates/party/${token}/candidates/${id}/send-link`, { method: "POST" }),
+      apiFetch(path`/candidates/party/${token}/candidates/${id}/send-link`, { method: "POST" }),
     removeCandidate: (token, id) =>
-      apiFetch(`/candidates/party/${token}/candidates/${id}`, { method: "DELETE" }),
+      apiFetch(path`/candidates/party/${token}/candidates/${id}`, { method: "DELETE" }),
 
     // Registration-link gated
-    getRegistration: (token) => apiFetch(`/candidates/register/${token}`),
+    getRegistration: (token) => apiFetch(path`/candidates/register/${token}`),
     register: (token, data) =>
-      apiFetch(`/candidates/register/${token}`, { method: "POST", body: data }),
+      apiFetch(path`/candidates/register/${token}`, { method: "POST", body: data }),
 
     // Candidate-token gated (the candidate's personal link)
-    getOwnProfile: (token) => apiFetch(`/candidates/me/${token}`),
+    getOwnProfile: (token) => apiFetch(path`/candidates/me/${token}`),
     // One request, so the server saves the profile and the answers together
     // or neither: a rejected answer must not leave the profile change stored.
     // A backend that predates the combined save ignores `answers` and replies
     // without `saved`; that is an error (answersIgnored), not a success.
     saveOwnProfile: async (token, profile, answers) => {
-      const result = await apiFetch(`/candidates/me/${token}`, { method: "PUT", body: { ...profile, answers } });
+      const result = await apiFetch(path`/candidates/me/${token}`, { method: "PUT", body: { ...profile, answers } });
       if (typeof result?.saved !== "number") {
         throw Object.assign(new Error("Answers were not saved"), { answersIgnored: true });
       }
@@ -136,30 +162,30 @@ export function createApi({
     createParty: (secret, data) =>
       apiFetch("/admin/parties", { method: "POST", body: data, adminSecret: secret }),
     deleteParty: (secret, id) =>
-      apiFetch(`/admin/parties/${id}`, { method: "DELETE", adminSecret: secret }),
+      apiFetch(path`/admin/parties/${id}`, { method: "DELETE", adminSecret: secret }),
     rotatePartyToken: (secret, id) =>
-      apiFetch(`/admin/parties/${id}/token`, { method: "POST", adminSecret: secret }),
+      apiFetch(path`/admin/parties/${id}/token`, { method: "POST", adminSecret: secret }),
     getPartyCandidatesAdmin: (secret, id) =>
-      apiFetch(`/admin/parties/${id}/candidates`, { adminSecret: secret }),
+      apiFetch(path`/admin/parties/${id}/candidates`, { adminSecret: secret }),
     sendPartyCandidateLinks: (secret, id) =>
-      apiFetch(`/admin/parties/${id}/send-candidate-links`, { method: "POST", adminSecret: secret }),
+      apiFetch(path`/admin/parties/${id}/send-candidate-links`, { method: "POST", adminSecret: secret }),
     getAllQuestionSets: (secret) => apiFetch("/admin/question-sets", { adminSecret: secret }),
     approveQuestionSet: (secret, id) =>
-      apiFetch(`/admin/question-sets/${id}/approve`, { method: "PATCH", adminSecret: secret }),
+      apiFetch(path`/admin/question-sets/${id}/approve`, { method: "PATCH", adminSecret: secret }),
     rejectQuestionSet: (secret, id) =>
-      apiFetch(`/admin/question-sets/${id}/reject`, { method: "PATCH", adminSecret: secret }),
+      apiFetch(path`/admin/question-sets/${id}/reject`, { method: "PATCH", adminSecret: secret }),
     hideQuestionSet: (secret, id) =>
-      apiFetch(`/admin/question-sets/${id}/hide`, { method: "PATCH", adminSecret: secret }),
+      apiFetch(path`/admin/question-sets/${id}/hide`, { method: "PATCH", adminSecret: secret }),
     unhideQuestionSet: (secret, id) =>
-      apiFetch(`/admin/question-sets/${id}/unhide`, { method: "PATCH", adminSecret: secret }),
+      apiFetch(path`/admin/question-sets/${id}/unhide`, { method: "PATCH", adminSecret: secret }),
     deleteQuestionSet: (secret, id) =>
-      apiFetch(`/admin/question-sets/${id}`, { method: "DELETE", adminSecret: secret }),
+      apiFetch(path`/admin/question-sets/${id}`, { method: "DELETE", adminSecret: secret }),
     reviewQuestionSet: (secret, id, data) =>
-      apiFetch(`/admin/question-sets/${id}/review`, { method: "PATCH", body: data, adminSecret: secret }),
+      apiFetch(path`/admin/question-sets/${id}/review`, { method: "PATCH", body: data, adminSecret: secret }),
     addQuestion: (secret, setId, statement) =>
-      apiFetch(`/admin/question-sets/${setId}/questions`, { method: "POST", body: { statement }, adminSecret: secret }),
+      apiFetch(path`/admin/question-sets/${setId}/questions`, { method: "POST", body: { statement }, adminSecret: secret }),
     removeQuestion: (secret, setId, questionId) =>
-      apiFetch(`/admin/question-sets/${setId}/questions/${questionId}`, { method: "DELETE", adminSecret: secret }),
+      apiFetch(path`/admin/question-sets/${setId}/questions/${questionId}`, { method: "DELETE", adminSecret: secret }),
     mergeQuestions: (secret, keepId, dropIds) =>
       apiFetch("/admin/question-sets/merge-questions", { method: "POST", body: { keepId, dropIds }, adminSecret: secret }),
   };

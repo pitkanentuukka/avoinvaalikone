@@ -27,6 +27,11 @@ describe("tokenLinkFromParams", () => {
     ["?view=candidate&partyToken=abc&candidateId=1", { view: "legacy", token: null }],
     ["?candidateToken=c&partyToken=p", { view: "candidate", token: "c" }],
     ["", null],
+    // #37: tokens are hex; whitespace is a pasting accident (encoded, it would miss).
+    ["?partyToken=ab%0Ac%09", { view: "party", token: "abc" }],
+    ["?candidateToken=%20abc%0D%0A", { view: "candidate", token: "abc" }],
+    ["?register=a%20bc", { view: "register", token: "abc" }],
+    ["?partyToken=%20%0A", null],
   ])("%s", (search, expected) => {
     expect(tokenLinkFromParams(new URLSearchParams(search))).toEqual(expected);
   });

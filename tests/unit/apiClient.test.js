@@ -1,8 +1,8 @@
 // The frontend is an ES module package, so it is loaded with import() (npm test
 // runs Jest with --experimental-vm-modules for this).
-let createApi;
+let createApi, isTransientError;
 beforeAll(async () => {
-  ({ createApi } = await import("../../vaalikone-frontend/src/api.js"));
+  ({ createApi, isTransientError } = await import("../../vaalikone-frontend/src/api.js"));
 });
 
 function jsonResponse(status, data) {
@@ -180,5 +180,72 @@ describe("isTransientError", () => {
   // e.g. a response of an unexpected shape: retrying won't help.
   test("an error that didn't come from the request is not transient", () => {
     expect(isTransientError(new TypeError("Cannot read properties of undefined (reading 'name')"))).toBe(false);
+  });
+});
+
+// #37: each token or id is one path segment. The browser resolves the URL
+// before sending it, so an unencoded `..` climbs a level and `#` cuts the
+// path short. The mock fetch gets the raw string; resolving it the way the
+// browser does shows the path that would reach the server.
+describe("path parameters", () => {
+  const sentPath = (fetch) => new URL(fetch.mock.calls[0][0], "http://localhost").pathname;
+  const tokenCalls = [
+    ["getPartyOverview", (api, t) => api.getPartyOverview(t), "/api/candidates/party/T"],
+    ["rotateRegistrationLink", (api, t) => api.rotateRegistrationLink(t), "/api/candidates/party/T/registration-token"],
+    ["sendCandidateLink", (api, t) => api.sendCandidateLink(t, "c1"), "/api/candidates/party/T/candidates/c1/send-link"],
+    ["removeCandidate", (api, t) => api.removeCandidate(t, "c1"), "/api/candidates/party/T/candidates/c1"],
+    ["getRegistration", (api, t) => api.getRegistration(t), "/api/candidates/register/T"],
+    ["register", (api, t) => api.register(t, {}), "/api/candidates/register/T"],
+    ["getOwnProfile", (api, t) => api.getOwnProfile(t), "/api/candidates/me/T"],
+    ["saveOwnProfile", (api, t) => api.saveOwnProfile(t, {}, {}), "/api/candidates/me/T"],
+  ];
+
+  test.each(tokenCalls)("%s sends #, %%, / and \\ in the token encoded", async (_, call, expected) => {
+    const { api, fetch } = apiWith(jsonResponse(404, {}));
+    await call(api, "a#b%zz/c?d\\e").catch(() => {});
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(sentPath(fetch)).toBe(expected.replace("T", "a%23b%25zz%2Fc%3Fd%5Ce"));
+  });
+
+  // encodeURIComponent leaves dots alone, and browsers resolve %2E%2E as ..
+  // too, so these can't be sent as a segment at all. nginx picks its location
+  // after decoding %2F, so `../..` encoded would still climb out of /api/.
+  // A lone surrogate can't be encoded. No real token is any of these.
+  const badTokens = ["..", ".", "", "../../..", "x/..", "./x", "\uD800"];
+  test.each(tokenCalls.flatMap(([name, call]) => badTokens.map((t) => [name, JSON.stringify(t), call, t])))(
+    "%s with token %s is refused without a request, as an invalid link",
+    async (_, __, call, token) => {
+      const { api, fetch } = apiWith(jsonResponse(200, []));
+      const err = await call(api, token).then(() => null, (e) => e);
+      expect(err).toBeInstanceOf(Error);
+      expect(isTransientError(err)).toBe(false);
+      expect(fetch).not.toHaveBeenCalled();
+    },
+  );
+
+  test.each([
+    ["sendCandidateLink's candidate id", (api) => api.sendCandidateLink("tok", "..")],
+    ["removeCandidate's candidate id", (api) => api.removeCandidate("tok", "")],
+    ["an admin id", (api) => api.deleteParty("secret", "..")],
+    ["getCandidate's id", (api) => api.getCandidate("\uD800")],
+  ])("%s is checked too, as a rejection rather than a throw", async (_, call) => {
+    const { api, fetch } = apiWith(jsonResponse(200, {}));
+    let promise;
+    expect(() => { promise = call(api); }).not.toThrow();
+    await expect(promise).rejects.toThrow("Virheellinen linkki");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  test("ids are encoded too", async () => {
+    const { api, fetch } = apiWith(jsonResponse(200, {}));
+    await api.getCandidate("x/y#z");
+    expect(sentPath(fetch)).toBe("/api/candidates/x%2Fy%23z");
+  });
+
+  test("a real token goes through unchanged", async () => {
+    const token = "0123456789abcdef".repeat(3);
+    const { api, fetch } = apiWith(jsonResponse(200, { party: { name: "P" } }));
+    await api.getPartyOverview(token);
+    expect(fetch.mock.calls[0][0]).toBe(`/api/candidates/party/${token}`);
   });
 });
