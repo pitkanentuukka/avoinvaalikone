@@ -140,7 +140,7 @@ publicRouter.post("/", async (req, res, next) => {
   try {
     const { ngoName, ngoEmail, logoUrl, title, questions } = req.body;
 
-    if (!ngoName?.trim() || !title?.trim()) {
+    if (typeof ngoName !== "string" || !ngoName.trim() || typeof title !== "string" || !title.trim()) {
       return res
         .status(400)
         .json({ error: "Järjestön nimi ja otsikko vaaditaan" });
@@ -404,8 +404,11 @@ adminRouter.patch("/:id/review", requireAdmin, validateUUIDParam("id"), async (r
     if (!Array.isArray(reviews) || reviews.length === 0) {
       return res.status(400).json({ error: "reviews-kenttä vaaditaan" });
     }
-    // Validate edits and merge targets before checking out a connection.
+    // Validate every item before checking out a connection.
     for (const r of reviews) {
+      if (!r || typeof r !== "object" || !isValidUUID(r.questionId)) {
+        return res.status(400).json({ error: "Virheellinen kysymyksen tunniste" });
+      }
       if (r.editedStatement != null && !isValidLength(r.editedStatement, 500)) {
         return res.status(400).json({ error: "Muokattu väittämä on liian pitkä (maksimi: 500 merkkiä)" });
       }
@@ -608,7 +611,7 @@ adminRouter.post("/:id/questions", requireAdmin, validateUUIDParam("id"), async 
   let client;
   try {
     const { statement } = req.body;
-    if (!statement?.trim()) {
+    if (typeof statement !== "string" || !statement.trim()) {
       return res.status(400).json({ error: "Väittämä vaaditaan" });
     }
     if (!isValidLength(statement, 500)) {

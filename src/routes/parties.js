@@ -37,7 +37,7 @@ router.get("/", requireAdmin, async (req, res, next) => {
 router.post("/", requireAdmin, async (req, res, next) => {
   try {
     const { name, email } = req.body;
-    if (!name?.trim()) {
+    if (typeof name !== "string" || !name.trim()) {
       return res.status(400).json({ error: "Puolueen nimi vaaditaan" });
     }
     
