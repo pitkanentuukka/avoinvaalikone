@@ -1296,7 +1296,6 @@ const labelStyle = { fontSize: "13px", fontWeight: 600, display: "block", margin
 const candidateLink = (token) => `${window.location.origin}/?candidateToken=${token}`;
 const registrationLink = (token) => `${window.location.origin}/?register=${token}`;
 
-// Distinct questions across approved sets (a question may be shared by several sets).
 function confirmAction(message) {
   return import.meta.env.VITE_NODE_ENV === "development" || window.confirm(message);
 }

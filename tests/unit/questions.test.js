@@ -31,9 +31,16 @@ describe("answeredCount", () => {
     expect(answeredCount(answers, questions)).toBe(1);
   });
 
-  // #19: answers loaded from the server for questions not on the page (sets
-  // no longer approved) were counted, showing e.g. "5 / 4".
-  test("ignores answers to questions not on the page", () => {
+  // #19: answers loaded from the server for questions not on the page were
+  // counted, showing e.g. "5 / 4". The public question list already leaves out
+  // hidden and unapproved sets, so such a question is usually just absent.
+  test("ignores answers to questions missing from the question list", () => {
+    const questions = [{ id: "q1" }, { id: "q2" }];
+    const answers = { q1: { value: 1 }, q2: { value: 2 }, gone: { value: 3 } };
+    expect(answeredCount(answers, questions)).toBe(2);
+  });
+
+  test("ignores answers to questions in sets that are not approved", () => {
     const sets = [set("a", "approved", ["q1", "q2", "q3", "q4"]), set("b", "pending", ["q5"])];
     const questions = distinctQuestions(sets);
     const answers = { q1: { value: 1 }, q2: { value: 2 }, q3: { value: 3 }, q4: { value: 4 }, q5: { value: 0 } };
