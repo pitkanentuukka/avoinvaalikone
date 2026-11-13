@@ -1,4 +1,12 @@
 {
+    # reverse_proxy logs a response cut off mid-body (frontend restarting, a
+    # client dropping) above INFO, and current Caddy versions attach the
+    # request URI: party, registration and candidate tokens (issue #36).
+    # handle_errors below can't catch it, as the handler panics instead.
+    log default {
+        exclude http.handlers.reverse_proxy
+    }
+
     servers {
         # Cloudflare sits in front of Caddy. Without trusting its ranges, Caddy
         # discards the X-Forwarded-For Cloudflare sends and substitutes the
@@ -24,9 +32,9 @@ avoinvaalikone.fi {
     # writes its party, registration or candidate token
     # (/api/candidates/me/<token>, /?candidateToken=<token>) to the caddy log
     # (issue #36). An error a handle_errors route answers is logged at DEBUG,
-    # below the default INFO level. The client gets the same status; the cost
-    # is that Caddy no longer logs why (the frontend's own log can't either,
-    # since the request never reached it).
+    # below the default INFO level (so never turn on `debug`). The client gets
+    # the same status; the cost is that Caddy no longer logs why (the
+    # frontend's own log can't either, since the request never reached it).
     handle_errors {
         respond "{err.status_code} {err.status_text}" {err.status_code}
     }

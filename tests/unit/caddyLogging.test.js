@@ -30,7 +30,7 @@ function topLevelBlocks() {
 }
 
 test("every site answers its own errors, so Caddy doesn't log them with the URI", () => {
-  const sites = Object.entries(topLevelBlocks()).filter(([name]) => name !== "");
+  const sites = Object.entries(topLevelBlocks());
   expect(sites.length).toBeGreaterThan(0);
   for (const [, body] of sites) {
     expect(body).toMatch(/^\s*reverse_proxy\b/m);
@@ -38,6 +38,33 @@ test("every site answers its own errors, so Caddy doesn't log them with the URI"
   }
 });
 
-test("there is no access log that would record the URI", () => {
-  expect(caddyfile).not.toMatch(/^\s*log\b/m);
+test("no site has an access log that would record the URI", () => {
+  for (const body of Object.values(topLevelBlocks())) {
+    expect(body).not.toMatch(/^\s*log\b/m);
+  }
+});
+
+// The global options block: the first `{` at column 0.
+function globalOptions() {
+  const start = caddyfile.search(/^\{\s*$/m);
+  expect(start).toBeGreaterThan(-1);
+  let depth = 0;
+  for (let i = start; i < caddyfile.length; i++) {
+    if (caddyfile[i] === "{") depth++;
+    else if (caddyfile[i] === "}" && --depth === 0) return caddyfile.slice(start + 1, i);
+  }
+  throw new Error("unterminated global options block");
+}
+
+// reverse_proxy logs a response cut off mid-body ("aborting with incomplete
+// response") above INFO, and current Caddy versions attach the request, URI
+// included. handle_errors can't catch it: the handler panics instead.
+test("the default log leaves out reverse_proxy's own messages", () => {
+  expect(globalOptions()).toMatch(/^\s*log\s+default\s*\{[^}]*^\s*exclude\b[^\n]*\bhttp\.handlers\.reverse_proxy\b/m);
+});
+
+// At DEBUG, the errors handle_errors answers are logged again, with the URI.
+test("nothing turns on debug logging", () => {
+  expect(globalOptions()).not.toMatch(/^\s*debug\s*$/m);
+  expect(caddyfile).not.toMatch(/^\s*level\s+debug\b/im);
 });

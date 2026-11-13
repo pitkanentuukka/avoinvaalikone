@@ -13,9 +13,12 @@ services:
     container_name: vaalikone-db
     restart: unless-stopped
     # Modest tuning for the read-mostly hot dataset; log_min_duration_statement
-    # surfaces slow queries in the container logs. log_parameter_max_length=0
-    # keeps their bind parameters out: the token lookups bind party,
-    # registration and candidate tokens, which are bearer secrets (issue #36).
+    # surfaces slow queries in the container logs. Party, registration and
+    # candidate tokens are bearer secrets and must stay out of them (issue
+    # #36): log_parameter_max_length=0 drops bind parameters (the token
+    # lookups bind the token), and terse error verbosity drops DETAIL lines,
+    # since a CHECK or NOT NULL violation logs the whole failing row, token
+    # column included (the profile UPDATE relies on the constituency CHECK).
     command:
       [
         "postgres",
@@ -23,6 +26,7 @@ services:
         "-c", "effective_cache_size=768MB",
         "-c", "log_min_duration_statement=250",
         "-c", "log_parameter_max_length=0",
+        "-c", "log_error_verbosity=terse",
       ]
     environment:
       POSTGRES_USER: vaalikone

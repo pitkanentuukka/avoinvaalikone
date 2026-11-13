@@ -55,4 +55,18 @@ describe("docker-compose.yml db command", () => {
   test("leaves bind parameters (tokens) out of the slow-statement log", () => {
     expect(dbSettings().log_parameter_max_length).toBe("0");
   });
+
+  // A CHECK or NOT NULL violation logs "DETAIL: Failing row contains (…)",
+  // the whole row: for a candidate or party, its token. The profile UPDATE
+  // relies on the constituency CHECK, so any candidate link can trigger it.
+  test("leaves error DETAIL lines (failing rows, tokens) out of the log", () => {
+    expect(dbSettings().log_error_verbosity).toBe("terse");
+  });
+
+  test("isn't replaced in production, where it matters", () => {
+    const prod = fs.readFileSync(path.join(__dirname, "../../docker-compose.prod.yml"), "utf8");
+    const db = prod.slice(prod.search(/^ {2}db:\s*$/m));
+    const end = db.slice(1).search(/^ {2}\S/m);
+    expect(db.slice(0, end === -1 ? undefined : end + 1)).not.toMatch(/^ {4}command:/m);
+  });
 });
