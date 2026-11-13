@@ -10,12 +10,15 @@
 
 jest.mock("pg", () => ({ Pool: jest.fn() }));
 
+// Required here, outside jest.isolateModules, so the scripts' isolated
+// registry gets this same mocked module and Pool.mockImplementation reaches it.
 const { Pool } = require("pg");
 
 let savedExitCode;
 
 beforeEach(() => {
   savedExitCode = process.exitCode;
+  process.exitCode = undefined;
   jest.spyOn(process, "exit").mockImplementation(() => {});
   jest.spyOn(console, "log").mockImplementation(() => {});
   jest.spyOn(console, "error").mockImplementation(() => {});
@@ -53,13 +56,15 @@ function fakePool({ connectError, failOn } = {}) {
   };
   Pool.mockImplementation(() => pool);
 
-  const done = () =>
-    Promise.race([
-      finished,
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("script neither ended the pool nor exited")), 1000)
-      ),
-    ]).then(() => new Promise((resolve) => setImmediate(resolve)));
+  const done = () => {
+    let timer;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error("script neither ended the pool nor exited")), 1000);
+    });
+    return Promise.race([finished, timeout])
+      .finally(() => clearTimeout(timer))
+      .then(() => new Promise((resolve) => setImmediate(resolve)));
+  };
 
   return { client, pool, done };
 }
@@ -97,6 +102,21 @@ describe("migrations/seed.js", () => {
 });
 
 describe("migrations/run.js", () => {
+  // Guards the exit code the Dockerfile's `run.js && exec node src/index.js`
+  // depends on: success must not leave exitCode set, or the server never starts.
+  test("a successful run ends the pool and leaves the exit code at 0", async () => {
+    const { client, pool, done } = fakePool();
+    runScript("run.js");
+    await done();
+
+    expect(sqls(client)).toContain("SELECT pg_advisory_unlock($1)");
+    expect(client.release).toHaveBeenCalledTimes(1);
+    expect(pool.end).toHaveBeenCalledTimes(1);
+    expect(process.exit).not.toHaveBeenCalled();
+    expect(process.exitCode).toBeUndefined();
+    expect(console.error).not.toHaveBeenCalled();
+  });
+
   test("a failed migration unlocks, releases the client and ends the pool", async () => {
     const { client, pool, done } = fakePool({ failOn: "CREATE TABLE IF NOT EXISTS schema_migrations" });
     runScript("run.js");
