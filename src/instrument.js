@@ -27,6 +27,9 @@ if (process.env.SENTRY_DSN) {
       if (event.request) delete event.request.data;
       return redactTokensDeep(event);
     },
+    // Transactions skip beforeSend. None are sent at tracesSampleRate 0, but
+    // if tracing is turned on, their names and span URLs carry tokens too.
+    beforeSendTransaction: (event) => redactTokensDeep(event),
   });
 }
 

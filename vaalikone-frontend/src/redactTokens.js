@@ -39,7 +39,10 @@ export function redactTokensDeep(value, seen = new Map()) {
 
 // For Sentry.init in main.jsx. Breadcrumbs are masked as they're recorded, and
 // the whole event again before it's sent (request URL, error messages, …).
+// Transactions skip beforeSend; there are none while tracing is off, but if it
+// is turned on their names and span URLs are masked too.
 export const sentryRedaction = {
   beforeBreadcrumb: (breadcrumb) => redactTokensDeep(breadcrumb),
   beforeSend: (event) => redactTokensDeep(event),
+  beforeSendTransaction: (event) => redactTokensDeep(event),
 };

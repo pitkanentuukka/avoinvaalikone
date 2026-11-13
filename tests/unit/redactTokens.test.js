@@ -110,6 +110,14 @@ describe("frontend Sentry hooks", () => {
     expect(crumb.data).toEqual({ from: "/?partyToken=[token]", to: "/" });
   });
 
+  test("beforeSendTransaction masks a transaction", () => {
+    const event = frontend.sentryRedaction.beforeSendTransaction({
+      type: "transaction", transaction: `/?candidateToken=${T}`,
+      spans: [{ data: { "url.full": `https://x/api/candidates/me/${T}` } }],
+    });
+    expect(JSON.stringify(event)).not.toContain(T);
+  });
+
   test("beforeSend masks the event", () => {
     const event = frontend.sentryRedaction.beforeSend({ request: { url: `https://x/?candidateToken=${T}` } });
     expect(event.request.url).toBe("https://x/?candidateToken=[token]");
