@@ -281,7 +281,7 @@ weighted   = similarity × (weight + 1)
 ```
 The weighted similarities are averaged over all of the voter's questions and returned as a percentage. A skipped question counts as full disagreement, so a candidate cannot reach a high match by answering only a few questions.
 
-**Response:** `{ sessionId, questionCount, results: [...] }`. `questionCount` is the number of the voter's questions that were scored. Results are sorted by `match` descending, then `answeredCount` descending (how many of the `questionCount` questions the candidate answered), then by name. Each result includes the candidate's answers for comparison. The `sessionId` is also used to store voter responses anonymously for analytics. It is `null` when the voter opted out of research (`includeInResearch: false`) or none of the answered questions exist any more; otherwise the session is recorded even if no candidate matched.
+**Response:** `{ sessionId, questionCount, results: [...] }`. `questionCount` is the number of the voter's questions that were scored. Results are sorted by `match` descending, then `answeredCount` descending (how many of the `questionCount` questions the candidate answered), then by name. Each result includes the candidate's answers for comparison. The `sessionId` is also used to store voter responses anonymously for analytics. Only the scored questions are stored, so a session is the questionnaire that was matched; answers to sets outside `questionSetIds` are not recorded. It is `null` when the voter opted out of research (`includeInResearch: false`) or none of the voter's questions were scored; otherwise the session is recorded even if no candidate matched.
 
 ---
 

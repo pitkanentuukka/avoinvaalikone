@@ -2,7 +2,9 @@ BEGIN;
 
 -- Anonymous voter response storage for aggregate analysis.
 -- No IP, no user agent, no precise timestamp — only a random session UUID and date.
--- The session_id is generated server-side at match time; it cannot be linked to any individual.
+-- The session_id was generated server-side at match time when this migration was
+-- written. Since #7 the client may supply it (the frontend sends a fresh random
+-- UUID per submission); see docs/direct-api-caveats.md.
 CREATE TABLE IF NOT EXISTS voter_responses (
   session_id   UUID    NOT NULL,
   question_id  UUID    NOT NULL REFERENCES questions (id) ON DELETE CASCADE,
