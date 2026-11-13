@@ -58,7 +58,7 @@ docker compose down                       # Stop all services
   - `src/routes/voter.js` — match computation: weighted similarity scoring (answers 0–4 scale, weights 0–3)
 
 **Rate limiting** (every limiter, including the per-token ones in `src/routes/candidates.js`, is skipped unless `NODE_ENV=production`):
-- Admin: 30 req / 15 min, counting only requests without a valid `ADMIN_SECRET` (brute-force protection; an authenticated admin is never throttled)
+- Admin: 30 req / 15 min, counting only requests without a valid `ADMIN_SECRET` (brute-force protection; an authenticated admin is never throttled). `GET /api/health` with an `Authorization` header shares this budget, because it returns pool counters to a valid admin token and so can test guesses; probes without the header are never throttled
 - NGO submissions: 20 req / 15 min
 - Voter match: 300 req / 1 min by default, set with `RATE_LIMIT_MATCH_MAX` (headroom for carrier CGNAT on election night; see `docs/scaling.md`)
 

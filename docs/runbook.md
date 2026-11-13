@@ -29,8 +29,9 @@ the workflow's "Build & restart services" step with an earlier checkout.
 | `statement timeout` errors | A query hit `PG_STATEMENT_TIMEOUT_MS` (10 s) | Find and fix the query; the timeout is protective, don't just raise it |
 | Backend restart loops | Migration failure (runs on every start) | `docker compose logs backend`, fix the migration, redeploy |
 
-Health/load at a glance: `curl -s https://avoinvaalikone.fi/api/health` — pool
-counters (`waiting > 0` = saturation). Errors: Sentry (backend + frontend).
+Health/load at a glance: `curl -s -H "Authorization: Bearer $ADMIN_SECRET" https://avoinvaalikone.fi/api/health`
+— pool counters (`waiting > 0` = saturation; only returned for the admin
+token, and a wrong token counts toward the admin rate limit). Errors: Sentry (backend + frontend).
 
 ## Election-night checklist
 

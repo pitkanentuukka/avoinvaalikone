@@ -37,50 +37,6 @@ app.use(helmet({
   },
 }));
 
-// Health check. Deliberately no DB roundtrip (Docker/CI probe it frequently).
-// Registered before the HTTPS redirect: the Docker healthcheck calls the
-// container over plain HTTP, and a redirect would send it to PUBLIC_HOST,
-// where another replica answers for this one.
-// Pool counters give free load visibility during the event, but they leak
-// backend saturation to anyone, so they're only returned to an authenticated
-// admin — the operator curls this with the admin token during the event.
-app.get("/api/health", (req, res) => {
-  const body = { status: "ok", timestamp: new Date().toISOString() };
-  if (isAdminRequest(req)) {
-    body.pool = { total: pool.totalCount, idle: pool.idleCount, waiting: pool.waitingCount };
-  }
-  res.json(body);
-});
-
-// Redirect HTTP to HTTPS in production.
-// Requires PUBLIC_HOST env var — falls back to skipping the redirect rather
-// than trusting the user-supplied Host header (which would be an open redirect).
-app.use((req, res, next) => {
-  if (process.env.NODE_ENV === 'production' && req.header('x-forwarded-proto') !== 'https') {
-    const host = process.env.PUBLIC_HOST;
-    if (!host) {
-      console.error('PUBLIC_HOST is not set — skipping HTTP→HTTPS redirect to avoid open redirect vulnerability');
-      return next();
-    }
-    return res.redirect(301, `https://${host}${req.url}`);
-  }
-  next();
-});
-
-// ─── Middleware ───
-app.use(
-  cors({
-    origin: process.env.CORS_ORIGIN || "http://localhost:5173",
-    credentials: true,
-  })
-);
-// In production only log failures: per-request logging at election-day rates
-// is measurable event-loop and disk overhead with no diagnostic value.
-app.use(morgan(":date[iso] :method :url :status :response-time ms - :res[content-length]", {
-  skip: (req, res) => process.env.NODE_ENV === "production" && res.statusCode < 400,
-}));
-app.use(express.json({ limit: "1mb" }));
-
 // ─── Rate Limiters ───
 
 // Stores live in Redis when REDIS_URL is set, so the limits hold across
@@ -130,6 +86,60 @@ const matchLimiter = rateLimit({
   store: redisStore("rl:match:"),
   passOnStoreError: true,
 });
+
+// In production only log failures: per-request logging at election-day rates
+// is measurable event-loop and disk overhead with no diagnostic value.
+// Registered before the health check so throttled ADMIN_SECRET guesses there
+// (429) are logged like those on /api/admin/*; successful probes never are.
+app.use(morgan(":date[iso] :method :url :status :response-time ms - :res[content-length]", {
+  skip: (req, res) =>
+    res.statusCode < 400 && (process.env.NODE_ENV === "production" || req.path === "/api/health"),
+}));
+
+// Health check. Deliberately no DB roundtrip (Docker/CI probe it frequently).
+// Registered before the HTTPS redirect: the Docker healthcheck calls the
+// container over plain HTTP, and a redirect would send it to PUBLIC_HOST,
+// where another replica answers for this one.
+// Pool counters give free load visibility during the event, but they leak
+// backend saturation to anyone, so they're only returned to an authenticated
+// admin — the operator curls this with the admin token during the event.
+// That also makes it a way to test ADMIN_SECRET guesses, so a request with an
+// Authorization header goes through adminLimiter, sharing the /api/admin/*
+// budget. Probes without one (Docker, CI) are never throttled.
+const limitAdminGuesses = (req, res, next) =>
+  req.headers.authorization === undefined ? next() : adminLimiter(req, res, next);
+
+app.get("/api/health", limitAdminGuesses, (req, res) => {
+  const body = { status: "ok", timestamp: new Date().toISOString() };
+  if (isAdminRequest(req)) {
+    body.pool = { total: pool.totalCount, idle: pool.idleCount, waiting: pool.waitingCount };
+  }
+  res.json(body);
+});
+
+// Redirect HTTP to HTTPS in production.
+// Requires PUBLIC_HOST env var — falls back to skipping the redirect rather
+// than trusting the user-supplied Host header (which would be an open redirect).
+app.use((req, res, next) => {
+  if (process.env.NODE_ENV === 'production' && req.header('x-forwarded-proto') !== 'https') {
+    const host = process.env.PUBLIC_HOST;
+    if (!host) {
+      console.error('PUBLIC_HOST is not set — skipping HTTP→HTTPS redirect to avoid open redirect vulnerability');
+      return next();
+    }
+    return res.redirect(301, `https://${host}${req.url}`);
+  }
+  next();
+});
+
+// ─── Middleware ───
+app.use(
+  cors({
+    origin: process.env.CORS_ORIGIN || "http://localhost:5173",
+    credentials: true,
+  })
+);
+app.use(express.json({ limit: "1mb" }));
 
 // ─── Routes ───
 
