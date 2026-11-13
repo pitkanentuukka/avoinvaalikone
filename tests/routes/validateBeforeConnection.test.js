@@ -42,6 +42,14 @@ const cases = [
   ["review: invalid duplicateOf", () => review({ reviews: [{ questionId: QUESTION_ID, duplicateOf: "nope" }] })],
   ["POST /:id/questions: missing statement", () => addQuestion({})],
   ["POST /:id/questions: statement too long", () => addQuestion({ statement: "a".repeat(501) })],
+  // Issue #67: values of the wrong type must be rejected, not crash on .trim().
+  ["POST /api/question-sets: numeric ngoName", () => submit({ ngoName: 1, title: "Sarja", questions: ["Väittämä"] })],
+  ["POST /api/question-sets: object title", () => submit({ ngoName: "Järjestö", title: {}, questions: ["Väittämä"] })],
+  ["POST /:id/questions: numeric statement", () => addQuestion({ statement: 1 })],
+  ["review: null review item", () => review({ reviews: [null] })],
+  ["review: string review item", () => review({ reviews: ["x"] })],
+  ["review: missing questionId", () => review({ reviews: [{ rejected: true }] })],
+  ["review: invalid questionId", () => review({ reviews: [{ questionId: "x", rejected: true }] })],
 ];
 
 beforeAll(() => {

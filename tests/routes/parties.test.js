@@ -64,6 +64,17 @@ describe("POST /api/admin/parties", () => {
     expect(res.body.error).toMatch(/nimi vaaditaan/i);
   });
 
+  // Issue #67: a non-string name used to crash on .trim() → 500.
+  test.each([1, {}, ["Vihreät"]])("non-string name %p → 400", async (name) => {
+    const res = await request(app)
+      .post("/api/admin/parties")
+      .set("Authorization", authHeader)
+      .send({ name });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/nimi vaaditaan/i);
+    expect(db.query).not.toHaveBeenCalled();
+  });
+
   test("name too long (>100 chars) → 400", async () => {
     const res = await request(app)
       .post("/api/admin/parties")
