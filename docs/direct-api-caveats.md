@@ -17,9 +17,8 @@ unaffected, and what a fix would look like.
 Validation accepts UUIDs in any case, but the routes look answers up by the
 lowercase ID the database returns.
 
-- **Match:** an uppercase key is silently left out of scoring and out of
-  `questionCount`. An uppercase `answers` key also makes that request's research
-  insert into `voter_responses` fail.
+- **Match:** an uppercase key is silently left out of scoring, out of
+  `questionCount` and out of the research rows in `voter_responses`.
 - **Candidate answers:** an answer under an uppercase key is not saved. Its key
   is returned in `skipped`, as if the question had been deleted or merged.
 
