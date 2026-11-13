@@ -61,7 +61,6 @@ describe("POST /api/question-sets", () => {
   });
 
   test("empty questions array → 400", async () => {
-    buildMockClient();
     const res = await request(app)
       .post("/api/question-sets")
       .send({ ngoName: "TestiJärjestö", title: "Sarja", questions: [] });
@@ -70,7 +69,6 @@ describe("POST /api/question-sets", () => {
   });
 
   test("ngoName too long → 400", async () => {
-    buildMockClient();
     const res = await request(app)
       .post("/api/question-sets")
       .send({ ngoName: "a".repeat(256), title: "Sarja", questions: ["Väittämä"] });
@@ -96,7 +94,6 @@ describe("POST /api/question-sets", () => {
   });
 
   test("missing title → 400", async () => {
-    buildMockClient();
     const res = await request(app)
       .post("/api/question-sets")
       .send({ ngoName: "TestiJärjestö", questions: ["Väittämä 1"] });
@@ -105,7 +102,6 @@ describe("POST /api/question-sets", () => {
   });
 
   test("title too long → 400", async () => {
-    buildMockClient();
     const res = await request(app)
       .post("/api/question-sets")
       .send({ ngoName: "TestiJärjestö", title: "a".repeat(256), questions: ["Väittämä 1"] });
@@ -114,7 +110,6 @@ describe("POST /api/question-sets", () => {
   });
 
   test("invalid ngoEmail → 400", async () => {
-    buildMockClient();
     const res = await request(app)
       .post("/api/question-sets")
       .send({ ngoName: "TestiJärjestö", title: "Sarja", ngoEmail: "not-email", questions: ["Väittämä 1"] });
@@ -123,7 +118,6 @@ describe("POST /api/question-sets", () => {
   });
 
   test("ngoEmail too long → 400", async () => {
-    buildMockClient();
     // 252 + "@b.fi" = 256 chars, exceeds 255 limit
     const res = await request(app)
       .post("/api/question-sets")
@@ -133,7 +127,6 @@ describe("POST /api/question-sets", () => {
   });
 
   test("invalid logoUrl → 400", async () => {
-    buildMockClient();
     const res = await request(app)
       .post("/api/question-sets")
       .send({ ngoName: "TestiJärjestö", title: "Sarja", logoUrl: "javascript:alert(1)", questions: ["Väittämä 1"] });
@@ -142,7 +135,6 @@ describe("POST /api/question-sets", () => {
   });
 
   test("logoUrl too long → 400", async () => {
-    buildMockClient();
     const res = await request(app)
       .post("/api/question-sets")
       .send({ ngoName: "TestiJärjestö", title: "Sarja", logoUrl: "https://example.com/" + "a".repeat(490), questions: ["Väittämä 1"] });
@@ -167,7 +159,6 @@ describe("POST /api/question-sets", () => {
   });
 
   test("statement over 500 characters → 400 naming it, nothing created", async () => {
-    buildMockClient();
     const long = "Pitkä väittämä " + "a".repeat(500);
     const res = await request(app)
       .post("/api/question-sets")
@@ -180,7 +171,6 @@ describe("POST /api/question-sets", () => {
   });
 
   test("over-long statement in object form → 400; several → plural message", async () => {
-    const client = buildMockClient();
     const res = await request(app)
       .post("/api/question-sets")
       .send({
@@ -192,7 +182,7 @@ describe("POST /api/question-sets", () => {
     expect(res.body.error).toMatch(/Väittämät ovat liian pitkiä/);
     expect(res.body.error).toContain("Eka");
     expect(res.body.error).toContain("Toka");
-    expect(client.query).not.toHaveBeenCalled();
+    expect(db.getClient).not.toHaveBeenCalled();
   });
 
   test("statement of exactly 500 characters → 201", async () => {
@@ -214,13 +204,12 @@ describe("POST /api/question-sets", () => {
   });
 
   test("no non-empty statements → 400, no empty question set created", async () => {
-    const client = buildMockClient();
     const res = await request(app)
       .post("/api/question-sets")
       .send({ ngoName: "TestiJärjestö", title: "Sarja", questions: ["   ", ""] });
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/väittämä/i);
-    expect(client.query).not.toHaveBeenCalled();
+    expect(db.getClient).not.toHaveBeenCalled();
   });
 
   test("DB error mid-transaction → ROLLBACK called and client.release() called", async () => {
@@ -364,7 +353,6 @@ describe("PATCH /api/admin/question-sets/:id/review", () => {
   });
 
   test("missing reviews field → 400", async () => {
-    buildMockClient();
     const res = await request(app)
       .patch(`/api/admin/question-sets/${VALID_UUID}/review`)
       .set("Authorization", authHeader)
@@ -374,7 +362,6 @@ describe("PATCH /api/admin/question-sets/:id/review", () => {
   });
 
   test("empty reviews array → 400", async () => {
-    buildMockClient();
     const res = await request(app)
       .patch(`/api/admin/question-sets/${VALID_UUID}/review`)
       .set("Authorization", authHeader)
@@ -395,17 +382,13 @@ describe("PATCH /api/admin/question-sets/:id/review", () => {
   });
 
   test("editedStatement too long → 400", async () => {
-    const client = buildMockClient();
-    client.query
-      .mockResolvedValueOnce({})                     // BEGIN
-      .mockResolvedValueOnce({ rows: [pendingSet] }) // SELECT FOR UPDATE
-      .mockResolvedValueOnce({});                    // ROLLBACK
     const res = await request(app)
       .patch(`/api/admin/question-sets/${VALID_UUID}/review`)
       .set("Authorization", authHeader)
       .send({ reviews: [{ questionId: Q1, rejected: false, editedStatement: "a".repeat(501) }] });
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/liian pitkä/i);
+    expect(db.getClient).not.toHaveBeenCalled();
   });
 
   test("all questions accepted → status approved, hidden=true → 200", async () => {
@@ -637,7 +620,6 @@ describe("POST /api/admin/question-sets/:id/questions", () => {
   });
 
   test("missing statement → 400", async () => {
-    buildMockClient();
     const res = await request(app)
       .post(`/api/admin/question-sets/${VALID_UUID}/questions`)
       .set("Authorization", authHeader)
@@ -647,7 +629,6 @@ describe("POST /api/admin/question-sets/:id/questions", () => {
   });
 
   test("statement too long → 400", async () => {
-    buildMockClient();
     const res = await request(app)
       .post(`/api/admin/question-sets/${VALID_UUID}/questions`)
       .set("Authorization", authHeader)
@@ -851,7 +832,6 @@ describe("POST /api/admin/question-sets/merge-questions", () => {
   });
 
   test("invalid keepId → 400", async () => {
-    buildMockClient();
     const res = await request(app)
       .post("/api/admin/question-sets/merge-questions")
       .set("Authorization", authHeader)
