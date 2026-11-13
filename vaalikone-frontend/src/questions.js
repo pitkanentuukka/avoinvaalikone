@@ -8,7 +8,9 @@ export function distinctQuestions(questionSets) {
   return [...new Map(approved.flatMap((s) => s.questions || []).map((q) => [q.id, q])).values()];
 }
 
-// How many of the questions the candidate has rated.
+// How many of the questions the candidate has rated. Answers loaded from the
+// server can include questions not on the page (sets no longer approved), so
+// count by question rather than by answer (#19).
 export function answeredCount(answers, questions) {
-  return Object.values(answers).filter((a) => a.value !== undefined).length;
+  return questions.filter((q) => answers[q.id]?.value !== undefined).length;
 }
