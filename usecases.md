@@ -87,7 +87,7 @@ Voters answer questions and get matched with candidates.
 - All voter answers match a candidate perfectly -> 100% match
 - All voter answers are maximally different from candidate -> 0% match (value diff = 4)
 - Weights default to 1 (the "somewhat important" option the UI shows as selected) if not provided; an explicit 0 is kept
-- Rate limited: 60 requests per 1 minute
+- Rate limited: 300 requests per 1 minute by default (`RATE_LIMIT_MATCH_MAX`)
 - Voter responses are stored with a random session UUID (no identity link)
 
 ### UC-VOTER-2: View All Candidates
@@ -327,9 +327,11 @@ These apply across all user categories and should be tested as part of E2E scena
 
 ### CC-2: Rate Limiting
 
-- Admin endpoints: 30 req / 15 min, counting only requests without a valid admin token (skipped in non-production)
+All limits apply only in production (`NODE_ENV=production`).
+
+- Admin endpoints: 30 req / 15 min, counting only requests without a valid admin token
 - NGO submission: 20 req / 15 min
-- Voter match: 60 req / 1 min
+- Voter match: 300 req / 1 min by default (`RATE_LIMIT_MATCH_MAX`)
 - Exceeding limits -> 429 with Finnish error message
 
 ### CC-3: Input Validation
