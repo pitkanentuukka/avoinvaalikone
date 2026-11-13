@@ -4,6 +4,7 @@ import * as Sentry from "@sentry/react";
 import translations from "./translations";
 import { createApi, isTransientError } from "./api";
 import { cleanToken, readInitialLink, rememberLink, tokenLinkFromParams } from "./tokenLinks";
+import { answeredCount, distinctQuestions } from "./questions";
 import voterGuideContent from "./guides/voter-guide.md?raw";
 import candidateGuideContent from "./guides/candidate-guide.md?raw";
 import adminGuideContent from "./guides/admin-guide.md?raw";
@@ -1295,12 +1296,6 @@ const labelStyle = { fontSize: "13px", fontWeight: 600, display: "block", margin
 const candidateLink = (token) => `${window.location.origin}/?candidateToken=${token}`;
 const registrationLink = (token) => `${window.location.origin}/?register=${token}`;
 
-// Distinct questions across approved sets (a question may be shared by several sets).
-function distinctQuestions(questionSets) {
-  const approved = questionSets.filter((s) => s.status === "approved");
-  return [...new Map(approved.flatMap((s) => s.questions || []).map((q) => [q.id, q])).values()];
-}
-
 function confirmAction(message) {
   return import.meta.env.VITE_NODE_ENV === "development" || window.confirm(message);
 }
@@ -1733,7 +1728,7 @@ function CandidateView({ candidateToken, justRegistered, leaveGuardRef }) {
     );
   }
 
-  const answeredCount = Object.values(answers).filter((a) => a.value !== undefined).length;
+  const answered = answeredCount(answers, allQuestions);
   const canSave = profileComplete(profile);
 
   return (
@@ -1749,7 +1744,7 @@ function CandidateView({ candidateToken, justRegistered, leaveGuardRef }) {
         <div>
           <Badge color="blue">{partyName}</Badge>
           <h2 style={{ fontSize: "24px", fontWeight: 800, margin: "8px 0 4px" }}>{t.candidateAnswerTitle}</h2>
-          <p style={{ color: palette.textMuted, fontSize: "14px" }}>{answeredCount} / {allQuestions.length} {t.candidateAnsweredCount}</p>
+          <p style={{ color: palette.textMuted, fontSize: "14px" }}>{answered} / {allQuestions.length} {t.candidateAnsweredCount}</p>
         </div>
         <Button onClick={save} loading={saving} disabled={!canSave}>{t.candidateSaveAnswers}</Button>
       </div>
@@ -1776,7 +1771,7 @@ function CandidateView({ candidateToken, justRegistered, leaveGuardRef }) {
 
       <div style={{ textAlign: "center", paddingBottom: "40px" }}>
         <Button size="lg" onClick={save} loading={saving} disabled={!canSave}>
-          {t.candidateSaveAnswers} ({answeredCount}/{allQuestions.length})
+          {t.candidateSaveAnswers} ({answered}/{allQuestions.length})
         </Button>
       </div>
     </div>
