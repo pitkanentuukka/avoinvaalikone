@@ -23,7 +23,11 @@ match rate limit for the duration of the test, since all k6 traffic comes from
 one IP:
 
 ```bash
-RATE_LIMIT_MATCH_MAX=100000   # in .env, then `docker compose … up -d backend` (not `restart`)
+# in /opt/vaalikone: raise the limit for the test (keep both -f files; not `restart`,
+# which keeps the old environment)
+RATE_LIMIT_MATCH_MAX=100000 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d backend
+# afterwards: back to the .env value
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d backend
 ```
 
 **Never load-test through Cloudflare** (`https://avoinvaalikone.fi`): you would

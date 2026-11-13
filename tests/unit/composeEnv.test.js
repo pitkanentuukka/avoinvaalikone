@@ -1,6 +1,7 @@
 // The backend container only sees the variables docker-compose.yml lists under
-// its `environment:` (no env_file, and .dockerignore keeps .env out of the
-// image), so an operator dial the docs tell you to set in .env must be listed.
+// its `environment:`: there is no env_file, and the Dockerfile copies only
+// src/ and migrations/, so .env never reaches the image. An operator dial the
+// docs tell you to set in .env must therefore be listed.
 const fs = require("fs");
 const path = require("path");
 
