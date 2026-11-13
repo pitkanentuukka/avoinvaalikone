@@ -11,11 +11,18 @@ if (process.env.SENTRY_DSN) {
     // through the free-tier quota and add overhead for no decision value.
     tracesSampleRate: 0,
     // The SDK attaches each request's body to its error events by default.
-    // A match request's body is a voter's answers, weights and constituency,
-    // political opinions the research data is kept unlinkable to protect, and
-    // Sentry is a third party. The stack trace and the route are enough to
-    // debug with (issue #34).
+    // A match request's body is a voter's answers, weights and constituency:
+    // political opinions, which the research data is kept unlinkable to
+    // protect, and Sentry is a third party. The stack trace and the route are
+    // enough to debug with (issue #34).
     integrations: [Sentry.httpIntegration({ maxIncomingRequestBodySize: "none" })],
+    // The Express error handler can still attach the parsed req.body when an
+    // error reaches it outside its request's async context, and a future SDK
+    // version may add other ways; drop the body from every event regardless.
+    beforeSend(event) {
+      if (event.request) delete event.request.data;
+      return event;
+    },
   });
 }
 
