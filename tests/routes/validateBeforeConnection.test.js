@@ -42,14 +42,28 @@ const cases = [
   ["review: invalid duplicateOf", () => review({ reviews: [{ questionId: QUESTION_ID, duplicateOf: "nope" }] })],
   ["POST /:id/questions: missing statement", () => addQuestion({})],
   ["POST /:id/questions: statement too long", () => addQuestion({ statement: "a".repeat(501) })],
-  // Issue #67: values of the wrong type must be rejected, not crash on .trim().
-  ["POST /api/question-sets: numeric ngoName", () => submit({ ngoName: 1, title: "Sarja", questions: ["Väittämä"] })],
-  ["POST /api/question-sets: object title", () => submit({ ngoName: "Järjestö", title: {}, questions: ["Väittämä"] })],
-  ["POST /:id/questions: numeric statement", () => addQuestion({ statement: 1 })],
-  ["review: null review item", () => review({ reviews: [null] })],
-  ["review: string review item", () => review({ reviews: ["x"] })],
-  ["review: missing questionId", () => review({ reviews: [{ rejected: true }] })],
-  ["review: invalid questionId", () => review({ reviews: [{ questionId: "x", rejected: true }] })],
+  // Issue #67: values of the wrong type must be rejected with the field's
+  // message, not crash on .trim() (or, for truthy ones, claim "too long").
+  ...[
+    ["numeric ngoName", { ngoName: 1 }, /nimi ja otsikko vaaditaan/],
+    ["object title", { title: {} }, /nimi ja otsikko vaaditaan/],
+    ["ngoEmail false", { ngoEmail: false }, /Virheellinen sähköpostiosoite/],
+    ["ngoEmail 0", { ngoEmail: 0 }, /Virheellinen sähköpostiosoite/],
+    ["numeric ngoEmail", { ngoEmail: 1 }, /Virheellinen sähköpostiosoite/],
+    ["logoUrl false", { logoUrl: false }, /Logon URL on virheellinen/],
+    ["logoUrl 0", { logoUrl: 0 }, /Logon URL on virheellinen/],
+    ["object logoUrl", { logoUrl: {} }, /Logon URL on virheellinen/],
+  ].map(([name, fields, error]) => [
+    `POST /api/question-sets: ${name}`,
+    () => submit({ ngoName: "Järjestö", title: "Sarja", questions: ["Väittämä"], ...fields }),
+    error,
+  ]),
+  ["POST /:id/questions: numeric statement", () => addQuestion({ statement: 1 }), /Väittämä vaaditaan/],
+  ["review: null review item", () => review({ reviews: [null] }), /Virheellinen kysymyksen tunniste/],
+  ["review: string review item", () => review({ reviews: ["x"] }), /Virheellinen kysymyksen tunniste/],
+  ["review: missing questionId", () => review({ reviews: [{ rejected: true }] }), /Virheellinen kysymyksen tunniste/],
+  ["review: invalid questionId", () => review({ reviews: [{ questionId: "x", rejected: true }] }), /Virheellinen kysymyksen tunniste/],
+  ["review: numeric editedStatement", () => review({ reviews: [{ questionId: QUESTION_ID, editedStatement: 1 }] }), /Muokattu väittämä on virheellinen/],
 ];
 
 beforeAll(() => {
@@ -67,8 +81,10 @@ afterEach(() => {
   console.error.mockRestore();
 });
 
-test.each(cases)("%s → 400 without a pool checkout", async (_name, send) => {
+// Pad rows to three columns: with fewer, jest passes `done` as the third argument.
+test.each(cases.map(([name, send, error = null]) => [name, send, error]))("%s → 400 without a pool checkout", async (_name, send, error) => {
   const res = await send().timeout(REQUEST_TIMEOUT_MS);
   expect(res.status).toBe(400);
+  if (error) expect(res.body.error).toMatch(error);
   expect(db.getClient).not.toHaveBeenCalled();
 }, TIMEOUT_MS);

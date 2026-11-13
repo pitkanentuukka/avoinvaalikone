@@ -173,6 +173,28 @@ describe("POST /api/admin/parties — email validation", () => {
     expect(res.body.error).toMatch(/liian pitkä/i);
   });
 
+  // Issue #67: a falsy non-string used to skip the checks and crash on .trim();
+  // a truthy one was reported as "too long".
+  test.each([false, 0, 1, {}])("non-string email %p → 400", async (email) => {
+    const res = await request(app)
+      .post("/api/admin/parties")
+      .set("Authorization", authHeader)
+      .send({ name: "Vihreät", email });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("Virheellinen sähköpostiosoite");
+    expect(db.query).not.toHaveBeenCalled();
+  });
+
+  test.each([null, ""])("email %p → stored as null", async (email) => {
+    db.query.mockResolvedValueOnce({ rows: [{ id: VALID_UUID, name: "Vihreät", email: null }] });
+    const res = await request(app)
+      .post("/api/admin/parties")
+      .set("Authorization", authHeader)
+      .send({ name: "Vihreät", email });
+    expect(res.status).toBe(201);
+    expect(db.query.mock.calls[0][1][2]).toBeNull();
+  });
+
   test("valid email → included in 201 response", async () => {
     const party = { id: VALID_UUID, name: "Vihreät", token: "vihre-t-abc12345", email: "vihrea@example.fi", created_at: new Date().toISOString() };
     db.query.mockResolvedValueOnce({ rows: [party] });

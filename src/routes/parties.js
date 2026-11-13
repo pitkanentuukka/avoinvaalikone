@@ -45,10 +45,16 @@ router.post("/", requireAdmin, async (req, res, next) => {
     if (!isValidLength(name, 100)) {
       return res.status(400).json({ error: "Puolueen nimi on liian pitkä (maksimi: 100 merkkiä)" });
     }
-    if (email && !isValidLength(email, 255)) {
+    // Optional: null, undefined and "" mean "no email"; anything else must be
+    // a string (a falsy non-string like 0 or false would crash .trim()).
+    const hasEmail = email != null && email !== "";
+    if (hasEmail && typeof email !== "string") {
+      return res.status(400).json({ error: "Virheellinen sähköpostiosoite" });
+    }
+    if (hasEmail && !isValidLength(email, 255)) {
       return res.status(400).json({ error: "Sähköpostiosoite on liian pitkä (maksimi: 255 merkkiä)" });
     }
-    if (email && !isValidEmail(email)) {
+    if (hasEmail && !isValidEmail(email)) {
       return res.status(400).json({ error: "Virheellinen sähköpostiosoite" });
     }
 
@@ -58,7 +64,7 @@ router.post("/", requireAdmin, async (req, res, next) => {
       `INSERT INTO parties (name, token, email)
        VALUES ($1, $2, $3)
        RETURNING id, name, token, registration_token, email, created_at`,
-      [name.trim(), token, email?.trim() || null]
+      [name.trim(), token, hasEmail ? email.trim() : null]
     );
     res.status(201).json(rows[0]);
   } catch (err) {
