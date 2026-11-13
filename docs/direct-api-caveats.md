@@ -17,8 +17,10 @@ unaffected, and what a fix would look like.
 Validation accepts UUIDs in any case, but the routes look answers up by the
 lowercase ID the database returns.
 
-- **Match:** an uppercase key is silently left out of scoring, out of
-  `questionCount` and out of the research rows in `voter_responses`.
+- **Match:** an uppercase `answers` key is silently left out of scoring, out of
+  `questionCount` and out of the research rows in `voter_responses`. An
+  uppercase `weights` key is silently ignored, so that question gets the
+  default weight 1 (`DEFAULT_WEIGHT`) in scoring and in its research row.
 - **Candidate answers:** an answer under an uppercase key is not saved. Its key
   is returned in `skipped`, as if the question had been deleted or merged.
 
@@ -81,7 +83,7 @@ submission and reuses it only for the one retry of that same request.
 **Endpoint:** `POST /api/voter/match` (`sessionId`)
 
 `voter_responses.session_id` is stored exactly as the client sent it. Before
-#7 it was always server-random (the `migrations/005` header still says so). A
+#7 it was always server-random. A
 client could pick ids that encode an identifier, or reuse one id per device,
 and so link research rows to a person or device. Clients already learned the
 server-random id from the response and could record it, so what changed is
