@@ -138,7 +138,6 @@ publicRouter.get("/", publicCache(300), microCache(), async (req, res, next) => 
 publicRouter.post("/", async (req, res, next) => {
   let client;
   try {
-    client = await db.getClient();
     const { ngoName, ngoEmail, logoUrl, title, questions } = req.body;
 
     if (!ngoName?.trim() || !title?.trim()) {
@@ -194,6 +193,9 @@ publicRouter.post("/", async (req, res, next) => {
       return res.status(400).json({ error: "Vähintään yksi väittämä vaaditaan" });
     }
 
+    // Check out a connection only once the body is valid, so invalid requests
+    // never wait for (or hold) a pool slot.
+    client = await db.getClient();
     await begin(client);
 
     const { rows: setRows } = await client.query(
@@ -244,7 +246,6 @@ const adminRouter = Router();
 adminRouter.post("/merge-questions", requireAdmin, async (req, res, next) => {
   let client;
   try {
-    client = await db.getClient();
     const { keepId, dropIds } = req.body;
 
     if (!isValidUUID(keepId)) {
@@ -260,6 +261,7 @@ adminRouter.post("/merge-questions", requireAdmin, async (req, res, next) => {
       return res.status(400).json({ error: "Kysymystä ei voi yhdistää itseensä" });
     }
 
+    client = await db.getClient();
     await begin(client);
 
     // Verify every referenced question exists.
@@ -398,12 +400,21 @@ adminRouter.patch("/:id/reject", requireAdmin, validateUUIDParam("id"), async (r
 adminRouter.patch("/:id/review", requireAdmin, validateUUIDParam("id"), async (req, res, next) => {
   let client;
   try {
-    client = await db.getClient();
     const { reviews } = req.body;
     if (!Array.isArray(reviews) || reviews.length === 0) {
       return res.status(400).json({ error: "reviews-kenttä vaaditaan" });
     }
+    // Validate edits and merge targets before checking out a connection.
+    for (const r of reviews) {
+      if (r.editedStatement != null && !isValidLength(r.editedStatement, 500)) {
+        return res.status(400).json({ error: "Muokattu väittämä on liian pitkä (maksimi: 500 merkkiä)" });
+      }
+      if (r.duplicateOf != null && !isValidUUID(r.duplicateOf)) {
+        return res.status(400).json({ error: "Virheellinen kaksoiskappaleen tunniste" });
+      }
+    }
 
+    client = await db.getClient();
     await begin(client);
 
     const { rows: sets } = await client.query(
@@ -413,17 +424,6 @@ adminRouter.patch("/:id/review", requireAdmin, validateUUIDParam("id"), async (r
     if (sets.length === 0) {
       await rollback(client);
       return res.status(404).json({ error: "Kysymyssarjaa ei löytynyt" });
-    }
-    // Validate edits and merge targets
-    for (const r of reviews) {
-      if (r.editedStatement != null && !isValidLength(r.editedStatement, 500)) {
-        await rollback(client);
-        return res.status(400).json({ error: "Muokattu väittämä on liian pitkä (maksimi: 500 merkkiä)" });
-      }
-      if (r.duplicateOf != null && !isValidUUID(r.duplicateOf)) {
-        await rollback(client);
-        return res.status(400).json({ error: "Virheellinen kaksoiskappaleen tunniste" });
-      }
     }
 
     const rejectedReviews = reviews.filter((r) => r.rejected);
@@ -607,7 +607,6 @@ adminRouter.patch("/:id/unhide", requireAdmin, validateUUIDParam("id"), async (r
 adminRouter.post("/:id/questions", requireAdmin, validateUUIDParam("id"), async (req, res, next) => {
   let client;
   try {
-    client = await db.getClient();
     const { statement } = req.body;
     if (!statement?.trim()) {
       return res.status(400).json({ error: "Väittämä vaaditaan" });
@@ -616,6 +615,7 @@ adminRouter.post("/:id/questions", requireAdmin, validateUUIDParam("id"), async 
       return res.status(400).json({ error: "Väittämä on liian pitkä (maksimi: 500 merkkiä)" });
     }
 
+    client = await db.getClient();
     const { rows: sets } = await client.query(
       "SELECT id, status, hidden FROM question_sets WHERE id = $1",
       [req.params.id]

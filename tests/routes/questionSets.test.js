@@ -96,7 +96,7 @@ describe("POST /api/question-sets", () => {
   });
 
   test("missing title → 400", async () => {
-    buildMockClient(); // route calls db.getClient() before validation
+    buildMockClient();
     const res = await request(app)
       .post("/api/question-sets")
       .send({ ngoName: "TestiJärjestö", questions: ["Väittämä 1"] });
@@ -167,7 +167,7 @@ describe("POST /api/question-sets", () => {
   });
 
   test("statement over 500 characters → 400 naming it, nothing created", async () => {
-    const client = buildMockClient();
+    buildMockClient();
     const long = "Pitkä väittämä " + "a".repeat(500);
     const res = await request(app)
       .post("/api/question-sets")
@@ -176,8 +176,7 @@ describe("POST /api/question-sets", () => {
     expect(res.body.error).toMatch(/liian pitkä/i);
     expect(res.body.error).toContain("Pitkä väittämä");
     expect(res.body.error).not.toContain("Väittämä 1");
-    expect(client.query).not.toHaveBeenCalled();
-    expect(client.release).toHaveBeenCalled();
+    expect(db.getClient).not.toHaveBeenCalled();
   });
 
   test("over-long statement in object form → 400; several → plural message", async () => {
