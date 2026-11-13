@@ -85,3 +85,60 @@ describe("Admin rate limit", () => {
     expect(res.status).toBe(200);
   });
 });
+
+// /api/health adds pool counters for a valid admin token, so it also answers
+// "is this ADMIN_SECRET right?" (issue #29). Guesses there must use the same
+// budget as /api/admin/*, while plain Docker/CI probes stay unthrottled.
+describe("Admin rate limit on /api/health", () => {
+  test("wrong-secret guesses are throttled after the limit", async () => {
+    const req = client();
+    for (let i = 0; i < ADMIN_LIMIT; i++) {
+      const res = await req("get", "/api/health").set("Authorization", "Bearer wrong");
+      expect(res.status).toBe(200);
+      expect(res.body.pool).toBeUndefined();
+    }
+    const res = await req("get", "/api/health").set("Authorization", "Bearer wrong");
+    expect(res.status).toBe(429);
+  });
+
+  test("guesses on /api/health and /api/admin share one budget", async () => {
+    const req = client();
+    for (let i = 0; i < ADMIN_LIMIT; i++) {
+      const path = i % 2 ? "/api/health" : "/api/admin/parties";
+      await req("get", path).set("Authorization", "Bearer wrong");
+    }
+    const health = await req("get", "/api/health").set("Authorization", "Bearer wrong");
+    expect(health.status).toBe(429);
+    const admin = await req("get", "/api/admin/parties").set("Authorization", "Bearer wrong");
+    expect(admin.status).toBe(429);
+  });
+
+  test("probes without an Authorization header are not throttled", async () => {
+    const req = client();
+    for (let i = 0; i < ADMIN_LIMIT + 10; i++) {
+      const res = await req("get", "/api/health");
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe("ok");
+    }
+  });
+
+  test("probes still answer after guesses from the same IP used up the budget", async () => {
+    const req = client();
+    for (let i = 0; i < ADMIN_LIMIT + 1; i++) {
+      await req("get", "/api/admin/parties").set("Authorization", "Bearer wrong");
+    }
+    const res = await req("get", "/api/health");
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("ok");
+  });
+
+  test("the real admin still gets the pool counters after the budget is used up", async () => {
+    const req = client();
+    for (let i = 0; i < ADMIN_LIMIT + 1; i++) {
+      await req("get", "/api/health").set("Authorization", "Bearer wrong");
+    }
+    const res = await req("get", "/api/health").set("Authorization", `Bearer ${ADMIN_SECRET}`);
+    expect(res.status).toBe(200);
+    expect(res.body.pool).toEqual({ total: 0, idle: 0, waiting: 0 });
+  });
+});
