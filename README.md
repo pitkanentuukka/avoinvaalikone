@@ -349,7 +349,7 @@ Integration tests use `supertest` and a mock database helper. Unit tests cover a
 | NGO submissions | 20 req | 15 min |
 | Voter match | 300 req (`RATE_LIMIT_MATCH_MAX`) | 1 min |
 
-All three limits apply only when `NODE_ENV=production`; otherwise they are skipped. The voter match default leaves room for many voters behind one carrier CGNAT address; raise `RATE_LIMIT_MATCH_MAX` if they hit 429s, or for load tests (see `docs/scaling.md`). The admin limit only counts requests that lack a valid `ADMIN_SECRET`, so it slows down guessing the secret without throttling a logged-in admin.
+These limits, and the per-token limits on the party, registration and candidate links (`src/routes/candidates.js`), apply only when `NODE_ENV=production`; otherwise they are skipped. The voter match default leaves room for many voters behind one carrier CGNAT address; raise `RATE_LIMIT_MATCH_MAX` if they hit 429s, or for load tests (see `docs/scaling.md`). The admin limit only counts requests that lack a valid `ADMIN_SECRET`, so it slows down guessing the secret without throttling a logged-in admin.
 
 ---
 

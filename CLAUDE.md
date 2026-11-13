@@ -57,7 +57,7 @@ docker compose down                       # Stop all services
   - `src/routes/candidates.js` — public reads plus three token tiers. **Party token** (`/party/:partyToken`): overview, rotate the registration link, re-send a candidate's link, remove candidates — it never sees candidate tokens, so it cannot edit profiles or answers. **Registration token** (`/register/:registrationToken`): candidate self-registration; candidates are visible to voters immediately; same name + email again re-sends the existing link instead of creating a duplicate. **Candidate token** (`/me/:candidateToken`): the only credential that can edit a candidate's own profile and answers.
   - `src/routes/voter.js` — match computation: weighted similarity scoring (answers 0–4 scale, weights 0–3)
 
-**Rate limiting** (all limiters are skipped unless `NODE_ENV=production`):
+**Rate limiting** (every limiter, including the per-token ones in `src/routes/candidates.js`, is skipped unless `NODE_ENV=production`):
 - Admin: 30 req / 15 min, counting only requests without a valid `ADMIN_SECRET` (brute-force protection; an authenticated admin is never throttled)
 - NGO submissions: 20 req / 15 min
 - Voter match: 300 req / 1 min by default, set with `RATE_LIMIT_MATCH_MAX` (headroom for carrier CGNAT on election night; see `docs/scaling.md`)
