@@ -57,10 +57,10 @@ docker compose down                       # Stop all services
   - `src/routes/candidates.js` — public reads plus three token tiers. **Party token** (`/party/:partyToken`): overview, rotate the registration link, re-send a candidate's link, remove candidates — it never sees candidate tokens, so it cannot edit profiles or answers. **Registration token** (`/register/:registrationToken`): candidate self-registration; candidates are visible to voters immediately; same name + email again re-sends the existing link instead of creating a duplicate. **Candidate token** (`/me/:candidateToken`): the only credential that can edit a candidate's own profile and answers.
   - `src/routes/voter.js` — match computation: weighted similarity scoring (answers 0–4 scale, weights 0–3)
 
-**Rate limiting** (skipped in development for admin endpoints):
+**Rate limiting** (every limiter, including the per-token ones in `src/routes/candidates.js`, is skipped unless `NODE_ENV=production`):
 - Admin: 30 req / 15 min, counting only requests without a valid `ADMIN_SECRET` (brute-force protection; an authenticated admin is never throttled)
 - NGO submissions: 20 req / 15 min
-- Voter match: 60 req / 1 min
+- Voter match: 300 req / 1 min by default, set with `RATE_LIMIT_MATCH_MAX` (headroom for carrier CGNAT on election night; see `docs/scaling.md`)
 
 **Match algorithm** (`src/match.js`, called from `src/routes/voter.js`): For each question the voter answered, computes `similarity = 1 - |voterValue - candidateValue| / 4`, multiplied by `weight + 1` (so weight 0 → factor 1, weight 3 → factor 4). A question the candidate skipped counts as similarity 0 with the voter's weight. Without that, a candidate who answered one question and agreed would get 100%. A question with no weight in the request counts as weight 1 (`DEFAULT_WEIGHT`), because the weighting UI shows "somewhat important" as selected and only sends weights the voter clicked; the same default is stored in `voter_responses`. Scores are averaged over all of the voter's scored questions and returned as a percentage, with `questionCount` in the response so the UI can show "vastannut X/Y". Results sort by match, then `answeredCount`, then name. When the voter restricts to certain sets, only the voter's questions in those sets are scored. Set membership is tested with `EXISTS` against `question_set_questions` (not a column on `questions`), so a question shared by multiple selected sets is still counted once.
 
@@ -88,7 +88,7 @@ When a set or a per-set link is removed, the route layer deletes any question th
 
 ### Environment Variables
 
-Copy `.env.example` to `.env`. Required: `DATABASE_URL`, `ADMIN_SECRET`. Optional: `PORT` (default 3000), `CORS_ORIGIN` (default `http://localhost:5173`), `NODE_ENV`, `PUBLIC_HOST` (production HTTPS-redirect target), `TRUST_PROXY_HOPS` (number of reverse proxies in front of the app, default 1; the production Cloudflare → Caddy → nginx chain needs 3, set in `docker-compose.prod.yml`).
+Copy `.env.example` to `.env`. Required: `DATABASE_URL`, `ADMIN_SECRET`. Optional: `PORT` (default 3000), `CORS_ORIGIN` (default `http://localhost:5173`), `NODE_ENV`, `PUBLIC_HOST` (production HTTPS-redirect target), `TRUST_PROXY_HOPS` (number of reverse proxies in front of the app, default 1; the production Cloudflare → Caddy → nginx chain needs 3, set in `docker-compose.prod.yml`), `RATE_LIMIT_MATCH_MAX` (voter match requests per IP per minute, default 300).
 
 ## Key Conventions
 

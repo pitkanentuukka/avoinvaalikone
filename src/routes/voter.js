@@ -25,8 +25,11 @@ const router = Router();
  * Returns { sessionId, questionCount, results }: candidates ranked by match
  * percentage. questionCount is how many of the voter's questions were scored;
  * each result's answeredCount is how many of those the candidate answered.
- * sessionId is null when includeInResearch is false or none of the answered
- * questions exist any more; otherwise it is set even if no candidate matched.
+ * sessionId is null when includeInResearch is false or none of the voter's
+ * questions were scored; otherwise it is set even if no candidate matched.
+ *
+ * A research session records the questionnaire that was matched: only the
+ * scored questions are stored, not answers kept from deselected sets.
  */
 router.post("/match", async (req, res, next) => {
   try {
@@ -90,9 +93,8 @@ router.post("/match", async (req, res, next) => {
 
     // Keep only answers for questions that still exist. Voter answers are stored
     // in browser localStorage, so they can reference questions that have since
-    // been merged or deleted; those must not reach the voter_responses insert
-    // (FK violation) or the match computation. This also bounds the insert to
-    // the number of questions actually in the DB.
+    // been merged or deleted; those must not reach the match computation or
+    // the voter_responses insert (FK violation).
     //
     // The same query flags which of them belong to the selected sets. A question
     // can belong to several sets, so membership is tested with EXISTS against the
@@ -100,7 +102,8 @@ router.post("/match", async (req, res, next) => {
     // when a question is shared by multiple selected sets). Only those questions
     // are scored: localStorage also keeps answers to sets the voter has since
     // deselected, and every question scored counts against candidates who
-    // skipped it.
+    // skipped it. For the same reason they are left out of the research
+    // session.
     const hasSetFilter = Array.isArray(questionSetIds) && questionSetIds.length > 0;
     const { rows: existingRows } = hasSetFilter
       ? await db.query(
@@ -192,13 +195,13 @@ router.post("/match", async (req, res, next) => {
     results.sort(compareResults);
 
     let sessionId = null;
-    if (includeInResearch !== false && voterQuestionIds.length > 0) {
+    if (includeInResearch !== false && scoredQuestionIds.length > 0) {
       sessionId = clientSessionId ?? randomUUID();
-      const placeholders = voterQuestionIds
+      const placeholders = scoredQuestionIds
         .map((_, i) => `($1, $${i * 3 + 2}, $${i * 3 + 3}, $${i * 3 + 4})`)
         .join(", ");
       const flatValues = [sessionId];
-      for (const qId of voterQuestionIds) {
+      for (const qId of scoredQuestionIds) {
         flatValues.push(qId, parseInt(answers[qId], 10), weightFor(weights, qId));
       }
       // Fire-and-forget: the research insert must not add latency to the match

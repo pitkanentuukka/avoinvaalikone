@@ -255,7 +255,7 @@ Question UUID keys must be **lowercase**, as the API returns them. An uppercase 
 
 | Method | Path | Auth | Rate limit |
 |--------|------|------|------------|
-| POST | `/api/voter/match` | None | 60 / min |
+| POST | `/api/voter/match` | None | 300 / min (`RATE_LIMIT_MATCH_MAX`) |
 
 ```json
 // Request
@@ -281,7 +281,7 @@ weighted   = similarity × (weight + 1)
 ```
 The weighted similarities are averaged over all of the voter's questions and returned as a percentage. A skipped question counts as full disagreement, so a candidate cannot reach a high match by answering only a few questions.
 
-**Response:** `{ sessionId, questionCount, results: [...] }`. `questionCount` is the number of the voter's questions that were scored. Results are sorted by `match` descending, then `answeredCount` descending (how many of the `questionCount` questions the candidate answered), then by name. Each result includes the candidate's answers for comparison. The `sessionId` is also used to store voter responses anonymously for analytics. It is `null` when the voter opted out of research (`includeInResearch: false`) or none of the answered questions exist any more; otherwise the session is recorded even if no candidate matched.
+**Response:** `{ sessionId, questionCount, results: [...] }`. `questionCount` is the number of the voter's questions that were scored. Results are sorted by `match` descending, then `answeredCount` descending (how many of the `questionCount` questions the candidate answered), then by name. Each result includes the candidate's answers for comparison. The `sessionId` is also used to store voter responses anonymously for analytics. Only the scored questions are stored, so a session is the questionnaire that was matched; answers to sets outside `questionSetIds` are not recorded. It is `null` when the voter opted out of research (`includeInResearch: false`) or none of the voter's questions were scored; otherwise the session is recorded even if no candidate matched.
 
 ---
 
@@ -323,6 +323,7 @@ The entire React SPA lives in [vaalikone-frontend/src/App.jsx](vaalikone-fronten
 | `SMTP_FROM` | `noreply@vaalikone.fi` | Sender address |
 | `SMTP_USER` | — | SMTP username (optional) |
 | `SMTP_PASS` | — | SMTP password (optional) |
+| `RATE_LIMIT_MATCH_MAX` | `300` | Voter match requests per IP per minute (production only) |
 
 In Docker Compose, `mailpit` provides a local SMTP server (port 1025) and web UI at http://localhost:8025, and `CORS_ORIGIN` is overridden to `http://localhost:80` to match the containerized frontend.
 
@@ -346,9 +347,9 @@ Integration tests use `supertest` and a mock database helper. Unit tests cover a
 |-------|-------|--------|
 | Admin endpoints (requests without a valid admin secret) | 30 req | 15 min |
 | NGO submissions | 20 req | 15 min |
-| Voter match | 60 req | 1 min |
+| Voter match | 300 req (`RATE_LIMIT_MATCH_MAX`) | 1 min |
 
-Rate limiting is skipped in development (`NODE_ENV=development`) for admin endpoints. The admin limit only counts requests that lack a valid `ADMIN_SECRET`, so it slows down guessing the secret without throttling a logged-in admin.
+These limits, and the per-token limits on the party, registration and candidate links (`src/routes/candidates.js`), apply only when `NODE_ENV=production`; otherwise they are skipped. The voter match default leaves room for many voters behind one carrier CGNAT address; raise `RATE_LIMIT_MATCH_MAX` if they hit 429s, or for load tests (see `docs/scaling.md`). The admin limit only counts requests that lack a valid `ADMIN_SECRET`, so it slows down guessing the secret without throttling a logged-in admin.
 
 ---
 

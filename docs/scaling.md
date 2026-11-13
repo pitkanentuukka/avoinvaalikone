@@ -254,8 +254,9 @@ Quick reference:
 
 ```bash
 # On the server, against localhost (bypasses Cloudflare — measures origin only)
-RATE_LIMIT_MATCH_MAX=100000 docker compose ... restart backend  # disable rate limit for test
+RATE_LIMIT_MATCH_MAX=100000 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d backend  # disable rate limit for test
 k6 run -e BASE_URL=http://localhost scripts/loadtest/voter-flow.js
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d backend  # afterwards: back to the .env value
 ```
 
 Thresholds in the script:
@@ -287,6 +288,6 @@ Cloudflare's DDoS/bot mitigation against your own IP.
 | Situation | Action |
 |-----------|--------|
 | Admin approves/hides a question set and it needs to be visible immediately | Cloudflare dashboard → Caching → Purge by URL → `https://avoinvaalikone.fi/api/question-sets` |
-| Voters behind one carrier IP getting 429 | Raise `RATE_LIMIT_MATCH_MAX` in `.env` and `docker compose restart backend` |
-| DB pool exhaustion (`waiting > 0`) | Raise `PG_POOL_MAX` (keep `replicas × PG_POOL_MAX` under 100) and restart |
+| Voters behind one carrier IP getting 429 | Raise `RATE_LIMIT_MATCH_MAX` in `.env`, then `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d backend`. Keep both `-f` files (without the prod overlay this recreates a single backend with `TRUST_PROXY_HOPS=1`, which puts every voter in one rate-limit bucket, and publishes port 3000 past Caddy and Cloudflare), and don't use `restart`, which keeps the old environment. All replicas are recreated at once, so expect a few seconds of 502s (the match request retries once) |
+| DB pool exhaustion (`waiting > 0`) | Raise `PG_POOL_MAX` in `.env` (keep `replicas × PG_POOL_MAX` under 100), then `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d backend` |
 | One backend replica unhealthy | `docker compose restart backend` — nginx re-resolves DNS within 10 s |

@@ -66,6 +66,7 @@ services:
       PG_POOL_MAX: ${PG_POOL_MAX:-10}
       PG_STATEMENT_TIMEOUT_MS: ${PG_STATEMENT_TIMEOUT_MS:-}
       PG_QUERY_TIMEOUT_MS: ${PG_QUERY_TIMEOUT_MS:-}
+      RATE_LIMIT_MATCH_MAX: ${RATE_LIMIT_MATCH_MAX:-}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:80}
       SENTRY_DSN: ${SENTRY_DSN:-}
       ADMIN_SECRET: ${ADMIN_SECRET:?ADMIN_SECRET must be set (no insecure default)}
