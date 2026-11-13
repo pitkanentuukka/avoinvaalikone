@@ -128,9 +128,13 @@ hostname every 10 seconds. Without this, nginx pins the IPs at startup and
 - `src/db/pool.js` — 30-second interval warns on pool saturation
   (`waitingCount > 0`); queries >500 ms are logged with the first 80 chars of
   SQL.
-- `/api/health` — now returns `{ status, pool: { total, idle, waiting } }`.
-  Free visibility via `curl https://avoinvaalikone.fi/api/health` during the
-  event; no DB roundtrip so Docker/CI probes stay cheap.
+- `/api/health` — returns `{ status, timestamp }`, plus
+  `pool: { total, idle, waiting }` when called with the admin token
+  (`Authorization: Bearer $ADMIN_SECRET`). Free visibility during the event; no
+  DB roundtrip so Docker/CI probes stay cheap. A request with an
+  `Authorization` header that isn't the admin token counts toward the admin
+  rate limit (30 / 15 min per IP, shared with `/api/admin/*`) and gets 429
+  after that, so don't point a monitor at it with a stale token.
 
 ---
 
@@ -233,13 +237,16 @@ curl -sI -H "Accept-Encoding: gzip" https://avoinvaalikone.fi/api/question-sets 
 ### 6. Check pool / health endpoint
 
 ```bash
-curl -s https://avoinvaalikone.fi/api/health | python3 -m json.tool
+curl -s -H "Authorization: Bearer $ADMIN_SECRET" https://avoinvaalikone.fi/api/health | python3 -m json.tool
 # {
 #   "status": "ok",
 #   "timestamp": "...",
 #   "pool": { "total": 3, "idle": 3, "waiting": 0 }
 # }
 ```
+
+Without the token (or with a wrong one) there is no `pool` field; a wrong
+token also counts toward the admin rate limit.
 
 `waiting > 0` during the event means the pool is saturated — raise `PG_POOL_MAX`
 or add a replica.

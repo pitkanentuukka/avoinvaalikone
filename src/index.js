@@ -87,6 +87,15 @@ const matchLimiter = rateLimit({
   passOnStoreError: true,
 });
 
+// In production only log failures: per-request logging at election-day rates
+// is measurable event-loop and disk overhead with no diagnostic value.
+// Registered before the health check so throttled ADMIN_SECRET guesses there
+// (429) are logged like those on /api/admin/*; successful probes never are.
+app.use(morgan(":date[iso] :method :url :status :response-time ms - :res[content-length]", {
+  skip: (req, res) =>
+    res.statusCode < 400 && (process.env.NODE_ENV === "production" || req.path === "/api/health"),
+}));
+
 // Health check. Deliberately no DB roundtrip (Docker/CI probe it frequently).
 // Registered before the HTTPS redirect: the Docker healthcheck calls the
 // container over plain HTTP, and a redirect would send it to PUBLIC_HOST,
@@ -130,11 +139,6 @@ app.use(
     credentials: true,
   })
 );
-// In production only log failures: per-request logging at election-day rates
-// is measurable event-loop and disk overhead with no diagnostic value.
-app.use(morgan(":date[iso] :method :url :status :response-time ms - :res[content-length]", {
-  skip: (req, res) => process.env.NODE_ENV === "production" && res.statusCode < 400,
-}));
 app.use(express.json({ limit: "1mb" }));
 
 // ─── Routes ───
