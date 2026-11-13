@@ -140,7 +140,7 @@ publicRouter.post("/", async (req, res, next) => {
   try {
     const { ngoName, ngoEmail, logoUrl, title, questions } = req.body;
 
-    if (!ngoName?.trim() || !title?.trim()) {
+    if (typeof ngoName !== "string" || !ngoName.trim() || typeof title !== "string" || !title.trim()) {
       return res
         .status(400)
         .json({ error: "Järjestön nimi ja otsikko vaaditaan" });
@@ -153,16 +153,26 @@ publicRouter.post("/", async (req, res, next) => {
     if (!isValidLength(title, 255)) {
       return res.status(400).json({ error: "Otsikko on liian pitkä (maksimi: 255 merkkiä)" });
     }
-    if (ngoEmail && !isValidLength(ngoEmail, 255)) {
-      return res.status(400).json({ error: "Sähköpostiosoite on liian pitkä (maksimi: 255 merkkiä)" });
-    }
-    if (ngoEmail && !isValidEmail(ngoEmail)) {
+    // Optional fields: null, undefined and "" mean "not given"; anything else
+    // must be a string (a falsy non-string like 0 or false would crash .trim()).
+    const hasEmail = ngoEmail != null && ngoEmail !== "";
+    const hasLogo = logoUrl != null && logoUrl !== "";
+    if (hasEmail && typeof ngoEmail !== "string") {
       return res.status(400).json({ error: "Virheellinen sähköpostiosoite" });
     }
-    if (logoUrl && !isValidLength(logoUrl, 500)) {
+    if (hasEmail && !isValidLength(ngoEmail, 255)) {
+      return res.status(400).json({ error: "Sähköpostiosoite on liian pitkä (maksimi: 255 merkkiä)" });
+    }
+    if (hasEmail && !isValidEmail(ngoEmail)) {
+      return res.status(400).json({ error: "Virheellinen sähköpostiosoite" });
+    }
+    if (hasLogo && typeof logoUrl !== "string") {
+      return res.status(400).json({ error: "Logon URL on virheellinen (vaaditaan http:// tai https://)" });
+    }
+    if (hasLogo && !isValidLength(logoUrl, 500)) {
       return res.status(400).json({ error: "Logon URL on liian pitkä (maksimi: 500 merkkiä)" });
     }
-    if (logoUrl && !isValidUrl(logoUrl)) {
+    if (hasLogo && !isValidUrl(logoUrl)) {
       return res.status(400).json({ error: "Logon URL on virheellinen (vaaditaan http:// tai https://)" });
     }
 
@@ -202,7 +212,7 @@ publicRouter.post("/", async (req, res, next) => {
       `INSERT INTO question_sets (ngo_name, ngo_email, logo_url, title, status)
        VALUES ($1, $2, $3, $4, 'pending')
        RETURNING *`,
-      [ngoName.trim(), ngoEmail?.trim() || null, logoUrl?.trim() || null, title.trim()]
+      [ngoName.trim(), hasEmail ? ngoEmail.trim() : null, hasLogo ? logoUrl.trim() : null, title.trim()]
     );
     const qs = setRows[0];
 
@@ -404,8 +414,14 @@ adminRouter.patch("/:id/review", requireAdmin, validateUUIDParam("id"), async (r
     if (!Array.isArray(reviews) || reviews.length === 0) {
       return res.status(400).json({ error: "reviews-kenttä vaaditaan" });
     }
-    // Validate edits and merge targets before checking out a connection.
+    // Validate every item before checking out a connection.
     for (const r of reviews) {
+      if (!r || typeof r !== "object" || !isValidUUID(r.questionId)) {
+        return res.status(400).json({ error: "Virheellinen kysymyksen tunniste" });
+      }
+      if (r.editedStatement != null && typeof r.editedStatement !== "string") {
+        return res.status(400).json({ error: "Muokattu väittämä on virheellinen" });
+      }
       if (r.editedStatement != null && !isValidLength(r.editedStatement, 500)) {
         return res.status(400).json({ error: "Muokattu väittämä on liian pitkä (maksimi: 500 merkkiä)" });
       }
@@ -608,7 +624,7 @@ adminRouter.post("/:id/questions", requireAdmin, validateUUIDParam("id"), async 
   let client;
   try {
     const { statement } = req.body;
-    if (!statement?.trim()) {
+    if (typeof statement !== "string" || !statement.trim()) {
       return res.status(400).json({ error: "Väittämä vaaditaan" });
     }
     if (!isValidLength(statement, 500)) {

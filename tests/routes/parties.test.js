@@ -64,6 +64,17 @@ describe("POST /api/admin/parties", () => {
     expect(res.body.error).toMatch(/nimi vaaditaan/i);
   });
 
+  // Issue #67: a non-string name used to crash on .trim() → 500.
+  test.each([1, {}, ["Vihreät"]])("non-string name %p → 400", async (name) => {
+    const res = await request(app)
+      .post("/api/admin/parties")
+      .set("Authorization", authHeader)
+      .send({ name });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/nimi vaaditaan/i);
+    expect(db.query).not.toHaveBeenCalled();
+  });
+
   test("name too long (>100 chars) → 400", async () => {
     const res = await request(app)
       .post("/api/admin/parties")
@@ -160,6 +171,28 @@ describe("POST /api/admin/parties — email validation", () => {
       .send({ name: "Vihreät", email: "a".repeat(252) + "@b.fi" });
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/liian pitkä/i);
+  });
+
+  // Issue #67: a falsy non-string used to skip the checks and crash on .trim();
+  // a truthy one was reported as "too long".
+  test.each([false, 0, 1, {}])("non-string email %p → 400", async (email) => {
+    const res = await request(app)
+      .post("/api/admin/parties")
+      .set("Authorization", authHeader)
+      .send({ name: "Vihreät", email });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("Virheellinen sähköpostiosoite");
+    expect(db.query).not.toHaveBeenCalled();
+  });
+
+  test.each([null, ""])("email %p → stored as null", async (email) => {
+    db.query.mockResolvedValueOnce({ rows: [{ id: VALID_UUID, name: "Vihreät", email: null }] });
+    const res = await request(app)
+      .post("/api/admin/parties")
+      .set("Authorization", authHeader)
+      .send({ name: "Vihreät", email });
+    expect(res.status).toBe(201);
+    expect(db.query.mock.calls[0][1][2]).toBeNull();
   });
 
   test("valid email → included in 201 response", async () => {
