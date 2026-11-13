@@ -43,7 +43,7 @@ afterAll(async () => {
   fs.rmSync(mockEnvDir, { recursive: true, force: true });
   // Only reached when the test below fails: don't leave the client retrying.
   if (redis) redis.destroy();
-  if (Sentry.getClient()) await Sentry.close(0);
+  if (Sentry?.getClient()) await Sentry.close(0);
 });
 
 // A developer .env that sets SMTP_HOST would make every test file that forgets
