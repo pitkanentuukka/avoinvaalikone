@@ -4,10 +4,6 @@ function snakeToCamel(str) {
   return str.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
 }
 
-function camelToSnake(str) {
-  return str.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
-}
-
 function mapKeys(obj, fn) {
   if (Array.isArray(obj)) return obj.map((item) => mapKeys(item, fn));
   if (obj && typeof obj === "object" && !(obj instanceof Date)) {
@@ -19,7 +15,6 @@ function mapKeys(obj, fn) {
 }
 
 const toCamel = (data) => mapKeys(data, snakeToCamel);
-const _toSnake = (data) => mapKeys(data, camelToSnake);
 
 // Builds an API path with each interpolated value (a token or an id) encoded
 // as one path segment. Unencoded, the browser would resolve the URL before
