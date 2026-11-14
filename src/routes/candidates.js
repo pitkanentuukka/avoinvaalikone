@@ -148,7 +148,14 @@ router.get("/party/:partyToken", requirePartyToken, async (req, res, next) => {
   try {
     const { rows } = await db.query(
       `SELECT c.id, c.name, c.photo_url, c.email, c.constituency, c.created_at,
-              (SELECT COUNT(*) FROM candidate_answers ca WHERE ca.candidate_id = c.id) AS answer_count
+              (SELECT COUNT(*) FROM candidate_answers ca
+               WHERE ca.candidate_id = c.id
+                 AND EXISTS (
+                   SELECT 1 FROM question_set_questions qsq
+                   JOIN question_sets qs ON qs.id = qsq.question_set_id
+                   WHERE qsq.question_id = ca.question_id
+                     AND qs.status = 'approved' AND qs.hidden = false
+                 )) AS answer_count
        FROM candidates c
        WHERE c.party_id = $1
        ORDER BY c.name`,
