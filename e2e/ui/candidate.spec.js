@@ -81,6 +81,29 @@ test.describe("Candidate and party portal UI", () => {
     await expect(page.getByPlaceholder("esim. Matti Meikäläinen")).toHaveCount(0);
   });
 
+  test("the explanation box opens only once a position is chosen", async ({ page, request }) => {
+    const candidate = await createCandidate(request, party, { name: "Perustelu Ehdokas" });
+    await page.goto(`/?candidateToken=${candidate.token}`);
+
+    // An explanation is only sent along with a position, so typing one first
+    // would be lost on save (#38).
+    const explanation = page.getByRole("textbox", { name: "Perustele kantasi väittämään: UI Väittämä 1" });
+    await expect(explanation).toBeDisabled();
+    await expect(explanation).toHaveAttribute("placeholder", /Valitse ensin kantasi/);
+
+    const q1Card = page.getByText("UI Väittämä 1").first().locator("xpath=ancestor::div[contains(@style,'border-radius')]").first();
+    await q1Card.getByRole("button", { name: "Samaa mieltä", exact: true }).click();
+    await expect(explanation).toBeEnabled();
+    await explanation.fill("Koska näin on.");
+    // The other question still has no position, so its box stays closed.
+    await expect(page.getByRole("textbox", { name: "Perustele kantasi väittämään: UI Väittämä 2" })).toBeDisabled();
+
+    await page.getByRole("button", { name: /Tallenna vastaukset/ }).first().click();
+    await expect(page.getByText("Vastaukset tallennettu")).toBeVisible();
+    await page.reload();
+    await expect(explanation).toHaveValue("Koska näin on.");
+  });
+
   test("a temporary load error offers a retry instead of \"invalid link\"", async ({ page, request }) => {
     const candidate = await createCandidate(request, party, { name: "Retry Ehdokas" });
     await page.route("**/api/candidates/me/*", (route) => route.fulfill({ status: 500, body: "{}" }));
