@@ -1697,6 +1697,8 @@ function CandidateView({ candidateToken, justRegistered, leaveGuardRef }) {
         setQuestionSets((sets) => sets.map((s) => ({ ...s, questions: (s.questions || []).filter((q) => !isSkipped(q.id)) })));
         try {
           const me = await api.getOwnProfile(candidateToken);
+          // `answers` is the snapshot sent above; use the latest state so edits
+          // made during either request survive the refresh.
           setAnswers((current) => reconcileAnswers(me, answers, current, skipped));
         } catch {
           setAnswers((prev) => Object.fromEntries(Object.entries(prev).filter(([qId]) => !isSkipped(qId))));
