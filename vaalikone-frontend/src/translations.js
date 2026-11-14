@@ -185,7 +185,7 @@ const translations = {
     candidateEmailLabel: "Sähköpostiosoite — saat henkilökohtaisen linkkisi ja ilmoitukset uusista kysymyksistä",
     candidateEmailPlaceholder: "etunimi.sukunimi@esimerkki.fi",
     candidateExplainPlaceholder: "Perustele kantasi (valinnainen mutta suositeltava)…",
-    candidateExplainNeedsPosition: "Valitse ensin kantasi yllä olevalta asteikolta, niin voit perustella sen.",
+    candidateExplainNeedsPosition: "Valitse ensin kantasi.",
     candidateConstituencyLabel: "Vaalipiiri",
     candidateConstituencyPlaceholder: "esim. Helsingin vaalipiiri",
 
@@ -448,7 +448,7 @@ const translations = {
     candidateEmailLabel: "Email address — for your personal link and notifications about new questions",
     candidateEmailPlaceholder: "firstname.lastname@example.com",
     candidateExplainPlaceholder: "Explain your position (optional but recommended)…",
-    candidateExplainNeedsPosition: "Choose your position on the scale above first, then you can explain it.",
+    candidateExplainNeedsPosition: "Choose your position first.",
     candidateConstituencyLabel: "Constituency",
     candidateConstituencyPlaceholder: "e.g. Helsinki constituency",
 

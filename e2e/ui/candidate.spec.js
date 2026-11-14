@@ -87,8 +87,10 @@ test.describe("Candidate and party portal UI", () => {
 
     // An explanation is only sent along with a position, so typing one first
     // would be lost on save (#38).
-    // Other specs reuse these statements, so scope to this set's cards.
-    const card = (statement) => page.getByText(statement).first().locator("xpath=ancestor::div[contains(@style,'border-radius')]").first();
+    // Other specs and earlier runs reuse these statements, so scope to this
+    // run's set.
+    const set = page.locator("section").filter({ has: page.getByRole("heading", { name: questionSet.title }) });
+    const card = (statement) => set.getByText(statement).locator("xpath=ancestor::div[contains(@style,'border-radius')]").first();
     const q1Card = card("UI Väittämä 1");
     const explanation = q1Card.getByRole("textbox", { name: /Perustele kantasi/ });
     await expect(explanation).toBeDisabled();
