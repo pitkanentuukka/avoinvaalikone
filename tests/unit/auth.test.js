@@ -1,6 +1,8 @@
 jest.mock("../../src/db/pool");
 
-const { requireAdmin, requirePartyToken } = require("../../src/middleware/auth");
+const {
+  requireAdmin, requirePartyToken, requireCandidateToken, requireRegistrationToken,
+} = require("../../src/middleware/auth");
 const db = require("../../src/db/pool");
 
 const ADMIN_SECRET = "test-admin-secret";
@@ -18,6 +20,73 @@ const makeReqRes = (overrides = {}) => {
   const next = jest.fn();
   return { req, res, next };
 };
+
+describe.each([
+  ["partyToken", requirePartyToken, "party", "Virheellinen puoluetunniste"],
+  ["candidateToken", requireCandidateToken, "candidate", "Virheellinen ehdokastunniste"],
+  ["registrationToken", requireRegistrationToken, "party", "Virheellinen rekisteröitymislinkki"],
+])("%s validation", (param, middleware, attachedField, invalidMessage) => {
+  const validToken = "0123456789abcdef".repeat(3);
+
+  beforeEach(() => db.query.mockReset());
+
+  test.each([
+    ["only NUL", "\0"],
+    ["leading NUL", `\0${validToken}`],
+    ["embedded NUL", `${validToken.slice(0, 24)}\0${validToken.slice(24)}`],
+    ["trailing NUL", `${validToken}\0`],
+  ])("%s → invalid-link 404 without querying PostgreSQL", async (_label, token) => {
+    // Model pg rejecting a text parameter containing NUL, as it does in production.
+    const pgError = Object.assign(new Error('invalid byte sequence for encoding "UTF8": 0x00'), {
+      code: "22021",
+    });
+    db.query.mockRejectedValue(pgError);
+    const { req, res, next } = makeReqRes({ params: { [param]: token } });
+
+    await middleware(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(404);
+    expect(res.json).toHaveBeenCalledWith({ error: invalidMessage });
+    expect(db.query).not.toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+    expect(req[attachedField]).toBeUndefined();
+  });
+
+  test("valid token → looks up and attaches the authenticated record", async () => {
+    const record = { id: "record-id", name: "Testi" };
+    db.query.mockResolvedValueOnce({ rows: [record] });
+    const { req, res, next } = makeReqRes({ params: { [param]: validToken } });
+
+    await middleware(req, res, next);
+
+    expect(db.query).toHaveBeenCalledWith(expect.any(String), [validToken]);
+    expect(req[attachedField]).toBe(record);
+    expect(next).toHaveBeenCalledWith();
+    expect(res.status).not.toHaveBeenCalled();
+  });
+
+  test("unknown token → invalid-link 404", async () => {
+    db.query.mockResolvedValueOnce({ rows: [] });
+    const { req, res, next } = makeReqRes({ params: { [param]: validToken } });
+
+    await middleware(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(404);
+    expect(res.json).toHaveBeenCalledWith({ error: invalidMessage });
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  test("database failure for a valid token → next(err)", async () => {
+    const err = new Error("DB down");
+    db.query.mockRejectedValueOnce(err);
+    const { req, res, next } = makeReqRes({ params: { [param]: validToken } });
+
+    await middleware(req, res, next);
+
+    expect(next).toHaveBeenCalledWith(err);
+    expect(res.status).not.toHaveBeenCalled();
+  });
+});
 
 // ─── requireAdmin ─────────────────────────────────────────────────────────────
 
