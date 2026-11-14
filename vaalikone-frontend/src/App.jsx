@@ -210,11 +210,15 @@ function ScaleInput({ value, onChange }) {
 
 // A field needs an accessible name: either `id` matching a visible label's
 // htmlFor (see Field), or `ariaLabel`. A placeholder isn't one.
-function TextArea({ value, onChange, placeholder, rows = 3, maxLength, id, ariaLabel, disabled }) {
+// `disabledReason` is shown under a disabled field, in place of the counter,
+// and is its accessible description: a placeholder isn't announced once
+// aria-describedby is set, and a disabled field can't be tabbed to.
+function TextArea({ value, onChange, placeholder, rows = 3, maxLength, id, ariaLabel, disabled, disabledReason }) {
   const counterId = useId();
+  const reason = disabled && disabledReason;
   const textarea = (
     <textarea id={id} aria-label={ariaLabel} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} rows={rows} maxLength={maxLength}
-      aria-describedby={maxLength ? counterId : undefined} disabled={disabled}
+      aria-describedby={maxLength || reason ? counterId : undefined} disabled={disabled}
       style={{
         width: "100%", padding: "12px 14px", borderRadius: "6px", border: `1px solid ${palette.border}`,
         fontFamily: "'Source Serif 4', Georgia, serif", fontSize: "14px", resize: "vertical",
@@ -222,6 +226,14 @@ function TextArea({ value, onChange, placeholder, rows = 3, maxLength, id, ariaL
         cursor: disabled ? "not-allowed" : undefined,
       }} />
   );
+  if (reason) {
+    return (
+      <div>
+        {textarea}
+        <div id={counterId} style={{ fontSize: "12px", color: palette.textMuted }}>{reason}</div>
+      </div>
+    );
+  }
   if (!maxLength) return textarea;
   return (
     <div>
@@ -1578,7 +1590,7 @@ function AnswerCard({ question: q, number, answer, setAnswer }) {
       </div>
       <ScaleInput value={answer?.value} onChange={(v) => setAnswer(q.id, "value", v)} />
       <div style={{ marginTop: "12px" }}>
-        <TextArea value={answer?.text || ""} onChange={(v) => setAnswer(q.id, "text", v)} placeholder={rated ? t.candidateExplainPlaceholder : t.candidateExplainNeedsPosition} ariaLabel={t.candidateExplainLabel(q.statement)} rows={2} maxLength={500} disabled={!rated} />
+        <TextArea value={answer?.text || ""} onChange={(v) => setAnswer(q.id, "text", v)} placeholder={t.candidateExplainPlaceholder} ariaLabel={t.candidateExplainLabel(q.statement)} rows={2} maxLength={500} disabled={!rated} disabledReason={t.candidateExplainNeedsPosition} />
       </div>
     </Card>
   );

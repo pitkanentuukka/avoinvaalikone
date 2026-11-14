@@ -87,16 +87,19 @@ test.describe("Candidate and party portal UI", () => {
 
     // An explanation is only sent along with a position, so typing one first
     // would be lost on save (#38).
-    const explanation = page.getByRole("textbox", { name: "Perustele kantasi väittämään: UI Väittämä 1" });
+    // Other specs reuse these statements, so scope to this set's cards.
+    const card = (statement) => page.getByText(statement).first().locator("xpath=ancestor::div[contains(@style,'border-radius')]").first();
+    const q1Card = card("UI Väittämä 1");
+    const explanation = q1Card.getByRole("textbox", { name: /Perustele kantasi/ });
     await expect(explanation).toBeDisabled();
-    await expect(explanation).toHaveAttribute("placeholder", /Valitse ensin kantasi/);
+    await expect(explanation).toHaveAccessibleDescription(/Valitse ensin kantasi/);
 
-    const q1Card = page.getByText("UI Väittämä 1").first().locator("xpath=ancestor::div[contains(@style,'border-radius')]").first();
     await q1Card.getByRole("button", { name: "Samaa mieltä", exact: true }).click();
     await expect(explanation).toBeEnabled();
+    await expect(q1Card.getByText(/Valitse ensin kantasi/)).toHaveCount(0);
     await explanation.fill("Koska näin on.");
     // The other question still has no position, so its box stays closed.
-    await expect(page.getByRole("textbox", { name: "Perustele kantasi väittämään: UI Väittämä 2" })).toBeDisabled();
+    await expect(card("UI Väittämä 2").getByRole("textbox", { name: /Perustele kantasi/ })).toBeDisabled();
 
     await page.getByRole("button", { name: /Tallenna vastaukset/ }).first().click();
     await expect(page.getByText("Vastaukset tallennettu")).toBeVisible();
