@@ -1424,9 +1424,16 @@ function PartyView({ partyToken }) {
       setLoading(true);
       setLoadFailed(false);
       try {
-        const [overview, qs] = await Promise.all([api.getPartyOverview(partyToken), api.getQuestionSets()]);
-        setData(overview);
-        setQuestionCount(distinctQuestions(qs).length);
+        const [overview, qs] = await Promise.allSettled([api.getPartyOverview(partyToken), api.getQuestionSets()]);
+        // Only the token request can say the link is invalid, even when the
+        // public question-set request fails first.
+        if (overview.status === "rejected") throw overview.reason;
+        if (qs.status === "rejected") {
+          setLoadFailed(true);
+          return;
+        }
+        setData(overview.value);
+        setQuestionCount(distinctQuestions(qs.value).length);
       } catch (e) {
         if (isTransientError(e)) setLoadFailed(true);
         else setInvalid(true);
@@ -1640,9 +1647,17 @@ function CandidateView({ candidateToken, justRegistered, leaveGuardRef }) {
       setLoading(true);
       setLoadFailed(false);
       try {
-        const [me, qs] = await Promise.all([api.getOwnProfile(candidateToken), api.getQuestionSets()]);
+        const [profileResult, qs] = await Promise.allSettled([api.getOwnProfile(candidateToken), api.getQuestionSets()]);
+        // Prefer the token request's failure; a public-request failure alone
+        // offers retry regardless of its HTTP status.
+        if (profileResult.status === "rejected") throw profileResult.reason;
+        if (qs.status === "rejected") {
+          setLoadFailed(true);
+          return;
+        }
+        const me = profileResult.value;
         setPartyName(me.party.name);
-        setQuestionSets(qs);
+        setQuestionSets(qs.value);
         setProfile({
           name: me.name, email: me.email || "", constituency: me.constituency || "",
           photoUrl: me.photoUrl || "", bio: me.bio || "",
