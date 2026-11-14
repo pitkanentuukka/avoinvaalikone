@@ -210,15 +210,16 @@ function ScaleInput({ value, onChange }) {
 
 // A field needs an accessible name: either `id` matching a visible label's
 // htmlFor (see Field), or `ariaLabel`. A placeholder isn't one.
-function TextArea({ value, onChange, placeholder, rows = 3, maxLength, id, ariaLabel }) {
+function TextArea({ value, onChange, placeholder, rows = 3, maxLength, id, ariaLabel, disabled }) {
   const counterId = useId();
   const textarea = (
     <textarea id={id} aria-label={ariaLabel} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} rows={rows} maxLength={maxLength}
-      aria-describedby={maxLength ? counterId : undefined}
+      aria-describedby={maxLength ? counterId : undefined} disabled={disabled}
       style={{
         width: "100%", padding: "12px 14px", borderRadius: "6px", border: `1px solid ${palette.border}`,
         fontFamily: "'Source Serif 4', Georgia, serif", fontSize: "14px", resize: "vertical",
-        background: palette.surface, color: palette.text, outline: "none", boxSizing: "border-box",
+        background: disabled ? palette.surfaceAlt : palette.surface, color: palette.text, outline: "none", boxSizing: "border-box",
+        cursor: disabled ? "not-allowed" : undefined,
       }} />
   );
   if (!maxLength) return textarea;
@@ -1565,8 +1566,11 @@ function RegisterView({ registrationToken, onRegistered }) {
 }
 
 // One question on the candidate's own page: the scale and an optional explanation.
+// An explanation is only saved along with a position, so the box stays closed
+// until one is chosen; the scale can't be cleared, so it never closes again.
 function AnswerCard({ question: q, number, answer, setAnswer }) {
   const { t } = useTranslation();
+  const rated = answer?.value !== undefined;
   return (
     <Card style={{ marginBottom: "12px" }}>
       <div style={{ fontSize: "14px", fontWeight: 600, marginBottom: "12px" }}>
@@ -1574,7 +1578,7 @@ function AnswerCard({ question: q, number, answer, setAnswer }) {
       </div>
       <ScaleInput value={answer?.value} onChange={(v) => setAnswer(q.id, "value", v)} />
       <div style={{ marginTop: "12px" }}>
-        <TextArea value={answer?.text || ""} onChange={(v) => setAnswer(q.id, "text", v)} placeholder={t.candidateExplainPlaceholder} ariaLabel={t.candidateExplainLabel(q.statement)} rows={2} maxLength={500} />
+        <TextArea value={answer?.text || ""} onChange={(v) => setAnswer(q.id, "text", v)} placeholder={rated ? t.candidateExplainPlaceholder : t.candidateExplainNeedsPosition} ariaLabel={t.candidateExplainLabel(q.statement)} rows={2} maxLength={500} disabled={!rated} />
       </div>
     </Card>
   );
@@ -1666,10 +1670,8 @@ function CandidateView({ candidateToken, justRegistered, leaveGuardRef }) {
   async function save() {
     setSaving(true);
     setError(null);
-    // Edits made while the save is in flight aren't covered by it, and
-    // explanations for unrated questions aren't sent at all.
-    const unsent = Object.values(answers).some((a) => a.value === undefined && a.text?.trim());
-    const editsSaved = unsent ? edits.current.saved : edits.current.made;
+    // Edits made while the save is in flight aren't covered by it.
+    const editsSaved = edits.current.made;
     try {
       const apiAnswers = {};
       for (const [qId, a] of Object.entries(answers)) {
@@ -1688,15 +1690,7 @@ function CandidateView({ candidateToken, justRegistered, leaveGuardRef }) {
         setQuestionSets((sets) => sets.map((s) => ({ ...s, questions: (s.questions || []).filter((q) => !isSkipped(q.id)) })));
         try {
           const me = await api.getOwnProfile(candidateToken);
-          setAnswers((prev) => {
-            const next = answersFromProfile(me);
-            // Keep explanations typed for questions not rated yet (they weren't
-            // sent), unless a merge has since given the question a server answer.
-            for (const [qId, a] of Object.entries(prev)) {
-              if (a.value === undefined && !isSkipped(qId) && next[qId] === undefined) next[qId] = a;
-            }
-            return next;
-          });
+          setAnswers(answersFromProfile(me));
         } catch {
           setAnswers((prev) => Object.fromEntries(Object.entries(prev).filter(([qId]) => !isSkipped(qId))));
         }
