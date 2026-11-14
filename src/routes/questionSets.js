@@ -632,18 +632,21 @@ adminRouter.post("/:id/questions", requireAdmin, validateUUIDParam("id"), async 
     }
 
     client = await db.getClient();
+    await begin(client);
+    // Hold the set lock through the edit: publishing's UPDATE must wait, or
+    // this SELECT sees the published row and rejects the edit.
     const { rows: sets } = await client.query(
-      "SELECT id, status, hidden FROM question_sets WHERE id = $1",
+      "SELECT id, status, hidden FROM question_sets WHERE id = $1 FOR UPDATE",
       [req.params.id]
     );
     if (sets.length === 0) {
+      await rollback(client);
       return res.status(404).json({ error: "Kysymyssarjaa ei löytynyt" });
     }
     if (sets[0].status !== "approved" || !sets[0].hidden) {
+      await rollback(client);
       return res.status(409).json({ error: "Kysymyksiä voi lisätä vain julkaisemattomiin kysymyssarjoihin" });
     }
-
-    await begin(client);
 
     const { rows: [{ max }] } = await client.query(
       "SELECT COALESCE(MAX(sort_order), 0) AS max FROM question_set_questions WHERE question_set_id = $1",
@@ -680,18 +683,21 @@ adminRouter.delete(
     let client;
     try {
       client = await db.getClient();
+      await begin(client);
+      // Serialize the staged check and edit with publishing, as in add above.
       const { rows: sets } = await client.query(
-        "SELECT id, status, hidden FROM question_sets WHERE id = $1",
+        "SELECT id, status, hidden FROM question_sets WHERE id = $1 FOR UPDATE",
         [req.params.id]
       );
       if (sets.length === 0) {
+        await rollback(client);
         return res.status(404).json({ error: "Kysymyssarjaa ei löytynyt" });
       }
       if (sets[0].status !== "approved" || !sets[0].hidden) {
+        await rollback(client);
         return res.status(409).json({ error: "Kysymyksiä voi poistaa vain julkaisemattomista kysymyssarjoista" });
       }
 
-      await begin(client);
       const { rowCount } = await client.query(
         "DELETE FROM question_set_questions WHERE question_id = $1 AND question_set_id = $2",
         [req.params.questionId, req.params.id]

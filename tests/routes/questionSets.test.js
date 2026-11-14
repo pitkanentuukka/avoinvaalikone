@@ -657,7 +657,7 @@ describe("POST /api/admin/question-sets/:id/questions", () => {
 
   test("set not found → 404", async () => {
     const client = buildMockClient();
-    client.query.mockResolvedValueOnce({ rows: [] }); // SELECT set
+    client.query.mockResolvedValueOnce({}).mockResolvedValueOnce({ rows: [] }); // BEGIN, SELECT set
     const res = await request(app)
       .post(`/api/admin/question-sets/${VALID_UUID}/questions`)
       .set("Authorization", authHeader)
@@ -667,7 +667,7 @@ describe("POST /api/admin/question-sets/:id/questions", () => {
 
   test("set is live (not staged) → 409", async () => {
     const client = buildMockClient();
-    client.query.mockResolvedValueOnce({ rows: [{ ...stagedSet, hidden: false }] }); // SELECT set
+    client.query.mockResolvedValueOnce({}).mockResolvedValueOnce({ rows: [{ ...stagedSet, hidden: false }] }); // BEGIN, SELECT set
     const res = await request(app)
       .post(`/api/admin/question-sets/${VALID_UUID}/questions`)
       .set("Authorization", authHeader)
@@ -678,8 +678,8 @@ describe("POST /api/admin/question-sets/:id/questions", () => {
   test("happy path → 201 with new question", async () => {
     const client = buildMockClient();
     client.query
-      .mockResolvedValueOnce({ rows: [stagedSet] })                              // SELECT set
-      .mockResolvedValueOnce({})                                                  // BEGIN
+      .mockResolvedValueOnce({}) // BEGIN
+      .mockResolvedValueOnce({ rows: [stagedSet] }) // SELECT set FOR UPDATE
       .mockResolvedValueOnce({ rows: [{ max: 2 }] })                              // SELECT MAX(sort_order)
       .mockResolvedValueOnce({ rows: [{ id: Q1, statement: "Uusi väittämä" }] }) // INSERT question
       .mockResolvedValueOnce({})                                                  // INSERT link
@@ -695,10 +695,10 @@ describe("POST /api/admin/question-sets/:id/questions", () => {
     expect(res.body.sortOrder).toBe(3);
   });
 
-  // Issue #18: the set check runs before BEGIN, so there is nothing to roll back.
-  test("set lookup fails before BEGIN → 500, no ROLLBACK, client released", async () => {
+  // Issue #57: the staged-set lookup now runs inside the transaction.
+  test("locked set lookup fails → 500, ROLLBACK, client released", async () => {
     const client = buildMockClient();
-    client.query.mockRejectedValueOnce(new Error("DB down")); // SELECT set
+    client.query.mockResolvedValueOnce({}).mockRejectedValueOnce(new Error("DB down")); // BEGIN, SELECT set
     jest.spyOn(console, "error").mockImplementation(() => {});
     const res = await request(app)
       .post(`/api/admin/question-sets/${VALID_UUID}/questions`)
@@ -706,7 +706,7 @@ describe("POST /api/admin/question-sets/:id/questions", () => {
       .send({ statement: "Uusi väittämä" });
     console.error.mockRestore();
     expect(res.status).toBe(500);
-    expect(client.query.mock.calls.map(([sql]) => sql)).not.toContain("ROLLBACK");
+    expect(client.query.mock.calls.map(([sql]) => sql)).toContain("ROLLBACK");
     expect(client.release).toHaveBeenCalledTimes(1);
   });
 });
@@ -735,7 +735,7 @@ describe("DELETE /api/admin/question-sets/:id/questions/:questionId", () => {
 
   test("set not found → 404", async () => {
     const client = buildMockClient();
-    client.query.mockResolvedValueOnce({ rows: [] }); // SELECT set
+    client.query.mockResolvedValueOnce({}).mockResolvedValueOnce({ rows: [] }); // BEGIN, SELECT set
     const res = await request(app)
       .delete(`/api/admin/question-sets/${VALID_UUID}/questions/${Q1}`)
       .set("Authorization", authHeader);
@@ -744,7 +744,7 @@ describe("DELETE /api/admin/question-sets/:id/questions/:questionId", () => {
 
   test("set is live (not staged) → 409", async () => {
     const client = buildMockClient();
-    client.query.mockResolvedValueOnce({ rows: [{ ...stagedSet, hidden: false }] }); // SELECT set
+    client.query.mockResolvedValueOnce({}).mockResolvedValueOnce({ rows: [{ ...stagedSet, hidden: false }] }); // BEGIN, SELECT set
     const res = await request(app)
       .delete(`/api/admin/question-sets/${VALID_UUID}/questions/${Q1}`)
       .set("Authorization", authHeader);
@@ -754,8 +754,8 @@ describe("DELETE /api/admin/question-sets/:id/questions/:questionId", () => {
   test("question not found in set → 404", async () => {
     const client = buildMockClient();
     client.query
-      .mockResolvedValueOnce({ rows: [stagedSet] }) // SELECT set
-      .mockResolvedValueOnce({})                    // BEGIN
+      .mockResolvedValueOnce({}) // BEGIN
+      .mockResolvedValueOnce({ rows: [stagedSet] }) // SELECT set FOR UPDATE
       .mockResolvedValueOnce({ rowCount: 0 });      // DELETE link → no rows
     const res = await request(app)
       .delete(`/api/admin/question-sets/${VALID_UUID}/questions/${Q1}`)
@@ -766,8 +766,8 @@ describe("DELETE /api/admin/question-sets/:id/questions/:questionId", () => {
   test("happy path → 204", async () => {
     const client = buildMockClient();
     client.query
-      .mockResolvedValueOnce({ rows: [stagedSet] }) // SELECT set
-      .mockResolvedValueOnce({})                    // BEGIN
+      .mockResolvedValueOnce({}) // BEGIN
+      .mockResolvedValueOnce({ rows: [stagedSet] }) // SELECT set FOR UPDATE
       .mockResolvedValueOnce({ rowCount: 1 })       // DELETE link
       .mockResolvedValueOnce({ rows: [{ id: Q1 }] }) // lock orphan candidate
       .mockResolvedValueOnce({})                    // DELETE orphan question
@@ -787,8 +787,8 @@ describe("DELETE /api/admin/question-sets/:id/questions/:questionId", () => {
   test("question not found, ROLLBACK fails on a dead connection → still 404, client released once", async () => {
     const client = buildMockClient();
     client.query
-      .mockResolvedValueOnce({ rows: [stagedSet] })                             // SELECT set
-      .mockResolvedValueOnce({})                                                // BEGIN
+      .mockResolvedValueOnce({}) // BEGIN
+      .mockResolvedValueOnce({ rows: [stagedSet] }) // SELECT set FOR UPDATE
       .mockResolvedValueOnce({ rowCount: 0 })                                   // DELETE link → no rows
       .mockRejectedValueOnce(new Error("Connection terminated unexpectedly")); // ROLLBACK
     const res = await request(app)
@@ -799,17 +799,17 @@ describe("DELETE /api/admin/question-sets/:id/questions/:questionId", () => {
     expect(client.release).toHaveBeenCalledTimes(1);
   });
 
-  // Issue #18: the set check runs before BEGIN, so there is nothing to roll back.
-  test("set lookup fails before BEGIN → 500, no ROLLBACK, client released", async () => {
+  // Issue #57: the staged-set lookup now runs inside the transaction.
+  test("locked set lookup fails → 500, ROLLBACK, client released", async () => {
     const client = buildMockClient();
-    client.query.mockRejectedValueOnce(new Error("DB down")); // SELECT set
+    client.query.mockResolvedValueOnce({}).mockRejectedValueOnce(new Error("DB down")); // BEGIN, SELECT set
     jest.spyOn(console, "error").mockImplementation(() => {});
     const res = await request(app)
       .delete(`/api/admin/question-sets/${VALID_UUID}/questions/${Q1}`)
       .set("Authorization", authHeader);
     console.error.mockRestore();
     expect(res.status).toBe(500);
-    expect(client.query.mock.calls.map(([sql]) => sql)).not.toContain("ROLLBACK");
+    expect(client.query.mock.calls.map(([sql]) => sql)).toContain("ROLLBACK");
     expect(client.release).toHaveBeenCalledTimes(1);
   });
 });
