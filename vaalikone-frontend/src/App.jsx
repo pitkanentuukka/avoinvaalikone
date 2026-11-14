@@ -5,6 +5,7 @@ import translations from "./translations";
 import { createApi, isTransientError } from "./api";
 import { cleanToken, readInitialLink, rememberLink, tokenLinkFromParams } from "./tokenLinks";
 import { answeredCount, distinctQuestions } from "./questions";
+import { answersFromProfile, reconcileAnswers } from "./candidateAnswers";
 import voterGuideContent from "./guides/voter-guide.md?raw";
 import candidateGuideContent from "./guides/candidate-guide.md?raw";
 import adminGuideContent from "./guides/admin-guide.md?raw";
@@ -1597,12 +1598,6 @@ function AnswerCard({ question: q, number, answer, setAnswer }) {
 }
 
 // The candidate's own page, reached only through their personal link.
-function answersFromProfile(me) {
-  return Object.fromEntries(
-    Object.entries(me.answers || {}).map(([k, v]) => [k, { value: v.value, text: v.explanation || "" }])
-  );
-}
-
 function CandidateView({ candidateToken, justRegistered, leaveGuardRef }) {
   const { t } = useTranslation();
   const [partyName, setPartyName] = useState("");
@@ -1702,7 +1697,7 @@ function CandidateView({ candidateToken, justRegistered, leaveGuardRef }) {
         setQuestionSets((sets) => sets.map((s) => ({ ...s, questions: (s.questions || []).filter((q) => !isSkipped(q.id)) })));
         try {
           const me = await api.getOwnProfile(candidateToken);
-          setAnswers(answersFromProfile(me));
+          setAnswers((current) => reconcileAnswers(me, answers, current, skipped));
         } catch {
           setAnswers((prev) => Object.fromEntries(Object.entries(prev).filter(([qId]) => !isSkipped(qId))));
         }
