@@ -486,11 +486,36 @@ describe("PUT /api/candidates/me/:candidateToken", () => {
 describe("PUT /api/candidates/me/:candidateToken/answers", () => {
   const url = `/api/candidates/me/${CANDIDATE_TOKEN}/answers`;
 
-  test("missing answers body → 400", async () => {
+  test.each([
+    ["missing", undefined],
+    ["null", null],
+    ["a string", "x"],
+    ["a number", 3],
+    ["a boolean", false],
+    ["an empty array", []],
+    ["a non-empty array", ["x"]],
+  ])("answers as %s → 400 before checking out a connection (#51)", async (_, answers) => {
     db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
-    const res = await request(app).put(url).send({});
+    const client = buildMockClient();
+    // Before the fix, arrays reach the save and return 200.
+    client.query.mockResolvedValue({ rowCount: 1 });
+
+    const res = await request(app).put(url).send({ answers });
     expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/Vastaukset vaaditaan/i);
+    expect(res.body).toEqual({ error: "Vastaukset ovat virheellisessä muodossa" });
+    expect(db.getClient).not.toHaveBeenCalled();
+    expect(client.query).not.toHaveBeenCalled();
+  });
+
+  test("an empty answers object remains a valid save", async () => {
+    db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
+    const client = buildMockClient();
+    client.query.mockResolvedValue({ rowCount: 1 });
+
+    const res = await request(app).put(url).send({ answers: {} });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ saved: 0, skipped: [] });
+    expect(client.query.mock.calls.some(([sql]) => /INSERT INTO candidate_answers/.test(sql))).toBe(false);
   });
 
   test("happy path with 2 valid answers → 200 { saved: 2 }", async () => {
