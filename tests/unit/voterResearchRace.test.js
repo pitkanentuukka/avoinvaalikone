@@ -35,7 +35,7 @@ async function submit(extra = {}) {
   return { status: 200, body: res.json.mock.calls[0][0] };
 }
 
-test.each([undefined, [SESSION]])("question lookup locks FK targets in admin id order (sets %p)", async (questionSetIds) => {
+test.each([undefined, [SESSION]])("question lookup orders research FK targets in admin id order (sets %p)", async (questionSetIds) => {
   db.query.mockResolvedValueOnce({ rows: [{ id: Q1, in_selected_sets: true }, { id: Q2, in_selected_sets: true }] });
   db.query.mockResolvedValue({ rows: [] });
   const res = await submit({ questionSetIds });
