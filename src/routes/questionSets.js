@@ -85,10 +85,17 @@ async function deleteOrphanQuestions(client, questionIds) {
 async function mergeQuestions(client, keepId, dropId) {
   if (keepId === dropId) return;
 
+  // Lock each candidate before copying their answer. If a concurrent removal
+  // commits, the locking SELECT omits that candidate instead of inserting a
+  // snapshot-visible answer whose candidate FK would fail. Lock only c: locking
+  // the source answers too could deadlock with the removal's cascading delete.
   await client.query(
     `INSERT INTO candidate_answers (candidate_id, question_id, value, explanation, answered_at)
-     SELECT candidate_id, $1, value, explanation, answered_at
-     FROM candidate_answers WHERE question_id = $2
+     SELECT ca.candidate_id, $1, ca.value, ca.explanation, ca.answered_at
+     FROM candidate_answers ca
+     JOIN candidates c ON c.id = ca.candidate_id
+     WHERE ca.question_id = $2
+     FOR KEY SHARE OF c
      ON CONFLICT (candidate_id, question_id) DO NOTHING`,
     [keepId, dropId]
   );
