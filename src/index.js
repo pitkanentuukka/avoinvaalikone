@@ -178,8 +178,15 @@ if (process.env.SENTRY_DSN) {
 }
 
 app.use((err, req, res, next) => {
-  console.error("Unhandled error:", err);
-  res.status(err.status || 500).json({
+  const status = err.status || 500;
+  // Express decode errors include the raw param (a bearer token) without
+  // its route prefix, so URL-based redactTokens cannot mask that message.
+  if (status >= 400 && status < 500) {
+    console.error("Unhandled error:", status, err.name);
+  } else {
+    console.error("Unhandled error:", err);
+  }
+  res.status(status).json({
     error:
       process.env.NODE_ENV === "production"
         ? "Palvelinvirhe"
