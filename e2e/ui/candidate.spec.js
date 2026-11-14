@@ -81,6 +81,34 @@ test.describe("Candidate and party portal UI", () => {
     await expect(page.getByPlaceholder("esim. Matti Meikäläinen")).toHaveCount(0);
   });
 
+  test("the explanation box opens only once a position is chosen", async ({ page, request }) => {
+    const candidate = await createCandidate(request, party, { name: "Perustelu Ehdokas" });
+    await page.goto(`/?candidateToken=${candidate.token}`);
+
+    // An explanation is only sent along with a position, so typing one first
+    // would be lost on save (#38).
+    // Other specs and earlier runs reuse these statements, so scope to this
+    // run's set.
+    const set = page.locator("section").filter({ has: page.getByRole("heading", { name: questionSet.title }) });
+    const card = (statement) => set.getByText(statement).locator("xpath=ancestor::div[contains(@style,'border-radius')]").first();
+    const q1Card = card("UI Väittämä 1");
+    const explanation = q1Card.getByRole("textbox", { name: /Perustele kantasi/ });
+    await expect(explanation).toBeDisabled();
+    await expect(explanation).toHaveAccessibleDescription(/Valitse ensin kantasi/);
+
+    await q1Card.getByRole("button", { name: "Samaa mieltä", exact: true }).click();
+    await expect(explanation).toBeEnabled();
+    await expect(q1Card.getByText(/Valitse ensin kantasi/)).toHaveCount(0);
+    await explanation.fill("Koska näin on.");
+    // The other question still has no position, so its box stays closed.
+    await expect(card("UI Väittämä 2").getByRole("textbox", { name: /Perustele kantasi/ })).toBeDisabled();
+
+    await page.getByRole("button", { name: /Tallenna vastaukset/ }).first().click();
+    await expect(page.getByText("Vastaukset tallennettu")).toBeVisible();
+    await page.reload();
+    await expect(explanation).toHaveValue("Koska näin on.");
+  });
+
   test("a temporary load error offers a retry instead of \"invalid link\"", async ({ page, request }) => {
     const candidate = await createCandidate(request, party, { name: "Retry Ehdokas" });
     await page.route("**/api/candidates/me/*", (route) => route.fulfill({ status: 500, body: "{}" }));
