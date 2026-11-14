@@ -12,7 +12,7 @@
 
 const http = require("http");
 
-const { questionId, constituency, clientIp, error, candidateToken } = JSON.parse(process.argv[2]);
+const { questionId, constituency, clientIp, error, candidateToken, partyToken, registrationToken } = JSON.parse(process.argv[2]);
 
 const Sentry = require("../../src/instrument");
 const app = require("../../src/index");
@@ -71,11 +71,21 @@ async function main() {
   );
   const matchEvent = await eventSent;
 
-  // A candidate opening their personal link while the database is
-  // unreachable: the token is in the path (issue #36).
-  eventSent = nextEvent();
-  const tokenStatus = await get(server.address().port, `/api/candidates/me/${candidateToken}`);
-  const tokenEvent = await eventSent;
+  // Each credential tier must stay private when its auth lookup fails (#83).
+  const tokenEvents = [];
+  for (const [route, token] of [
+    ["me", candidateToken],
+    ["party", partyToken],
+    ["register", registrationToken],
+  ]) {
+    Sentry.addBreadcrumb({
+      category: "http",
+      data: { url: `http://localhost/api/candidates/${route}/${token}` },
+    });
+    eventSent = nextEvent();
+    const status = await get(server.address().port, `/api/candidates/${route}/${token}`);
+    tokenEvents.push({ route, status, event: await eventSent });
+  }
   server.close();
 
   // A body on the request data from another path than the http integration:
@@ -94,7 +104,7 @@ async function main() {
   });
   const scopeEvent = await eventSent;
 
-  return { sentryEnabled: true, status, matchEvent, scopeEvent, tokenStatus, tokenEvent };
+  return { sentryEnabled: true, status, matchEvent, scopeEvent, tokenEvents };
 }
 
 main().then(

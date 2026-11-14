@@ -19,13 +19,16 @@ const ERROR = "something broke after the body was parsed";
 const CLIENT_IP = "203.0.113.7";
 const CANDIDATE_TOKEN = "3f9a1c0e5b7d2a4c6e8f0a1b3c5d7e9f1a2b3c4d5e6f7a8b";
 
+const PARTY_TOKEN = "a".repeat(48);
+const REGISTRATION_TOKEN = "b".repeat(48);
+
 let result;
 let childOutput = "";
 
 beforeAll(async () => {
   const child = fork(CHILD, [JSON.stringify({
     questionId: QUESTION_ID, constituency: CONSTITUENCY, clientIp: CLIENT_IP, error: ERROR,
-    candidateToken: CANDIDATE_TOKEN,
+    candidateToken: CANDIDATE_TOKEN, partyToken: PARTY_TOKEN, registrationToken: REGISTRATION_TOKEN,
   })], {
     execArgv: [],
     silent: true,
@@ -98,19 +101,31 @@ test("a request body that some other path puts on an event is dropped", () => {
   expect(serialized).not.toContain(CONSTITUENCY);
 });
 
-// Tokens are bearer secrets: anyone with access to the Sentry project or the
-// server logs could edit the candidate's profile and answers (issue #36).
-test("an error on a token route doesn't send the token to Sentry", () => {
-  const event = result.tokenEvent;
+// Exercise the real SDK pipeline, including transaction names and breadcrumbs.
+test.each(["me", "party", "register"])("a failed %s token route sends no credentials to Sentry", (route) => {
+  const { status, event } = result.tokenEvents.find((item) => item.route === route);
 
-  expect(result.tokenStatus).toBe(500);
+  expect(status).toBe(500);
   expect(event.exception.values[0].value).toMatch(/ECONNREFUSED/);
-  // Still says which route it came from.
-  expect(event.request.url).toContain("/api/candidates/me/[token]");
-  expect(JSON.stringify(event)).not.toContain(CANDIDATE_TOKEN);
+  expect(event.request.url).toContain(`/api/candidates/${route}/[token]`);
+  // SDK versions may use the route template or the concrete request path.
+  expect(event.transaction).toContain(`/api/candidates/${route}/`);
+  expect(event.breadcrumbs).toEqual(expect.arrayContaining([
+    expect.objectContaining({
+      category: "http",
+      data: expect.objectContaining({ url: `http://localhost/api/candidates/${route}/[token]` }),
+    }),
+  ]));
+  for (const token of [CANDIDATE_TOKEN, PARTY_TOKEN, REGISTRATION_TOKEN]) {
+    expect(JSON.stringify(event)).not.toContain(token);
+  }
 });
 
-test("the access log line for a failed token request doesn't contain the token", () => {
-  expect(childOutput).toContain("GET /api/candidates/me/[token] 500");
-  expect(childOutput).not.toContain(CANDIDATE_TOKEN);
+test("the access log lines for failed token requests don't contain credentials", () => {
+  for (const route of ["me", "party", "register"]) {
+    expect(childOutput).toContain(`GET /api/candidates/${route}/[token] 500`);
+  }
+  for (const token of [CANDIDATE_TOKEN, PARTY_TOKEN, REGISTRATION_TOKEN]) {
+    expect(childOutput).not.toContain(token);
+  }
 });
