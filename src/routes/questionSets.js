@@ -417,7 +417,7 @@ adminRouter.patch("/:id/reject", requireAdmin, validateUUIDParam("id"), async (r
 adminRouter.patch("/:id/review", requireAdmin, validateUUIDParam("id"), async (req, res, next) => {
   let client;
   try {
-    const { reviews } = req.body;
+    let { reviews } = req.body;
     if (!Array.isArray(reviews) || reviews.length === 0) {
       return res.status(400).json({ error: "reviews-kenttä vaaditaan" });
     }
@@ -437,6 +437,31 @@ adminRouter.patch("/:id/review", requireAdmin, validateUUIDParam("id"), async (r
       }
     }
 
+    // PostgreSQL UUIDs are case-insensitive; compare the same canonical IDs it
+    // returns, so case variants cannot bypass self-merge or duplicate checks.
+    reviews = reviews.map((r) => ({
+      ...r,
+      questionId: r.questionId.toLowerCase(),
+      duplicateOf: r.duplicateOf?.toLowerCase(),
+    }));
+    const reviewIds = reviews.map((r) => r.questionId);
+    if (new Set(reviewIds).size !== reviewIds.length) {
+      return res.status(400).json({ error: "Kysymyksen voi arvioida vain kerran" });
+    }
+    if (reviews.some((r) => r.duplicateOf === r.questionId)) {
+      return res.status(400).json({ error: "Kysymystä ei voi yhdistää itseensä" });
+    }
+    const rejectedReviews = reviews.filter((r) => r.rejected);
+    const mergedReviews = reviews.filter((r) => !r.rejected && r.duplicateOf);
+    const editedReviews = reviews.filter((r) => !r.rejected && !r.duplicateOf && r.editedStatement?.trim());
+    const removedIds = new Set([
+      ...mergedReviews.map((r) => r.questionId),
+      ...rejectedReviews.map((r) => r.questionId),
+    ]);
+    if (mergedReviews.some((r) => removedIds.has(r.duplicateOf))) {
+      return res.status(400).json({ error: "Yhdistämisen kohdetta ei voi yhdistää tai hylätä samassa pyynnössä" });
+    }
+
     client = await db.getClient();
     await begin(client);
 
@@ -449,17 +474,25 @@ adminRouter.patch("/:id/review", requireAdmin, validateUUIDParam("id"), async (r
       return res.status(404).json({ error: "Kysymyssarjaa ei löytynyt" });
     }
 
-    const rejectedReviews = reviews.filter((r) => r.rejected);
-    const mergedReviews = reviews.filter((r) => !r.rejected && r.duplicateOf);
-    const editedReviews = reviews.filter((r) => !r.rejected && !r.duplicateOf && r.editedStatement?.trim());
-
-    // Lock every question a merge or rejection may delete, all at once, before
-    // changing anything (see lockQuestions).
-    const deletableIds = [
-      ...mergedReviews.flatMap((r) => [r.questionId, r.duplicateOf]),
-      ...rejectedReviews.map((r) => r.questionId),
-    ];
-    if (deletableIds.length > 0) await lockQuestions(client, deletableIds);
+    // Lock all references in one stable order before edits or deletes, and
+    // verify the lock result instead of letting a missing target reach an FK.
+    const referencedIds = [...new Set([
+      ...reviewIds,
+      ...reviews.filter((r) => r.duplicateOf).map((r) => r.duplicateOf),
+    ])];
+    const found = await lockQuestions(client, referencedIds);
+    if (found.length !== referencedIds.length) {
+      await rollback(client);
+      return res.status(404).json({ error: "Kysymystä ei löytynyt" });
+    }
+    const { rows: linked } = await client.query(
+      "SELECT question_id FROM question_set_questions WHERE question_set_id = $1 AND question_id = ANY($2)",
+      [req.params.id, reviewIds]
+    );
+    if (linked.length !== reviewIds.length) {
+      await rollback(client);
+      return res.status(404).json({ error: "Kysymystä ei löytynyt kysymyssarjasta" });
+    }
 
     // Fetch originals for rejected and edited questions (needed for email)
     const needOriginalIds = [
