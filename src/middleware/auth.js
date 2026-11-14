@@ -43,6 +43,10 @@ async function requirePartyToken(req, res, next) {
   if (!partyToken) {
     return res.status(400).json({ error: "Puoluetunniste puuttuu" });
   }
+  // PostgreSQL text parameters cannot contain NUL (e.g. a decoded %00).
+  if (partyToken.includes("\0")) {
+    return res.status(404).json({ error: "Virheellinen puoluetunniste" });
+  }
   try {
     const { rows } = await db.query(
       "SELECT id, name, token, email, registration_token FROM parties WHERE token = $1",
@@ -67,6 +71,9 @@ async function requireCandidateToken(req, res, next) {
   const { candidateToken } = req.params;
   if (!candidateToken) {
     return res.status(400).json({ error: "Ehdokastunniste puuttuu" });
+  }
+  if (candidateToken.includes("\0")) {
+    return res.status(404).json({ error: "Virheellinen ehdokastunniste" });
   }
   try {
     const { rows } = await db.query(
@@ -95,6 +102,9 @@ async function requireRegistrationToken(req, res, next) {
   const { registrationToken } = req.params;
   if (!registrationToken) {
     return res.status(400).json({ error: "Rekisteröitymistunniste puuttuu" });
+  }
+  if (registrationToken.includes("\0")) {
+    return res.status(404).json({ error: "Virheellinen rekisteröitymislinkki" });
   }
   try {
     const { rows } = await db.query(
