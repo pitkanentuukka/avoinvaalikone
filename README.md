@@ -339,6 +339,8 @@ npm run test:coverage   # Coverage report
 
 Integration tests use `supertest` and a mock database helper. Unit tests cover auth middleware, validation logic and the frontend API client. `npm test` runs Jest with `--experimental-vm-modules` so tests can `import()` the frontend's ES modules. Running Jest any other way (`npx jest`, an IDE runner) needs the same flag, e.g. `NODE_OPTIONS=--experimental-vm-modules npx jest tests/unit/apiClient.test.js`; without it `apiClient.test.js` fails.
 
+The question-merge concurrency tests require real PostgreSQL (16 or newer) and run in the E2E API CI job. To run them locally, set `TEST_DATABASE_URL` to a test database connection string and run `npm test -- --runInBand questionMergeConcurrency`. They create and drop a randomly named schema, require schema creation permission, and skip when `TEST_DATABASE_URL` is unset.
+
 ---
 
 ## Rate Limiting

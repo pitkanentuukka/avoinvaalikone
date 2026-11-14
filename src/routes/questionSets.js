@@ -85,10 +85,17 @@ async function deleteOrphanQuestions(client, questionIds) {
 async function mergeQuestions(client, keepId, dropId) {
   if (keepId === dropId) return;
 
+  // Lock each candidate before copying their answer. If a concurrent removal
+  // commits, the locking SELECT omits that candidate instead of inserting a
+  // snapshot-visible answer whose candidate FK would fail. Lock only c: locking
+  // the source answers too could deadlock with the removal's cascading delete.
   await client.query(
     `INSERT INTO candidate_answers (candidate_id, question_id, value, explanation, answered_at)
-     SELECT candidate_id, $1, value, explanation, answered_at
-     FROM candidate_answers WHERE question_id = $2
+     SELECT ca.candidate_id, $1, ca.value, ca.explanation, ca.answered_at
+     FROM candidate_answers ca
+     JOIN candidates c ON c.id = ca.candidate_id
+     WHERE ca.question_id = $2
+     FOR KEY SHARE OF c
      ON CONFLICT (candidate_id, question_id) DO NOTHING`,
     [keepId, dropId]
   );
@@ -662,18 +669,21 @@ adminRouter.post("/:id/questions", requireAdmin, validateUUIDParam("id"), async 
     }
 
     client = await db.getClient();
+    await begin(client);
+    // Hold the set lock through the edit: publishing's UPDATE must wait, or
+    // this SELECT sees the published row and rejects the edit.
     const { rows: sets } = await client.query(
-      "SELECT id, status, hidden FROM question_sets WHERE id = $1",
+      "SELECT id, status, hidden FROM question_sets WHERE id = $1 FOR UPDATE",
       [req.params.id]
     );
     if (sets.length === 0) {
+      await rollback(client);
       return res.status(404).json({ error: "Kysymyssarjaa ei löytynyt" });
     }
     if (sets[0].status !== "approved" || !sets[0].hidden) {
+      await rollback(client);
       return res.status(409).json({ error: "Kysymyksiä voi lisätä vain julkaisemattomiin kysymyssarjoihin" });
     }
-
-    await begin(client);
 
     const { rows: [{ max }] } = await client.query(
       "SELECT COALESCE(MAX(sort_order), 0) AS max FROM question_set_questions WHERE question_set_id = $1",
@@ -710,18 +720,21 @@ adminRouter.delete(
     let client;
     try {
       client = await db.getClient();
+      await begin(client);
+      // Serialize the staged check and edit with publishing, as in add above.
       const { rows: sets } = await client.query(
-        "SELECT id, status, hidden FROM question_sets WHERE id = $1",
+        "SELECT id, status, hidden FROM question_sets WHERE id = $1 FOR UPDATE",
         [req.params.id]
       );
       if (sets.length === 0) {
+        await rollback(client);
         return res.status(404).json({ error: "Kysymyssarjaa ei löytynyt" });
       }
       if (sets[0].status !== "approved" || !sets[0].hidden) {
+        await rollback(client);
         return res.status(409).json({ error: "Kysymyksiä voi poistaa vain julkaisemattomista kysymyssarjoista" });
       }
 
-      await begin(client);
       const { rowCount } = await client.query(
         "DELETE FROM question_set_questions WHERE question_id = $1 AND question_set_id = $2",
         [req.params.questionId, req.params.id]

@@ -111,10 +111,10 @@ router.post("/match", async (req, res, next) => {
              SELECT 1 FROM question_set_questions qsq
              WHERE qsq.question_id = q.id AND qsq.question_set_id = ANY($2)
            ) AS in_selected_sets
-           FROM questions q WHERE q.id = ANY($1)`,
+           FROM questions q WHERE q.id = ANY($1) ORDER BY q.id`,
           [allQuestionIds, questionSetIds]
         )
-      : await db.query("SELECT id FROM questions WHERE id = ANY($1)", [allQuestionIds]);
+      : await db.query("SELECT id FROM questions WHERE id = ANY($1) ORDER BY id", [allQuestionIds]);
     const voterQuestionIds = existingRows.map((r) => r.id);
     if (voterQuestionIds.length === 0) {
       return res.json({ sessionId: null, questionCount: 0, results: [] });
@@ -197,20 +197,9 @@ router.post("/match", async (req, res, next) => {
     let sessionId = null;
     if (includeInResearch !== false && scoredQuestionIds.length > 0) {
       sessionId = clientSessionId ?? randomUUID();
-      const placeholders = scoredQuestionIds
-        .map((_, i) => `($1, $${i * 3 + 2}, $${i * 3 + 3}, $${i * 3 + 4})`)
-        .join(", ");
-      const flatValues = [sessionId];
-      for (const qId of scoredQuestionIds) {
-        flatValues.push(qId, parseInt(answers[qId], 10), weightFor(weights, qId));
-      }
       // Fire-and-forget: the research insert must not add latency to the match
       // response. Losing anonymized rows on a crash is acceptable.
-      db.query(
-        `INSERT INTO voter_responses (session_id, question_id, value, weight) VALUES ${placeholders}
-         ON CONFLICT DO NOTHING`,
-        flatValues
-      ).catch((err) => {
+      saveResearchResponses(sessionId, scoredQuestionIds, answers, weights).catch((err) => {
         console.error("voter_responses insert failed:", err.message);
       });
     }
@@ -220,5 +209,39 @@ router.post("/match", async (req, res, next) => {
     next(err);
   }
 });
+
+// The existence lookups return id order, so VALUES takes foreign-key KEY SHARE
+// locks in the same order as admin merge/delete paths take FOR UPDATE locks.
+async function saveResearchResponses(sessionId, questionIds, answers, weights) {
+  const insert = (ids) => {
+    const placeholders = ids
+      .map((_, i) => `($1, $${i * 3 + 2}, $${i * 3 + 3}, $${i * 3 + 4})`)
+      .join(", ");
+    const values = [sessionId];
+    for (const id of ids) {
+      values.push(id, parseInt(answers[id], 10), weightFor(weights, id));
+    }
+    return db.query(
+      `INSERT INTO voter_responses (session_id, question_id, value, weight) VALUES ${placeholders}
+       ON CONFLICT DO NOTHING`,
+      values
+    );
+  };
+
+  try {
+    await insert(questionIds);
+  } catch (err) {
+    if (err.code !== "23503") throw err;
+    // A merge/delete can commit after the match lookup. The failed statement
+    // inserted no rows; recheck only the originally scored questions and retry
+    // once, preserving the session id and values. Continued churn is logged by
+    // the caller, like other research failures, without delaying the response.
+    const { rows } = await db.query(
+      "SELECT id FROM questions WHERE id = ANY($1) ORDER BY id",
+      [questionIds]
+    );
+    if (rows.length > 0) await insert(rows.map(row => row.id));
+  }
+}
 
 module.exports = router;
