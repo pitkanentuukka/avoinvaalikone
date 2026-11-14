@@ -86,6 +86,16 @@ async function main() {
     const status = await get(server.address().port, `/api/candidates/${route}/${token}`);
     tokenEvents.push({ route, status, event: await eventSent });
   }
+  // Express's decode error includes the raw param, without a route prefix.
+  const malformedTokenStatuses = [];
+  for (const [route, token] of [
+    ["me", candidateToken],
+    ["party", partyToken],
+    ["register", registrationToken],
+  ]) {
+    const status = await get(server.address().port, `/api/candidates/${route}/${token}%ZZ`);
+    malformedTokenStatuses.push({ route, status });
+  }
   server.close();
 
   // A body on the request data from another path than the http integration:
@@ -104,7 +114,7 @@ async function main() {
   });
   const scopeEvent = await eventSent;
 
-  return { sentryEnabled: true, status, matchEvent, scopeEvent, tokenEvents };
+  return { sentryEnabled: true, status, matchEvent, scopeEvent, tokenEvents, malformedTokenStatuses };
 }
 
 main().then(

@@ -129,3 +129,15 @@ test("the access log lines for failed token requests don't contain credentials",
     expect(childOutput).not.toContain(token);
   }
 });
+
+test.each([
+  ["me", CANDIDATE_TOKEN],
+  ["party", PARTY_TOKEN],
+  ["register", REGISTRATION_TOKEN],
+])("a malformed escape on the %s token route keeps credentials out of backend logs", (route, token) => {
+  expect(result.malformedTokenStatuses.find((item) => item.route === route).status).toBe(400);
+  expect(childOutput).toContain(`GET /api/candidates/${route}/[token] 400`);
+  expect(childOutput).toContain("Unhandled error:");
+  expect(childOutput).toContain("URIError");
+  expect(childOutput).not.toContain(token);
+});
