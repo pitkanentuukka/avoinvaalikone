@@ -461,8 +461,8 @@ router.put("/me/:candidateToken", requireCandidateToken, async (req, res, next) 
 // PUT /api/candidates/me/:candidateToken/answers — save own answers (upsert)
 router.put("/me/:candidateToken/answers", requireCandidateToken, async (req, res, next) => {
   const { answers } = req.body;
-  if (!answers || typeof answers !== "object") {
-    return res.status(400).json({ error: "Vastaukset vaaditaan" });
+  if (!answers || typeof answers !== "object" || Array.isArray(answers)) {
+    return res.status(400).json({ error: "Vastaukset ovat virheellisessä muodossa" });
   }
 
   let client;
