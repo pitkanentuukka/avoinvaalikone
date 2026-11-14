@@ -103,7 +103,14 @@ router.get("/:id/candidates", requireAdmin, validateUUIDParam("id"), async (req,
   try {
     const { rows } = await db.query(
       `SELECT c.id, c.name, c.email, c.constituency, c.token,
-              (SELECT COUNT(*) FROM candidate_answers ca WHERE ca.candidate_id = c.id) AS answer_count,
+              (SELECT COUNT(*) FROM candidate_answers ca
+               WHERE ca.candidate_id = c.id
+                 AND EXISTS (
+                   SELECT 1 FROM question_set_questions qsq
+                   JOIN question_sets qs ON qs.id = qsq.question_set_id
+                   WHERE qsq.question_id = ca.question_id
+                     AND qs.status = 'approved' AND qs.hidden = false
+                 )) AS answer_count,
               e.status AS last_email_status, e.error AS last_email_error, e.created_at AS last_email_at
        FROM candidates c
        LEFT JOIN LATERAL (
