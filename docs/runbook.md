@@ -15,19 +15,21 @@ git push origin main         # CI redeploys the reverted tree
 
 Migrations are **forward-only** (`migration_history` table): never delete or edit
 an applied migration — write a new compensating migration instead. If a deploy is
-stuck and CI is unavailable, SSH to the box and run the compose up command from
-the workflow's "Build & restart services" step with an earlier checkout.
+stuck and CI is unavailable, rsync an earlier checkout to the box (as the
+workflow's "Rsync to server" step does) and run `sh /opt/vaalikone/scripts/deploy.sh`
+there. Not a bare `compose up`: it doesn't pick up a changed Caddyfile.
 
 ## Incident quick reference
 
 | Symptom | Meaning | Action |
 |---|---|---|
-| `DB pool saturated: … waiting=N` in backend logs | Queries queueing for connections | Check for slow queries (db logs, `log_min_duration_statement=250`); dials: `PG_POOL_MAX`, backend `replicas`, `RATE_LIMIT_MATCH_MAX` |
+| `DB pool saturated: … waiting=N` in backend logs | Queries queueing for connections | Check for slow queries (db logs, `log_min_duration_statement=250`; bind parameters are left out, and errors are logged terse, without DETAIL/HINT/CONTEXT (so a deadlock shows no process or query detail), as they'd log tokens, #36); dials: `PG_POOL_MAX`, backend `replicas`, `RATE_LIMIT_MATCH_MAX` |
 | `Redis error:` / `Redis connect failed:` | Shared rate-limit store down | No action needed short-term: limiters fall back to per-process (effective limits ×3). Restart redis when convenient |
 | Lots of 429s on `/api/voter/match` | Rate limit too tight for CGNAT crowds | Raise `RATE_LIMIT_MATCH_MAX` in `/opt/vaalikone/.env`, `docker compose … up -d backend` |
 | Slow `/api/*` GETs + high DB load | Edge cache not serving | `scripts/verify-edge-cache.sh` — if DYNAMIC, recreate the Cloudflare Cache Rule (docs/scaling.md) |
 | `statement timeout` errors | A query hit `PG_STATEMENT_TIMEOUT_MS` (10 s) | Find and fix the query; the timeout is protective, don't just raise it |
 | Backend restart loops | Migration failure (runs on every start) | `docker compose logs backend`, fix the migration, redeploy |
+| 502/504 from the site | A proxy can't reach the next hop | Caddy and nginx don't log upstream errors (they'd log tokens, #36). `docker compose ps` for a down container; `docker compose logs frontend`: `upstream=-` = the backend name didn't resolve (no replica running), `upstream_status=502` with `uct=-` = no connection (a backend refused or is gone), 504 / a high `urt` = hung. No line there = Caddy couldn't reach the frontend |
 
 Health/load at a glance: `curl -s -H "Authorization: Bearer $ADMIN_SECRET" https://avoinvaalikone.fi/api/health`
 — pool counters (`waiting > 0` = saturation; only returned for the admin

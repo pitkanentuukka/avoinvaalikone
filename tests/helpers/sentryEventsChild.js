@@ -12,7 +12,7 @@
 
 const http = require("http");
 
-const { questionId, constituency, clientIp, error } = JSON.parse(process.argv[2]);
+const { questionId, constituency, clientIp, error, candidateToken } = JSON.parse(process.argv[2]);
 
 const Sentry = require("../../src/instrument");
 const app = require("../../src/index");
@@ -22,6 +22,15 @@ let onEvent = () => {};
 // event processors and beforeSend, so this is exactly what would leave.
 const nextEvent = () => new Promise((resolve) => { onEvent = resolve; });
 Sentry.getClient().on("beforeSendEvent", (event) => onEvent(event));
+
+function get(port, path) {
+  return new Promise((resolve, reject) => {
+    http.get({ host: "127.0.0.1", port, path }, (res) => {
+      res.resume();
+      res.on("end", () => resolve(res.statusCode));
+    }).on("error", reject);
+  });
+}
 
 function post(port, path, body, headers) {
   const data = JSON.stringify(body);
@@ -61,6 +70,12 @@ async function main() {
     { "X-Forwarded-For": clientIp, "X-Real-IP": clientIp }
   );
   const matchEvent = await eventSent;
+
+  // A candidate opening their personal link while the database is
+  // unreachable: the token is in the path (issue #36).
+  eventSent = nextEvent();
+  const tokenStatus = await get(server.address().port, `/api/candidates/me/${candidateToken}`);
+  const tokenEvent = await eventSent;
   server.close();
 
   // A body on the request data from another path than the http integration:
@@ -79,7 +94,7 @@ async function main() {
   });
   const scopeEvent = await eventSent;
 
-  return { sentryEnabled: true, status, matchEvent, scopeEvent };
+  return { sentryEnabled: true, status, matchEvent, scopeEvent, tokenStatus, tokenEvent };
 }
 
 main().then(

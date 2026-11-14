@@ -160,8 +160,9 @@ CI/CD handles this on push to `main`. If deploying manually:
 ```bash
 rsync -avz --exclude='.git' --exclude='node_modules' --exclude='.env' \
   ./ user@80.69.172.220:/opt/vaalikone/
-ssh user@80.69.172.220 "cd /opt/vaalikone && \
-  docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build -d"
+# Builds and restarts; also restarts caddy if the Caddyfile changed, which
+# `up -d` alone doesn't pick up.
+ssh user@80.69.172.220 "sh /opt/vaalikone/scripts/deploy.sh"
 ```
 
 ### 2. Verify replicas are up

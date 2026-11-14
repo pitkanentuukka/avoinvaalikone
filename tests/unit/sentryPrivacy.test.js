@@ -17,6 +17,7 @@ const CONSTITUENCY = "Lapin vaalipiiri";
 const ERROR = "something broke after the body was parsed";
 // Behind the production proxies the client address arrives in headers.
 const CLIENT_IP = "203.0.113.7";
+const CANDIDATE_TOKEN = "3f9a1c0e5b7d2a4c6e8f0a1b3c5d7e9f1a2b3c4d5e6f7a8b";
 
 let result;
 let childOutput = "";
@@ -24,6 +25,7 @@ let childOutput = "";
 beforeAll(async () => {
   const child = fork(CHILD, [JSON.stringify({
     questionId: QUESTION_ID, constituency: CONSTITUENCY, clientIp: CLIENT_IP, error: ERROR,
+    candidateToken: CANDIDATE_TOKEN,
   })], {
     execArgv: [],
     silent: true,
@@ -42,6 +44,8 @@ beforeAll(async () => {
   });
   child.stdout.on("data", (d) => { childOutput += d; });
   child.stderr.on("data", (d) => { childOutput += d; });
+  // After the result message, so that the access log lines are all in.
+  const closed = new Promise((resolve) => child.on("close", resolve));
   result = await new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       child.kill();
@@ -54,6 +58,7 @@ beforeAll(async () => {
     });
   });
   if (result.error) throw new Error(`${result.error}\n${childOutput}`);
+  await closed;
 }, 20000);
 
 test("Sentry is enabled in the child, so the checks below aren't vacuous", () => {
@@ -91,4 +96,21 @@ test("a request body that some other path puts on an event is dropped", () => {
   const serialized = JSON.stringify(event);
   expect(serialized).not.toContain(QUESTION_ID);
   expect(serialized).not.toContain(CONSTITUENCY);
+});
+
+// Tokens are bearer secrets: anyone with access to the Sentry project or the
+// server logs could edit the candidate's profile and answers (issue #36).
+test("an error on a token route doesn't send the token to Sentry", () => {
+  const event = result.tokenEvent;
+
+  expect(result.tokenStatus).toBe(500);
+  expect(event.exception.values[0].value).toMatch(/ECONNREFUSED/);
+  // Still says which route it came from.
+  expect(event.request.url).toContain("/api/candidates/me/[token]");
+  expect(JSON.stringify(event)).not.toContain(CANDIDATE_TOKEN);
+});
+
+test("the access log line for a failed token request doesn't contain the token", () => {
+  expect(childOutput).toContain("GET /api/candidates/me/[token] 500");
+  expect(childOutput).not.toContain(CANDIDATE_TOKEN);
 });

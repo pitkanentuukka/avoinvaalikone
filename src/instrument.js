@@ -2,6 +2,7 @@
 // instrumentation can hook http/express. Inert when SENTRY_DSN is unset
 // (development, CI).
 const Sentry = require("@sentry/node");
+const { redactTokensDeep } = require("./redactTokens");
 
 if (process.env.SENTRY_DSN) {
   Sentry.init({
@@ -19,10 +20,16 @@ if (process.env.SENTRY_DSN) {
     // The Express error handler can still attach the parsed req.body when an
     // error reaches it outside its request's async context, and a future SDK
     // version may add other ways; drop the body from every event regardless.
+    // Then mask party, registration and candidate tokens wherever a URL was
+    // recorded (request URL, transaction name, breadcrumbs): they're bearer
+    // secrets carried in the path (issue #36).
     beforeSend(event) {
       if (event.request) delete event.request.data;
-      return event;
+      return redactTokensDeep(event);
     },
+    // Transactions skip beforeSend. None are sent at tracesSampleRate 0, but
+    // if tracing is turned on, their names and span URLs carry tokens too.
+    beforeSendTransaction: (event) => redactTokensDeep(event),
   });
 }
 

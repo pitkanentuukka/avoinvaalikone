@@ -7,6 +7,7 @@ const helmet = require("helmet");
 const morgan = require("morgan");
 const rateLimit = require("express-rate-limit");
 
+const { redactTokens } = require("./redactTokens");
 const { noStore } = require("./middleware/cacheControl");
 const { isAdminRequest } = require("./middleware/auth");
 const redisStore = require("./middleware/rateLimitStore");
@@ -86,6 +87,12 @@ const matchLimiter = rateLimit({
   store: redisStore("rl:match:"),
   passOnStoreError: true,
 });
+
+// :url masks party, registration and candidate tokens: rate-limited (429)
+// and failed requests on the token routes would otherwise write working
+// bearer secrets to the container logs (issue #36). Redefined globally rather
+// than under a new name so no format can bring back the raw URL.
+morgan.token("url", (req) => redactTokens(req.originalUrl || req.url));
 
 // In production only log failures: per-request logging at election-day rates
 // is measurable event-loop and disk overhead with no diagnostic value.
