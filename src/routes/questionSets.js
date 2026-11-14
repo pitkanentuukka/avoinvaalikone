@@ -454,9 +454,12 @@ adminRouter.patch("/:id/review", requireAdmin, validateUUIDParam("id"), async (r
     const rejectedReviews = reviews.filter((r) => r.rejected);
     const mergedReviews = reviews.filter((r) => !r.rejected && r.duplicateOf);
     const editedReviews = reviews.filter((r) => !r.rejected && !r.duplicateOf && r.editedStatement?.trim());
-    const mergedIds = new Set(mergedReviews.map((r) => r.questionId));
-    if (mergedReviews.some((r) => mergedIds.has(r.duplicateOf))) {
-      return res.status(400).json({ error: "Yhdistämisen kohdetta ei voi yhdistää toiseen kysymykseen samassa pyynnössä" });
+    const removedIds = new Set([
+      ...mergedReviews.map((r) => r.questionId),
+      ...rejectedReviews.map((r) => r.questionId),
+    ]);
+    if (mergedReviews.some((r) => removedIds.has(r.duplicateOf))) {
+      return res.status(400).json({ error: "Yhdistämisen kohdetta ei voi yhdistää tai hylätä samassa pyynnössä" });
     }
 
     client = await db.getClient();

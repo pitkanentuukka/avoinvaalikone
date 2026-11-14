@@ -70,6 +70,7 @@ test("missing merge target returns 404 and rolls back before any change", async 
 test.each([
   ["mutual duplicates", [{ questionId: A, duplicateOf: B }, { questionId: B, duplicateOf: A }]],
   ["merge chain", [{ questionId: A, duplicateOf: B.toUpperCase() }, { questionId: B, duplicateOf: C }]],
+  ["target rejected in this request", [{ questionId: A, duplicateOf: B.toUpperCase() }, { questionId: B, rejected: true }]],
   ["repeated source", [{ questionId: A, duplicateOf: B }, { questionId: A.toUpperCase(), duplicateOf: C }]],
 ])("%s returns 400 before any change", async (_name, reviews) => {
   const client = setup();
