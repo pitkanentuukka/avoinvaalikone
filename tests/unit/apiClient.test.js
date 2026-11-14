@@ -21,6 +21,25 @@ function apiWith(...outcomes) {
 
 const networkError = () => new TypeError("Failed to fetch");
 
+describe("API key conversion (#33)", () => {
+  test("does not retain the unused request-conversion helpers", () => {
+    const fs = require("fs");
+    const path = require("path");
+    const source = fs.readFileSync(path.join(__dirname, "../../vaalikone-frontend/src/api.js"), "utf8");
+    expect(source).not.toMatch(/\b(?:camelToSnake|_toSnake)\b/);
+  });
+
+  test("keeps request keys and converts nested response keys to camelCase", async () => {
+    const { api, fetch } = apiWith(jsonResponse(201, {
+      ngo_name: "NGO", questions: [{ sort_order: 1, metadata: null }],
+    }));
+    const body = { ngoName: "NGO", questions: [{ sortOrder: 1, metadata: null }] };
+
+    await expect(api.submitQuestionSet(body)).resolves.toEqual(body);
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual(body);
+  });
+});
+
 describe("apiFetch retries", () => {
   test("GET is retried once on a transient upstream error", async () => {
     const { api, fetch } = apiWith(jsonResponse(503, {}), jsonResponse(200, [{ ngo_name: "X" }]));
