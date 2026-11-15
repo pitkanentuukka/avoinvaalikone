@@ -155,7 +155,7 @@ A party token gives the party secretary management access, but cannot edit candi
 - `name`, `email`, or `constituency` exceeds 255 characters -> 400
 - Invalid email format -> 400
 - On candidate creation, an unsupported Finnish parliamentary constituency fails the database CHECK constraint -> 400
-- Non-string `photoUrl` or `bio` -> 400; `photoUrl` exceeds 500 characters or does not start with http(s) -> 400; `bio` exceeds 1000 characters -> 400
+- Non-null, non-string `photoUrl` or `bio` -> 400; `photoUrl` exceeds 500 characters or does not start with http(s) -> 400; `bio` exceeds 1000 characters -> 400
 - Profile strings are trimmed before storage; omitted, `null`, or empty `photoUrl` or `bio` is stored as `null` (a whitespace-only `bio` also becomes `null`)
 - Same name and email already registered in this party -> 409 after profile validation, with no new candidate and no personal token in the response; attempt to resend the existing personal link to the registered email address
 - If that resend fails or SMTP is not configured, still return 409, instructing the candidate to ask the party contact to resend the link
