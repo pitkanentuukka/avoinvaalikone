@@ -54,11 +54,12 @@ async function lockQuestions(client, questionIds) {
 }
 
 /**
- * Serialize administrative reviews/removals before taking any set row locks.
+ * Serialize administrative reviews/removals/merges before taking any row locks.
  * This gives orphan cleanup a committed view of earlier unlinks. A single
  * transaction advisory lock also avoids an inline merge waiting for the set
  * held by another unlink that is itself waiting for this lock. These low-volume
- * admin operations queue; shared question rows stay available to other merges.
+ * admin operations queue. Direct merges must join before locking questions,
+ * since copying set links needs FK locks on sets that reviews also lock.
  * Commit/rollback releases the lock, including on error and early return.
  */
 async function serializeQuestionUnlinks(client) {
@@ -296,6 +297,8 @@ adminRouter.post("/merge-questions", requireAdmin, async (req, res, next) => {
 
     client = await db.getClient();
     await begin(client);
+
+    await serializeQuestionUnlinks(client);
 
     // Verify every referenced question exists.
     const allIds = [keepId, ...dropIds];
