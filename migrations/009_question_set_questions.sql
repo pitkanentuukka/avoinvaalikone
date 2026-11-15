@@ -9,7 +9,6 @@
 -- candidate_answers and voter_responses keep referencing questions.id, so a merged
 -- (canonical) question keeps a single answer target regardless of how many sets share it.
 
-BEGIN;
 
 CREATE TABLE IF NOT EXISTS question_set_questions (
   question_set_id UUID    NOT NULL REFERENCES question_sets (id) ON DELETE CASCADE,
@@ -33,5 +32,3 @@ ALTER TABLE questions DROP COLUMN IF EXISTS question_set_id;
 
 INSERT INTO schema_migrations (version) VALUES (9)
   ON CONFLICT DO NOTHING;
-
-COMMIT;

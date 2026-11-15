@@ -49,12 +49,15 @@ introduces.
   a dedicated client before applying migrations. Every replica runs migrations on
   startup; the lock serializes them so late replicas block until the first
   finishes, then see everything already applied.
-- `migrations/010_match_covering_index.sql` builds a covering index
-  `CONCURRENTLY` (no write lock on `candidate_answers` during a campaign-period
-  deploy). It therefore contains **no** `BEGIN/COMMIT` and does not touch
-  `schema_migrations`; the runner records it in `migration_history` as usual. If
-  a `CONCURRENTLY` build is interrupted it can leave an INVALID index — drop it
-  and let the migration re-run (recovery command is in the file header).
+- The runner commits each SQL file and its `migration_history` row in a single
+  transaction and rolls back on failure before releasing the advisory lock.
+  SQL files must not contain transaction control or nontransactional commands.
+- `migrations/010_match_covering_index.sql` builds a covering index with a regular
+  `CREATE INDEX` so the index and its history row commit atomically. This blocks
+  writes to `candidate_answers` during the build. Databases that already recorded
+  migration 010 skip it. An interrupted build from the earlier `CONCURRENTLY`
+  version may have left an INVALID index; drop it before retrying (recovery
+  command is in the file header).
 
 ## Caching
 

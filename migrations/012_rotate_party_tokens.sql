@@ -12,7 +12,6 @@
 -- Upper-case Ä/Å/Ö are mapped explicitly because lower() only folds ASCII
 -- under a C locale.
 
-BEGIN;
 
 UPDATE parties
 SET token = left(regexp_replace(translate(lower(name), 'ÄÅÖäåö', 'aaoaao'), '[^a-z0-9]+', '-', 'g'), 12)
@@ -21,5 +20,3 @@ SET token = left(regexp_replace(translate(lower(name), 'ÄÅÖäåö', 'aaoaao')
 
 INSERT INTO schema_migrations (version) VALUES (12)
   ON CONFLICT DO NOTHING;
-
-COMMIT;

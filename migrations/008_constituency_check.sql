@@ -4,7 +4,6 @@
 -- other countries), remove or replace this constraint and update FI_CONSTITUENCIES
 -- in vaalikone-frontend/src/App.jsx to match.
 
-BEGIN;
 
 ALTER TABLE candidates
   DROP CONSTRAINT IF EXISTS candidates_constituency_valid;
@@ -29,5 +28,3 @@ ALTER TABLE candidates
 
 INSERT INTO schema_migrations (version) VALUES (8)
   ON CONFLICT DO NOTHING;
-
-COMMIT;

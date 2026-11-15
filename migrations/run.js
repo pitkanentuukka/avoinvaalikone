@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 const { Pool } = require("pg");
+const { begin, commit, rollback } = require("../src/db/transaction");
 
 // Arbitrary application-wide lock id for migrations. Every backend replica
 // runs migrations on startup; the advisory lock serializes them so late
@@ -46,14 +47,19 @@ async function migrate() {
       }
 
       const sql = fs.readFileSync(path.join(__dirname, file), "utf8");
+      // The runner owns the transaction: SQL files must not commit before
+      // their history row is durable. Keep both on this locked session.
+      await begin(client);
       await client.query(sql);
       await client.query(
         "INSERT INTO migration_history (filename) VALUES ($1)",
         [file]
       );
+      await commit(client);
       console.log(`✓ Migration ${file} applied successfully`);
     }
   } catch (err) {
+    await rollback(client);
     console.error("✗ Migration failed:", err.message);
     // Not process.exit(1): that would end the process before `finally`
     // unlocks, releases the client and closes the pool. The non-zero exit

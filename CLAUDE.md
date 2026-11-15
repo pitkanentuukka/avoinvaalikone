@@ -100,7 +100,7 @@ Copy `.env.example` to `.env`. Required: `DATABASE_URL`, `ADMIN_SECRET`. Optiona
 - Tokens are 24 random bytes from pgcrypto (`encode(gen_random_bytes(24), 'hex')` column defaults; rotate with `SET col = DEFAULT`)
 - Tokens travel in URL paths and magic-link query params, so anything that records a URL must mask them: Sentry (`beforeSend`/`beforeBreadcrumb`) and the morgan `:url` token use `redactTokens` (`src/redactTokens.js`, mirrored in `vaalikone-frontend/src/redactTokens.js`; `tests/unit/redactTokens.test.js` runs both). The frontend nginx logs only the masked `$log_uri` (maps in `vaalikone-frontend/nginx.conf`) and its error log is at `crit`, since nginx error lines carry the raw request line (upstream failures on every restart; only rare resource-exhaustion alerts still get through). A new token route or link param must be added to all three
 - API behaviour that only direct API clients can hit (the frontend never triggers it) is documented in `docs/direct-api-caveats.md` rather than fixed for now; add new cases there
-- Migrations run as a single SQL transaction (`migrations/001_initial.sql`); new migrations should follow the same versioned pattern and update `schema_migrations`
+- The migration runner wraps each SQL file and its `migration_history` insert in one transaction. SQL files must not contain transaction control or commands such as `CREATE INDEX CONCURRENTLY` that cannot run in a transaction. New migrations should follow the versioned pattern and update `schema_migrations`
 
 ## Issue Workflow
 
