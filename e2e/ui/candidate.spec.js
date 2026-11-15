@@ -96,7 +96,12 @@ test.describe("Candidate and party portal UI", () => {
     await expect(explanation).toBeDisabled();
     await expect(explanation).toHaveAccessibleDescription(/Valitse ensin kantasi/);
 
+    await expect(q1Card.getByRole("button", { pressed: false })).toHaveCount(5);
     await q1Card.getByRole("button", { name: "Samaa mieltä", exact: true }).click();
+    await expect(q1Card.getByRole("button", { name: "Samaa mieltä", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await q1Card.getByRole("button", { name: "Eri mieltä", exact: true }).click();
+    await expect(q1Card.getByRole("button", { name: "Eri mieltä", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(q1Card.getByRole("button", { name: "Samaa mieltä", exact: true })).toHaveAttribute("aria-pressed", "false");
     await expect(explanation).toBeEnabled();
     await expect(q1Card.getByText(/Valitse ensin kantasi/)).toHaveCount(0);
     await explanation.fill("Koska näin on.");
@@ -107,6 +112,7 @@ test.describe("Candidate and party portal UI", () => {
     await expect(page.getByText("Vastaukset tallennettu")).toBeVisible();
     await page.reload();
     await expect(explanation).toHaveValue("Koska näin on.");
+    await expect(q1Card.getByRole("button", { name: "Eri mieltä", exact: true })).toHaveAttribute("aria-pressed", "true");
   });
 
   test("a temporary load error offers a retry instead of \"invalid link\"", async ({ page, request }) => {

@@ -41,6 +41,12 @@ test.describe("Voter quiz UI", () => {
     // Start answering (all sets are pre-selected)
     await page.getByRole("button", { name: /Aloita/ }).click();
 
+    await expect(page.getByRole("button", { pressed: false })).toHaveCount(5);
+    await page.getByRole("button", { name: "Neutraali", exact: true }).click();
+    await page.getByRole("button", { name: "← Edellinen", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Neutraali", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("button", { pressed: false })).toHaveCount(4);
+
     // Step 3: Answer all questions
     await answerAllQuestions(page);
 
