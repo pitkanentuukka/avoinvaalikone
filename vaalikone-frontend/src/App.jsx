@@ -341,7 +341,7 @@ function CandidateProfile({ candidate, onClose, activeQuestions, voterAnswers })
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: "24px" }} onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()} style={{ background: palette.bg, borderRadius: "14px", maxWidth: 600, width: "100%", maxHeight: "85vh", overflow: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
         <div style={{ background: `linear-gradient(135deg, ${palette.accent}, ${palette.accentHover})`, padding: "36px 32px 28px", borderRadius: "14px 14px 0 0", color: "#fff", position: "relative" }}>
-          <button onClick={onClose} style={{ position: "absolute", top: 12, right: 16, background: "rgba(255,255,255,0.2)", border: "none", color: "#fff", width: 32, height: 32, borderRadius: "50%", cursor: "pointer", fontSize: "16px", fontWeight: 700 }}>×</button>
+          <button onClick={onClose} aria-label={t.close} style={{ position: "absolute", top: 12, right: 16, background: "rgba(255,255,255,0.2)", border: "none", color: "#fff", width: 32, height: 32, borderRadius: "50%", cursor: "pointer", fontSize: "16px", fontWeight: 700 }}>×</button>
           <div style={{ display: "flex", gap: "20px", alignItems: "center" }}>
             <Avatar src={candidate.photoUrl} name={candidate.name} size={80} />
             <div>
@@ -1229,7 +1229,7 @@ function NgoView() {
           <div onClick={(e) => e.stopPropagation()} style={{ background: palette.bg, borderRadius: "14px", maxWidth: 620, width: "100%", maxHeight: "80vh", overflow: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
             <div style={{ padding: "24px 28px", borderBottom: `1px solid ${palette.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 700 }}>{t.ngoApprovedTitle}</h3>
-              <button onClick={() => setShowApproved(false)} style={{ background: "none", border: "none", fontSize: "22px", cursor: "pointer", color: palette.textLight, lineHeight: 1 }}>×</button>
+              <button onClick={() => setShowApproved(false)} aria-label={t.close} style={{ background: "none", border: "none", fontSize: "22px", cursor: "pointer", color: palette.textLight, lineHeight: 1 }}>×</button>
             </div>
             <div style={{ padding: "20px 28px" }}>
               {approvedLoading && <div style={{ color: palette.textMuted, textAlign: "center", padding: "32px 0" }}>{t.ngoApprovedLoading}</div>}
