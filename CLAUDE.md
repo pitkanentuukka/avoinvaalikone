@@ -13,7 +13,7 @@ Vaalikone 2026 is a Finnish voter advisory machine (election compass). Voters an
 ```bash
 npm install           # Install dependencies
 npm run dev           # Start with hot-reload (node --watch)
-npm start             # Start in production mode
+npm start             # Start server (set NODE_ENV=production for production)
 npm run migrate       # Run database migrations
 npm run seed          # Seed sample data
 ```
