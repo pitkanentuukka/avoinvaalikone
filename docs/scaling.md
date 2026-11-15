@@ -256,14 +256,19 @@ or add a replica.
 
 ## Load testing
 
-See `scripts/loadtest/README.md` for full instructions.
+See [scripts/loadtest/README.md](../scripts/loadtest/README.md) for the HTTPS
+preflight and full instructions. Caddy must have a valid certificate trusted
+by the test host. Run these commands from `/opt/vaalikone` on the server.
 
 Quick reference:
 
 ```bash
-# On the server, against localhost (bypasses Cloudflare — measures origin only)
-RATE_LIMIT_MATCH_MAX=100000 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d backend  # disable rate limit for test
-k6 run -e BASE_URL=http://localhost scripts/loadtest/voter-flow.js
+# On the server: keep the production hostname for TLS and Caddy routing;
+# origin-local.json connects it to 127.0.0.1 and disables redirects.
+RATE_LIMIT_MATCH_MAX=100000 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d backend  # raise rate limit for test
+NO_PROXY=avoinvaalikone.fi no_proxy=avoinvaalikone.fi k6 run \
+  --config scripts/loadtest/origin-local.json \
+  -e BASE_URL=https://avoinvaalikone.fi scripts/loadtest/voter-flow.js
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d backend  # afterwards: back to the .env value
 ```
 
@@ -274,9 +279,13 @@ Thresholds in the script:
 - `POST /api/voter/match` p95 < 800 ms
 - `GET /api/candidates/:id` p95 < 300 ms
 
-**Never load-test through `https://avoinvaalikone.fi`** — you measure
-Cloudflare's cache, not the origin, and high synthetic traffic can trip
-Cloudflare's DDoS/bot mitigation against your own IP.
+**Never load-test the public hostname without an origin connection override**
+— that measures Cloudflare's cache and can trip its DDoS/bot mitigation against
+your own IP. The config above keeps TLS verification enabled and measures
+`Caddy → nginx → backend` on this server. It does not validate production
+client-IP rate limiting: bypassing Cloudflare shortens the proxy chain while
+`TRUST_PROXY_HOPS` still defaults to 3. Do not publish nginx or backend ports
+for the test.
 
 ---
 
