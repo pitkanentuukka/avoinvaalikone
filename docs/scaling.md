@@ -144,7 +144,7 @@ hostname every 10 seconds. Without this, nginx pins the IPs at startup and
 |----------|---------|---------|
 | `REDIS_URL` | _(unset)_ | Redis connection string. Required for shared rate limiting across replicas. Set automatically in compose. |
 | `PG_POOL_MAX` | `10` | DB connections per backend process. `replicas × PG_POOL_MAX` must stay under Postgres `max_connections` (100). |
-| `RATE_LIMIT_MATCH_MAX` | `300` | Match requests per IP per minute. Raise for load testing in prod mode; lower is more conservative against abuse. |
+| `RATE_LIMIT_MATCH_MAX` | `300` | Match requests per IP per minute. Positive safe integer only; invalid values warn at startup and fall back to 300. Unset or empty uses 300 without warning. Raise for load testing in prod mode; lower is more conservative against abuse. |
 
 ---
 
