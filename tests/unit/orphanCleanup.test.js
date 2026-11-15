@@ -18,6 +18,7 @@ test.each([[[Q1]], [[]]])("cleanup deletes only its locked orphan subset %j", as
   const client = buildMockClient();
   const remaining = new Set([Q1, Q2]);
   client.query.mockImplementation(async (sql, params) => {
+    if (/SELECT id FROM question_sets/.test(sql)) return { rows: [{ id: SET_ID }] };
     if (/SELECT question_id FROM question_set_questions/.test(sql)) {
       return { rows: [{ question_id: Q1 }, { question_id: Q2 }] };
     }
@@ -45,6 +46,7 @@ test("cleanup preserves a question linked by a merge while its lock was awaited"
   const client = buildMockClient();
   const remaining = new Set([Q1]);
   client.query.mockImplementation(async (sql, params) => {
+    if (/SELECT id FROM question_sets/.test(sql)) return { rows: [{ id: SET_ID }] };
     if (/SELECT question_id FROM question_set_questions/.test(sql)) return { rows: [{ question_id: Q1 }] };
     if (/FOR UPDATE/.test(sql)) return { rows: [{ id: Q1 }] };
     if (/DELETE FROM questions/.test(sql) && !/NOT EXISTS/.test(sql)) {
