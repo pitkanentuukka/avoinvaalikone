@@ -16,8 +16,8 @@ function deferred() {
 }
 
 function invoke(kind, setId, questionId, body = { reviews: [{ questionId, rejected: true }] }) {
-  const path = kind === "set" ? "/:id" : kind === "question" ? "/:id/questions/:questionId" : "/:id/review";
-  const method = kind === "review" ? "patch" : "delete";
+  const path = kind === "merge" ? "/merge-questions" : kind === "set" ? "/:id" : kind === "question" ? "/:id/questions/:questionId" : "/:id/review";
+  const method = kind === "merge" ? "post" : kind === "review" ? "patch" : "delete";
   const route = adminRouter.stack.find(l => l.route?.path === path && l.route.methods[method]).route;
   const res = { status: jest.fn().mockReturnThis(), end: jest.fn(), json: jest.fn() };
   const next = jest.fn();
@@ -204,4 +204,52 @@ describeWithDb("concurrent shared-question unlinks (#92)", () => {
     expect((await observer.query("SELECT id FROM questions WHERE id = $1", [keepId])).rows).toHaveLength(1);
   });
 
+  test.each(["merge", "review"])("direct merge and review serialize when %s starts first (#146)", async (firstKind) => {
+    const keepId = (await observer.query("INSERT INTO questions (statement) VALUES ('Canonical') RETURNING id")).rows[0].id;
+    db.getClient.mockReset().mockResolvedValueOnce({
+      query: async (...args) => {
+        const result = await first.query(...args);
+        // Pause after the first route holds its question locks, before merging
+        // can copy links and take FK key-share locks on the reviewed set.
+        if (/SELECT id FROM questions.*FOR UPDATE/.test(args[0])) {
+          paused.resolve(); await gate.promise;
+        }
+        return result;
+      }, release: jest.fn(),
+    }).mockResolvedValueOnce({ query: (...args) => second.query(...args), release: jest.fn() });
+    const start = kind => invoke(kind, setIds[0], questionId, kind === "merge"
+      ? { keepId, dropIds: [questionId] }
+      : { reviews: [{ questionId, rejected: false }] });
+    const a = start(firstKind);
+    pending.push(a.done);
+    await Promise.race([paused.promise, a.done.then(() => { throw new Error("First route did not lock questions"); })]);
+    const b = start(firstKind === "merge" ? "review" : "merge");
+    pending.push(b.done);
+    const deadline = Date.now() + 3000;
+    let blocked = false;
+    while (Date.now() < deadline) {
+      const { rows: [r] } = await observer.query(
+        "SELECT $2 = ANY(pg_blocking_pids($1)) AS blocked", [second.processID, first.processID]);
+      if (r.blocked) { blocked = true; break; }
+      await new Promise(r => setTimeout(r, 10));
+    }
+    gate.resolve();
+    await Promise.all(pending);
+    expect(blocked).toBe(true);
+    // next(err) is the route's HTTP 500 path, including PostgreSQL 40P01.
+    expect(a.next).not.toHaveBeenCalled();
+    expect(b.next).not.toHaveBeenCalled();
+    const merge = firstKind === "merge" ? a : b;
+    const review = firstKind === "review" ? a : b;
+    expect(merge.res.json).toHaveBeenCalledWith(expect.objectContaining({ id: keepId, merged: 1 }));
+    if (firstKind === "merge") expect(review.res.status).toHaveBeenCalledWith(404);
+    else expect(review.res.json).toHaveBeenCalledWith(expect.objectContaining({ status: "approved" }));
+    expect((await observer.query("SELECT id FROM questions WHERE id = $1", [questionId])).rows).toEqual([]);
+    expect((await observer.query("SELECT question_set_id, question_id FROM question_set_questions ORDER BY question_set_id")).rows)
+      .toEqual([...setIds].sort().map(id => ({ question_set_id: id, question_id: keepId })));
+    expect((await observer.query("SELECT question_id, value FROM candidate_answers")).rows)
+      .toEqual([{ question_id: keepId, value: 2 }]);
+    expect((await observer.query("SELECT question_id, value FROM voter_responses")).rows)
+      .toEqual([{ question_id: keepId, value: 2 }]);
+  });
 });
