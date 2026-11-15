@@ -14,6 +14,7 @@ const translations = {
     veryImportant: "Erittäin tärkeä",
 
     // Common
+    close: "Sulje",
     copyFieldLabel: "Linkki",
     loading: "Ladataan...",
     retry: "Yritä uudelleen",
@@ -277,6 +278,7 @@ const translations = {
     veryImportant: "Very important",
 
     // Common
+    close: "Close",
     copyFieldLabel: "Link",
     loading: "Loading...",
     retry: "Retry",
