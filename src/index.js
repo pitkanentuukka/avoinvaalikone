@@ -179,15 +179,15 @@ app.use("/api/candidates", candidatesRouter);
 app.use("/api/voter", matchLimiter, voterRouter);
 
 // ─── Error handling ───
-app.use((req, res) => {
-  res.status(404).json({ error: "Reittiä ei löytynyt" });
-});
-
-// Report unhandled errors to Sentry before the JSON error response below
-// (which still owns the client-facing Finnish message).
+// Register Sentry after all routes, before the terminal 404 handler so its
+// request handler can run, and before the client-facing JSON error handler.
 if (process.env.SENTRY_DSN) {
   Sentry.setupExpressErrorHandler(app);
 }
+
+app.use((req, res) => {
+  res.status(404).json({ error: "Reittiä ei löytynyt" });
+});
 
 app.use((err, req, res, next) => {
   const status = err.status || 500;
