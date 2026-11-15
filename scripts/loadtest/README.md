@@ -7,13 +7,18 @@ POST a match, open two candidate details. At full ramp it produces ~500 req/s
 ## Running locally
 
 ```bash
-docker compose --profile dev up --build -d
+NODE_ENV=development docker compose --profile dev up --build -d
 npm run seed                      # needs seeded questions + candidate answers
 k6 run -e BASE_URL=http://localhost scripts/loadtest/voter-flow.js
 ```
 
-In development (`NODE_ENV` ≠ production) rate limits are skipped, so the
-single-IP k6 run is not throttled.
+All rate limits are skipped when the backend's `NODE_ENV` is not `production`.
+Check this setting before a local run: Compose defaults an unset or empty
+`NODE_ENV` to `production`, even with `--profile dev` (that profile only starts
+Mailpit). The command above explicitly sets `NODE_ENV=development` so the
+single-IP k6 run is not throttled at the default 300 match requests/minute.
+For a plain `npm run dev` stack, use a `.env` copied from `.env.example` or
+explicitly set `NODE_ENV=development` as well.
 
 ## Running against the server (prod mode)
 

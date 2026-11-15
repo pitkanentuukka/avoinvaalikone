@@ -13,7 +13,7 @@ Vaalikone 2026 is a Finnish voter advisory machine (election compass). Voters an
 ```bash
 npm install           # Install dependencies
 npm run dev           # Start with hot-reload (node --watch)
-npm start             # Start in production mode
+npm start             # Start server (set NODE_ENV=production for production)
 npm run migrate       # Run database migrations
 npm run seed          # Seed sample data
 ```
@@ -89,7 +89,7 @@ When a set or a per-set link is removed, the route layer deletes any question th
 
 ### Environment Variables
 
-Copy `.env.example` to `.env`. Required: `DATABASE_URL`, `ADMIN_SECRET`. Optional: `PORT` (default 3000), `CORS_ORIGIN` (default `http://localhost:5173`), `NODE_ENV`, `PUBLIC_HOST` (production HTTPS-redirect target), `TRUST_PROXY_HOPS` (number of reverse proxies in front of the app, default 1; the production Cloudflare → Caddy → nginx chain needs 3, set in `docker-compose.prod.yml`), `RATE_LIMIT_MATCH_MAX` (voter match requests per IP per minute, default 300).
+Copy [`.env.example`](.env.example) to `.env` for the configuration reference: server/auth, database pool and query timeouts (`PG_POOL_MAX`, `PG_STATEMENT_TIMEOUT_MS`, `PG_QUERY_TIMEOUT_MS`), Redis (`REDIS_URL`), proxy trust (`TRUST_PROXY_HOPS`), redirects (`PUBLIC_HOST`), rate limits, Sentry (`SENTRY_DSN`, `VITE_SENTRY_DSN`), SMTP and backups. Plain Node runs require `DATABASE_URL` and `ADMIN_SECRET`; Compose supplies the database URL and requires `ADMIN_SECRET`. Plain `npm start` leaves an unset `NODE_ENV` unset (non-production behavior); `.env.example` sets `development`. Compose defaults unset or empty `NODE_ENV` to `production`, enabling rate limiting; the `dev` profile only starts Mailpit. See [docker-compose.yml](docker-compose.yml) and [docker-compose.prod.yml](docker-compose.prod.yml) for container-specific defaults and overrides, including `TRUST_PROXY_HOPS=3` for Cloudflare → Caddy → nginx (plain Node default: 1).
 
 ## Key Conventions
 
