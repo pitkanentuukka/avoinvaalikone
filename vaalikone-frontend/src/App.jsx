@@ -1051,7 +1051,7 @@ function AdminView() {
                   </div>
                   {selected && (
                     <label style={{ fontSize: "11px", color: palette.textMuted, display: "flex", alignItems: "center", gap: "4px", flexShrink: 0 }}>
-                      <input type="radio" name="merge-keep" checked={mergeKeepId === q.id} onChange={() => setMergeKeepId(q.id)} />
+                      <input type="radio" name="merge-keep" aria-label={`${t.adminMergeKeepLabel}: ${q.statement}`} checked={mergeKeepId === q.id} onChange={() => setMergeKeepId(q.id)} />
                       {t.adminMergeKeepLabel}
                     </label>
                   )}
