@@ -45,7 +45,7 @@ test.describe("Home page", () => {
     await expect(goButton).toBeDisabled();
 
     // Type a token
-    const tokenInput = page.getByPlaceholder("esim. sd-2026-x7k9");
+    const tokenInput = page.getByRole("textbox", { name: "Linkki tai tunniste", exact: true });
     await expect(tokenInput).toBeVisible();
     await tokenInput.fill("some-token");
     await expect(tokenInput).toHaveValue("some-token");
