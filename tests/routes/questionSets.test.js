@@ -928,6 +928,7 @@ describe("POST /api/admin/question-sets/merge-questions", () => {
     const client = buildMockClient();
     client.query
       .mockResolvedValueOnce({})              // BEGIN
+      .mockResolvedValueOnce({})              // advisory lock
       .mockResolvedValueOnce({ rows: [{ id: VALID_UUID }] }); // SELECT FOR UPDATE → only 1 of 2 found
     const res = await request(app)
       .post("/api/admin/question-sets/merge-questions")
@@ -940,6 +941,7 @@ describe("POST /api/admin/question-sets/merge-questions", () => {
     const client = buildMockClient();
     client.query
       .mockResolvedValueOnce({})                                              // BEGIN
+      .mockResolvedValueOnce({})                                              // advisory lock
       .mockResolvedValueOnce({ rows: [{ id: VALID_UUID }, { id: Q1 }] })      // SELECT FOR UPDATE (both exist)
       .mockResolvedValueOnce({})                                              // merge: INSERT candidate_answers
       .mockResolvedValueOnce({})                                              // merge: INSERT voter_responses
@@ -959,6 +961,7 @@ describe("POST /api/admin/question-sets/merge-questions", () => {
     expect(res.body.sets).toHaveLength(1);
     // Locked in id order, like the candidate answer save (#16), so the two
     // can't deadlock.
-    expect(client.query.mock.calls[1][0]).toMatch(/ORDER BY id\s+FOR UPDATE/);
+    expect(client.query.mock.calls[1][0]).toBe("SELECT pg_advisory_xact_lock(92, 1)");
+    expect(client.query.mock.calls[2][0]).toMatch(/ORDER BY id\s+FOR UPDATE/);
   });
 });
