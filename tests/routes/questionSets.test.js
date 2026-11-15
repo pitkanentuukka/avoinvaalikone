@@ -885,6 +885,26 @@ describe("POST /api/admin/question-sets/merge-questions", () => {
     expect(res.body.error).toMatch(/itseensä/i);
   });
 
+  test.each([
+    ["identical", [Q1, Q1]],
+    ["case variants", [Q1, Q1.toUpperCase()]],
+  ])("repeated dropIds (%s) → 400 even when all questions exist", async (_label, dropIds) => {
+    const client = buildMockClient();
+    client.query
+      .mockResolvedValueOnce({}) // BEGIN
+      .mockResolvedValueOnce({ rows: [{ id: VALID_UUID }, { id: Q1 }] });
+
+    const res = await request(app)
+      .post("/api/admin/question-sets/merge-questions")
+      .set("Authorization", authHeader)
+      .send({ keepId: VALID_UUID, dropIds });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("Yhdistettävien kysymysten tunnisteet eivät saa toistua");
+    expect(db.getClient).not.toHaveBeenCalled();
+    expect(client.query).not.toHaveBeenCalled();
+  });
+
   test("a question does not exist → 404", async () => {
     const client = buildMockClient();
     client.query
