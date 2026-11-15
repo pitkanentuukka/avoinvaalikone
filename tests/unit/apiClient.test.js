@@ -164,6 +164,21 @@ describe("isTransientError", () => {
     expect(isTransientError(await api.getOwnProfile("t").catch((e) => e))).toBe(false);
   });
 
+  test.each([414, 431].flatMap((status) =>
+    ["getPartyOverview", "getRegistration", "getOwnProfile"].map((method) => [status, method])
+  ))("HTTP %i for an overlong token in %s is an invalid link", async (status, method) => {
+    // nginx/Node can reject the request before the API returns a JSON body.
+    const { api, fetch } = apiWith({
+      ok: false, status,
+      json: async () => { throw new SyntaxError("Unexpected token '<'"); },
+    });
+    const err = await api[method]("a".repeat(20000)).catch((e) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(err.status).toBe(status);
+    expect(isTransientError(err)).toBe(false);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
   test("an unknown token keeps the server's message and status", async () => {
     const { api } = apiWith(jsonResponse(404, { error: "Virheellinen ehdokastunniste" }));
     const err = await api.getOwnProfile("nope").catch((e) => e);
