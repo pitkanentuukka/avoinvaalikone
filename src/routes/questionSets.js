@@ -64,8 +64,10 @@ async function deleteOrphanQuestions(client, questionIds) {
        AND NOT EXISTS (SELECT 1 FROM question_set_questions l WHERE l.question_id = q.id)`;
   // Lock in id order first, as lockQuestions does, but only the orphans: a
   // question another set still shares isn't deleted and needn't be locked.
-  await client.query(`SELECT q.id FROM questions q WHERE ${orphanFilter} ORDER BY q.id FOR UPDATE`, [questionIds]);
-  await client.query(`DELETE FROM questions q WHERE ${orphanFilter}`, [questionIds]);
+  const { rows: locked } = await client.query(`SELECT q.id FROM questions q WHERE ${orphanFilter} ORDER BY q.id FOR UPDATE`, [questionIds]);
+  // READ COMMITTED gives DELETE a fresh snapshot: never expand beyond the
+  // questions this transaction actually locked in the stable order.
+  await client.query("DELETE FROM questions WHERE id = ANY($1)", [locked.map((q) => q.id)]);
 }
 
 /**
