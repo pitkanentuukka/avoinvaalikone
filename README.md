@@ -63,7 +63,7 @@ cp .env.example .env       # fill in DATABASE_URL and ADMIN_SECRET
 createdb vaalikone
 npm install
 npm run migrate
-npm run seed               # optional sample data
+npm run seed               # optional sample data (only when parties, sets, questions and candidates are empty)
 npm run dev                # starts on http://localhost:3000
 ```
 

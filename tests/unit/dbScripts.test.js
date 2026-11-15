@@ -44,6 +44,7 @@ function fakePool({ connectError, failOn, query } = {}) {
     query: jest.fn(async (sql, params) => {
       if (failOn && sql.includes(failOn)) throw new Error("boom");
       if (query) return query(sql, params);
+      if (sql.includes("AS has_data")) return { rows: [{ has_data: false }] };
       return { rows: [] };
     }),
     release: jest.fn(),
