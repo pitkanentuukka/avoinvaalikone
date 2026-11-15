@@ -54,6 +54,18 @@ async function lockQuestions(client, questionIds) {
 }
 
 /**
+ * Serialize administrative reviews/removals before taking any set row locks.
+ * This gives orphan cleanup a committed view of earlier unlinks. A single
+ * transaction advisory lock also avoids an inline merge waiting for the set
+ * held by another unlink that is itself waiting for this lock. These low-volume
+ * admin operations queue; shared question rows stay available to other merges.
+ * Commit/rollback releases the lock, including on error and early return.
+ */
+async function serializeQuestionUnlinks(client) {
+  await client.query("SELECT pg_advisory_xact_lock(92, 1)");
+}
+
+/**
  * Delete any of the given questions that are no longer linked to any set.
  * Deleting a question cascades to its candidate_answers and voter_responses, so
  * this is only called for questions we have just unlinked from their last set.
@@ -468,6 +480,7 @@ adminRouter.patch("/:id/review", requireAdmin, validateUUIDParam("id"), async (r
 
     client = await db.getClient();
     await begin(client);
+    await serializeQuestionUnlinks(client);
 
     const { rows: sets } = await client.query(
       "SELECT * FROM question_sets WHERE id = $1 FOR UPDATE",
@@ -728,6 +741,7 @@ adminRouter.delete(
     try {
       client = await db.getClient();
       await begin(client);
+      await serializeQuestionUnlinks(client);
       // Serialize the staged check and edit with publishing, as in add above.
       const { rows: sets } = await client.query(
         "SELECT id, status, hidden FROM question_sets WHERE id = $1 FOR UPDATE",
@@ -769,6 +783,18 @@ adminRouter.delete("/:id", requireAdmin, validateUUIDParam("id"), async (req, re
   try {
     client = await db.getClient();
     await begin(client);
+    await serializeQuestionUnlinks(client);
+
+    // Stabilize membership against staged edits before collecting question IDs.
+    // The shared advisory lock was acquired before this set row lock.
+    const { rows: sets } = await client.query(
+      "SELECT id FROM question_sets WHERE id = $1 FOR UPDATE",
+      [req.params.id]
+    );
+    if (sets.length === 0) {
+      await rollback(client);
+      return res.status(404).json({ error: "Kysymyssarjaa ei löytynyt" });
+    }
 
     // Remember which questions this set held so we can clean up any that become orphaned.
     const { rows: linked } = await client.query(
