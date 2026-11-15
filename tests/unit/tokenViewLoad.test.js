@@ -36,6 +36,8 @@ describe.each(["PartyView", "CandidateView"])("%s load errors (#87)", (view) => 
   test.each([
     [404, 503, true],
     [400, 503, true],
+    [414, 503, true],
+    [431, 503, true],
     [503, 404, false],
     [503, 400, false],
   ])("token HTTP %i wins over an earlier question-set HTTP %i", async (tokenStatus, questionStatus, invalid) => {
