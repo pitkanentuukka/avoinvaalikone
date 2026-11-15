@@ -80,8 +80,11 @@ i.e. everything that arrives through Caddy/Cloudflare in production.
 `src/redis.js` + `src/middleware/rateLimitStore.js` + deps `redis`,
 `rate-limit-redis`:
 
-- All three rate limiters (admin, submission, match) share a Redis store when
-  `REDIS_URL` is set, so limits are enforced across backend replicas.
+- All six rate limiters (admin, submission, match, plus the party, registration
+  and candidate-token routes in `src/routes/candidates.js`) share a Redis
+  store when `REDIS_URL` is set, so limits are enforced across backend replicas.
+  The token-route limits are 60, 100 and 300 requests per 15 minutes per IP,
+  respectively; all six limiters apply only when `NODE_ENV=production`.
 - Falls back to per-process in-memory store when `REDIS_URL` is unset (local
   dev without compose).
 - **Match limit raised 60 → 300 req/min/IP**. Finnish carriers (DNA/Elisa/Telia)
