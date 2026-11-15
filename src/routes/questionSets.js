@@ -274,7 +274,7 @@ adminRouter.post("/merge-questions", requireAdmin, async (req, res, next) => {
     if (!dropIds.every((id) => isValidUUID(id))) {
       return res.status(400).json({ error: "Virheelliset yhdistettävien kysymysten tunnisteet" });
     }
-    if (dropIds.includes(keepId)) {
+    if (dropIds.some((id) => id.toLowerCase() === keepId.toLowerCase())) {
       return res.status(400).json({ error: "Kysymystä ei voi yhdistää itseensä" });
     }
     // PostgreSQL UUID equality ignores case, so case variants repeat too.
