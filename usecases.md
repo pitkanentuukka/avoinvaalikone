@@ -118,9 +118,9 @@ Voters answer questions and get matched with candidates.
 
 ---
 
-## 3. Candidate (via Party Token)
+## 3. Candidate and Party Access
 
-Candidates are managed through party-token-gated endpoints. A party token is a URL slug generated when the admin creates a party.
+A party token gives the party secretary management access, but cannot edit candidate profiles or answers. Candidates edit their own data using the candidate token in their personal link. Self-registration uses a separate registration token.
 
 ### UC-CAND-1: View Party's Candidates
 
@@ -156,50 +156,57 @@ Candidates are managed through party-token-gated endpoints. A party token is a U
 
 ### UC-CAND-3: Update Candidate Profile
 
-**Actor:** Party admin / candidate
-**Endpoint:** `PUT /api/candidates/party/:partyToken/candidates/:id`
+**Actor:** Candidate
+**Endpoint:** `PUT /api/candidates/me/:candidateToken`
 **Preconditions:**
-- Valid party token
-- Candidate exists and belongs to the party
+- Valid personal candidate token identifying the candidate being edited
 
 **Main Flow:**
-1. Update `name`, `photoUrl`, `bio` for the candidate
-2. `name` uses COALESCE (only updates if provided), `photoUrl` and `bio` are set directly (can be nulled)
+1. Submit the full profile: required `name`, `email`, `constituency`, and optional `photoUrl`, `bio`
+2. The candidate page includes an `answers` object in this request (see UC-CAND-4 for its shape and validation)
+3. Profile and answers are saved in the same transaction: a rejected answer or database error leaves both unchanged
+4. Returns the updated profile, plus `saved` (answer count) and `skipped` (question IDs) when `answers` is included
 
 **Edge Cases:**
-- Invalid UUID for `:id` -> 400
-- Candidate does not belong to this party -> 404
-- Candidate not found -> 404
+- Invalid or unknown candidate token -> 404
+- Missing or blank `name`, `email`, or `constituency` -> 400
 - `name` exceeds 255 characters -> 400
+- `email` exceeds 255 characters or invalid format -> 400
+- `constituency` exceeds 255 characters or is not a supported Finnish parliamentary constituency -> 400
 - `photoUrl` exceeds 500 characters or not http(s) -> 400
 - `bio` exceeds 1000 characters -> 400
-- Sending `null`/empty `photoUrl` or `bio` clears the field
+- Profile strings are trimmed; omitted, `null`, or empty `photoUrl` or `bio` clears the field (a whitespace-only `bio` also clears it)
+- Omitting `answers` (or sending `null`) updates only the profile; existing answers remain unchanged and the response has no `saved`/`skipped` fields
+- Non-object or array `answers` -> 400; invalid answer contents reject the whole combined save as described in UC-CAND-4
 
 ### UC-CAND-4: Save Candidate Answers
 
-**Actor:** Party admin / candidate
-**Endpoint:** `PUT /api/candidates/party/:partyToken/candidates/:id/answers`
+**Actor:** Candidate
+**Endpoints:**
+- Candidate page: `PUT /api/candidates/me/:candidateToken` with the full profile and an `answers` field (UC-CAND-3)
+- Answers only: `PUT /api/candidates/me/:candidateToken/answers`
 **Preconditions:**
-- Valid party token
-- Candidate exists and belongs to the party
-- Questions exist (from approved question sets)
+- Valid personal candidate token identifying the candidate being edited
 
 **Main Flow:**
 1. Submit `answers` object: `{ [questionId]: { value: 0-4, explanation?: string } }`
-2. Answers are upserted (insert or update on conflict)
+2. Validate answers to existing questions before writing; valid answers are upserted (insert or update on conflict)
 3. Candidate's `updated_at` timestamp is refreshed
-4. Returns count of saved answers
+4. Returns `saved` (count of saved answers) and `skipped` (question IDs that could not be saved); the combined endpoint also returns the updated profile
 
 **Edge Cases:**
-- Missing or non-object `answers` -> 400
-- Candidate does not belong to this party -> 404
-- Invalid UUID question IDs -> silently skipped
-- Answer value outside 0-4 or non-numeric -> silently skipped
-- Explanation exceeds 500 characters -> silently skipped
-- Empty explanation -> stored as empty string
+- Invalid or unknown candidate token -> 404
+- Answers-only endpoint: missing, `null`, non-object, or array `answers` -> 400; `{}` is valid and saves zero answers
+- Combined endpoint: omitted or `null` `answers` means profile-only update (UC-CAND-3); non-object or array `answers` -> 400
+- Invalid UUIDs and unknown or removed question IDs -> skipped and reported in `skipped`, even if their answer contents are invalid
+- A `null` answer entry is ignored without deleting an existing answer or adding the ID to `skipped`
+- For existing questions, a non-object answer, non-integer value, value outside 0-4, or non-string explanation -> 400 naming the affected questions; the whole save is rejected
+- Single-digit strings `"0"` through `"4"` are accepted as values and converted to integers
+- Explanation exceeds 500 characters after trimming -> 400 naming the affected questions; the whole save is rejected
+- Explanations are trimmed; omitted, `null`, empty, or whitespace-only explanations are stored as empty strings
 - Re-submitting answers for the same questions -> updates existing (upsert)
-- Transaction: all-or-nothing (rolls back on error)
-- Invalid party token -> 404
+- Omitted questions keep their existing answers
+- Transaction: all-or-nothing for validated answers (and the profile on the combined endpoint); errors roll back all writes, while skipped questions do not prevent valid answers from being saved
 
 ---
 
