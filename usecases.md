@@ -138,21 +138,28 @@ A party token gives the party secretary management access, but cannot edit candi
 
 ### UC-CAND-2: Register a New Candidate
 
-**Actor:** Party admin
-**Endpoint:** `POST /api/candidates/party/:partyToken`
-**Preconditions:** Valid party token exists
+**Actor:** Candidate
+**Endpoint:** `POST /api/candidates/register/:registrationToken`
+**Preconditions:** Valid registration token from the party's shareable sign-up link
 
 **Main Flow:**
-1. Provide candidate `name`, optionally `photoUrl`, `bio`, `email`
-2. System creates candidate linked to the party
+1. Submit required `name`, `email`, `constituency`, and optional `photoUrl`, `bio`
+2. Validate the profile and check for an existing registration with the same name and email in this party (case-insensitive, with submitted name and email trimmed)
+3. Create a candidate linked to the party identified by the registration token; the candidate is visible to voters immediately
+4. Return HTTP 201 with the candidate's profile, `id`, personal `token`, and `created_at`; the personal link built from the token lets the candidate edit their own profile and answers
+5. If SMTP is configured, also send the personal link by email; email failure does not undo registration or change the 201 response
 
 **Edge Cases:**
-- Missing `name` -> 400
-- `name` exceeds 255 characters -> 400
-- `photoUrl` exceeds 500 characters or not http(s) -> 400
-- `bio` exceeds 1000 characters -> 400
-- `email` exceeds 255 characters or invalid format -> 400
-- Invalid party token -> 404
+- Invalid or unknown registration token -> 404; the party management token is not the self-registration credential
+- Missing, blank, or non-string `name`, `email`, or `constituency` -> 400
+- `name`, `email`, or `constituency` exceeds 255 characters -> 400
+- Invalid email format -> 400
+- On candidate creation, an unsupported Finnish parliamentary constituency fails the database CHECK constraint -> 400
+- Non-string `photoUrl` or `bio` -> 400; `photoUrl` exceeds 500 characters or does not start with http(s) -> 400; `bio` exceeds 1000 characters -> 400
+- Profile strings are trimmed before storage; omitted, `null`, or empty `photoUrl` or `bio` is stored as `null` (a whitespace-only `bio` also becomes `null`)
+- Same name and email already registered in this party -> 409 after profile validation, with no new candidate and no personal token in the response; attempt to resend the existing personal link to the registered email address
+- If that resend fails or SMTP is not configured, still return 409, instructing the candidate to ask the party contact to resend the link
+- The same email with a different name is allowed, so a party office can register multiple candidates using a shared address
 
 ### UC-CAND-3: Update Candidate Profile
 
