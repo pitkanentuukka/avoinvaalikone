@@ -309,23 +309,11 @@ The entire React SPA lives in [vaalikone-frontend/src/App.jsx](vaalikone-fronten
 
 ## Environment Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PORT` | `3000` | Backend port |
-| `NODE_ENV` | `development` | Environment |
-| `DATABASE_URL` | — | PostgreSQL connection string |
-| `ADMIN_SECRET` | — | Bearer token for admin endpoints |
-| `CORS_ORIGIN` | `http://localhost:5173` | Allowed frontend origin |
-| `ADMIN_EMAIL` | — | Admin address for notifications |
-| `SMTP_HOST` | — | SMTP server (leave unset to disable email) |
-| `SMTP_PORT` | `1025` | SMTP port |
-| `SMTP_SECURE` | `false` | TLS (`true` for port 465) |
-| `SMTP_FROM` | `noreply@vaalikone.fi` | Sender address |
-| `SMTP_USER` | — | SMTP username (optional) |
-| `SMTP_PASS` | — | SMTP password (optional) |
-| `RATE_LIMIT_MATCH_MAX` | `300` | Voter match requests per IP per minute (production only) |
+Copy [`.env.example`](.env.example) to `.env` for the configuration reference, including database pool and query timeouts (`PG_POOL_MAX`, `PG_STATEMENT_TIMEOUT_MS`, `PG_QUERY_TIMEOUT_MS`), Redis (`REDIS_URL`), proxy trust (`TRUST_PROXY_HOPS`), the production redirect hostname (`PUBLIC_HOST`), Sentry (`SENTRY_DSN`, `VITE_SENTRY_DSN`), rate limits, SMTP and backups. Set `DATABASE_URL` and `ADMIN_SECRET` for a plain Node run; Compose supplies its own database URL and requires `ADMIN_SECRET`.
 
-In Docker Compose, `mailpit` provides a local SMTP server (port 1025) and web UI at http://localhost:8025, and `CORS_ORIGIN` is overridden to `http://localhost:80` to match the containerized frontend.
+Plain `npm start` does not set `NODE_ENV`; an unset value uses non-production behavior. The example `.env` sets `NODE_ENV=development`. Docker Compose defaults an unset or empty `NODE_ENV` to `production` (`${NODE_ENV:-production}`), which enables rate limiting. The `dev` Compose profile only starts Mailpit; it does not change `NODE_ENV`.
+
+In Docker Compose, `mailpit` provides a local SMTP server (port 1025) and web UI at http://localhost:8025 when the `dev` profile is enabled, and `CORS_ORIGIN` defaults to `http://localhost:80` to match the containerized frontend. See [docker-compose.yml](docker-compose.yml) and [docker-compose.prod.yml](docker-compose.prod.yml) for container-specific defaults and overrides (including production proxy trust).
 
 ---
 
