@@ -416,6 +416,7 @@ describe("PATCH /api/admin/question-sets/:id/review", () => {
     client.query
       .mockResolvedValueOnce({})                                                                          // BEGIN
       .mockResolvedValueOnce({ rows: [pendingSet] })                                                     // SELECT FOR UPDATE
+      .mockResolvedValueOnce({}) // serialize unlinks
       .mockResolvedValueOnce({ rows: [{ id: Q1 }, { id: Q2 }] }) // lock all referenced questions
       .mockResolvedValueOnce({ rows: [{ question_id: Q1 }, { question_id: Q2 }] }) // verify set membership
       // no needOriginalIds (no edits, no rejections) → skip SELECT originals
@@ -446,6 +447,7 @@ describe("PATCH /api/admin/question-sets/:id/review", () => {
     client.query
       .mockResolvedValueOnce({})                                                                          // BEGIN
       .mockResolvedValueOnce({ rows: [pendingSet] })                                                     // SELECT FOR UPDATE
+      .mockResolvedValueOnce({}) // serialize unlinks
       .mockResolvedValueOnce({ rows: [{ id: Q1 }, { id: Q2 }] }) // lock all referenced questions
       .mockResolvedValueOnce({ rows: [{ question_id: Q1 }, { question_id: Q2 }] }) // verify set membership
       .mockResolvedValueOnce({ rows: [{ id: Q1, statement: "Alkuperäinen" }] })                          // SELECT originals (edited)
@@ -481,6 +483,7 @@ describe("PATCH /api/admin/question-sets/:id/review", () => {
     client.query
       .mockResolvedValueOnce({})                                                  // BEGIN
       .mockResolvedValueOnce({ rows: [pendingSet] })                              // SELECT FOR UPDATE
+      .mockResolvedValueOnce({}) // serialize unlinks
       .mockResolvedValueOnce({ rows: [{ id: Q1 }, { id: Q2 }] }) // lock all referenced questions
       .mockResolvedValueOnce({ rows: [{ question_id: Q1 }, { question_id: Q2 }] }) // verify set membership
       .mockResolvedValueOnce({ rows: [{ id: Q2, statement: "Väittämä 2" }] })    // SELECT originals (rejected)
@@ -515,7 +518,8 @@ describe("PATCH /api/admin/question-sets/:id/review", () => {
 
     // The rejected question is locked in id order before anything changes, so
     // a concurrent answer save can't deadlock with it (#16).
-    expect(client.query.mock.calls[2]).toEqual([expect.stringMatching(/ORDER BY id FOR UPDATE/), [[Q1, Q2]]]);
+    expect(client.query.mock.calls[2][0]).toMatch(/pg_advisory_xact_lock/);
+    expect(client.query.mock.calls[3]).toEqual([expect.stringMatching(/ORDER BY id FOR UPDATE/), [[Q1, Q2]]]);
   });
 
   test("all questions rejected → status rejected, not hidden → 200", async () => {
@@ -524,6 +528,7 @@ describe("PATCH /api/admin/question-sets/:id/review", () => {
     client.query
       .mockResolvedValueOnce({})                                                                    // BEGIN
       .mockResolvedValueOnce({ rows: [pendingSet] })                                               // SELECT FOR UPDATE
+      .mockResolvedValueOnce({}) // serialize unlinks
       .mockResolvedValueOnce({ rows: [{ id: Q1 }, { id: Q2 }] }) // lock all referenced questions
       .mockResolvedValueOnce({ rows: [{ question_id: Q1 }, { question_id: Q2 }] }) // verify set membership
       .mockResolvedValueOnce({ rows: [{ id: Q1, statement: "Väittämä 1" }, { id: Q2, statement: "Väittämä 2" }] }) // SELECT originals (rejected)
@@ -557,6 +562,7 @@ describe("PATCH /api/admin/question-sets/:id/review", () => {
     client.query
       .mockResolvedValueOnce({})                                              // BEGIN
       .mockResolvedValueOnce({ rows: [pendingSet] })                          // SELECT FOR UPDATE
+      .mockResolvedValueOnce({}) // serialize unlinks
       .mockResolvedValueOnce({ rows: [{ id: Q1 }, { id: Q2 }, { id: VALID_UUID }] }) // lock all referenced questions
       .mockResolvedValueOnce({ rows: [{ question_id: Q1 }, { question_id: Q2 }] }) // verify set membership
       .mockResolvedValueOnce({})                                              // merge: INSERT candidate_answers
@@ -579,10 +585,11 @@ describe("PATCH /api/admin/question-sets/:id/review", () => {
 
     expect(res.status).toBe(200);
     const sqls = client.query.mock.calls.map(([sql]) => sql);
-    expect(sqls[2]).toMatch(/FROM questions\b[\s\S]*ORDER BY id FOR UPDATE/);
-    expect(client.query.mock.calls[2][1][0]).toEqual(expect.arrayContaining([Q1, VALID_UUID]));
-    expect(sqls[3]).toMatch(/SELECT question_id FROM question_set_questions/);
-    expect(sqls[4]).toMatch(/INSERT INTO candidate_answers/);
+    expect(sqls[2]).toMatch(/pg_advisory_xact_lock/);
+    expect(sqls[3]).toMatch(/FROM questions\b[\s\S]*ORDER BY id FOR UPDATE/);
+    expect(client.query.mock.calls[3][1][0]).toEqual(expect.arrayContaining([Q1, VALID_UUID]));
+    expect(sqls[4]).toMatch(/SELECT question_id FROM question_set_questions/);
+    expect(sqls[5]).toMatch(/INSERT INTO candidate_answers/);
   });
 
   test("DB error → ROLLBACK called, 500 returned, client released", async () => {
@@ -787,7 +794,7 @@ describe("DELETE /api/admin/question-sets/:id/questions/:questionId", () => {
       .set("Authorization", authHeader);
     expect(res.status).toBe(204);
     const sqls = client.query.mock.calls.map(([sql]) => sql);
-    expect(sqls[2]).toMatch(/ORDER BY id FOR UPDATE/);
+    expect(sqls[2]).toMatch(/pg_advisory_xact_lock/);
     expect(sqls[3]).toMatch(/DELETE FROM question_set_questions/);
     expect(sqls[4]).toMatch(/ORDER BY q\.id FOR UPDATE/);
     expect(sqls[5]).toMatch(/DELETE FROM questions/);
@@ -851,7 +858,7 @@ describe("DELETE /api/admin/question-sets/:id", () => {
     const sqls = client.query.mock.calls.map(([sql]) => sql);
     // Membership is stable and every question is locked before cascading links.
     expect(sqls[1]).toMatch(/FROM question_sets.*FOR UPDATE/);
-    expect(sqls[3]).toMatch(/FROM questions.*ORDER BY id FOR UPDATE/);
+    expect(sqls[3]).toMatch(/pg_advisory_xact_lock/);
     expect(client.query.mock.calls[3][1]).toEqual([[Q2, Q1]]);
     expect(sqls[4]).toMatch(/DELETE FROM question_sets/);
     expect(sqls[5]).toMatch(/NOT EXISTS[\s\S]*ORDER BY q\.id FOR UPDATE/);

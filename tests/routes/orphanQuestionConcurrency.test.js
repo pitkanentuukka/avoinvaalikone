@@ -126,4 +126,39 @@ describeWithDb("concurrent shared-question unlinks (#92)", () => {
     expect((await observer.query("SELECT * FROM voter_responses")).rows).toEqual([]);
     expect(blocked).toBe(true);
   });
+
+  test.each(["set", "question"])("%s removal of a shared question does not deadlock with merge FK locks", async (kind) => {
+    const keepId = (await observer.query("INSERT INTO questions (statement) VALUES ('Canonical') RETURNING id")).rows[0].id;
+    // A production merge locks its canonical/source questions before copying
+    // set links. Hold that lock while removal takes its own set lock.
+    await second.query("BEGIN");
+    await second.query("SELECT id FROM questions WHERE id = ANY($1) ORDER BY id FOR UPDATE", [[questionId, keepId]]);
+    db.getClient.mockReset().mockResolvedValue({ query: (...args) => first.query(...args), release: jest.fn() });
+    const removal = invoke(kind, setIds[0], questionId);
+    pending.push(removal.done);
+    let finished = false;
+    removal.done.then(() => { finished = true; });
+    const deadline = Date.now() + 3000;
+    while (!finished && Date.now() < deadline) {
+      const { rows: [r] } = await observer.query(
+        "SELECT $2 = ANY(pg_blocking_pids($1)) AS blocked", [first.processID, second.processID]);
+      if (r.blocked) break;
+      await new Promise(r => setTimeout(r, 10));
+    }
+    // Same FK-taking link copy as mergeQuestions(). A prelock on the shared
+    // question causes a cycle: removal waits Q; merge waits removal's set.
+    let mergeError;
+    try {
+      await second.query(`INSERT INTO question_set_questions (question_set_id, question_id, sort_order)
+        SELECT question_set_id, $1, sort_order FROM question_set_questions WHERE question_id = $2
+        ON CONFLICT (question_set_id, question_id) DO NOTHING`, [keepId, questionId]);
+      await second.query("COMMIT");
+    } catch (err) { mergeError = err; await second.query("ROLLBACK"); }
+    await removal.done;
+    expect(mergeError).toBeUndefined();
+    expect(removal.next).not.toHaveBeenCalled();
+    expect(removal.res.status).toHaveBeenCalledWith(204);
+    expect((await observer.query("SELECT id FROM questions WHERE id = $1", [questionId])).rows).toHaveLength(1);
+  });
+
 });

@@ -54,6 +54,25 @@ async function lockQuestions(client, questionIds) {
 }
 
 /**
+ * Serialize unlinks before changing membership, without locking shared question
+ * rows: a merge holds those rows while taking FK locks on the source sets.
+ * Transaction advisory locks release on commit/rollback. Sort the distinct lock
+ * keys themselves, so even a hash collision cannot invert acquisition order.
+ */
+async function serializeQuestionUnlinks(client, questionIds) {
+  if (questionIds.length === 0) return;
+  await client.query(
+    `SELECT pg_advisory_xact_lock(lock_id)
+     FROM (
+       SELECT DISTINCT hashtextextended(id::text, 92) AS lock_id
+       FROM unnest($1::uuid[]) AS ids(id)
+       ORDER BY lock_id
+     ) ordered_locks`,
+    [questionIds]
+  );
+}
+
+/**
  * Delete any of the given questions that are no longer linked to any set.
  * Deleting a question cascades to its candidate_answers and voter_responses, so
  * this is only called for questions we have just unlinked from their last set.
@@ -484,6 +503,7 @@ adminRouter.patch("/:id/review", requireAdmin, validateUUIDParam("id"), async (r
       ...reviewIds,
       ...reviews.filter((r) => r.duplicateOf).map((r) => r.duplicateOf),
     ])];
+    await serializeQuestionUnlinks(client, referencedIds);
     const found = await lockQuestions(client, referencedIds);
     if (found.length !== referencedIds.length) {
       await rollback(client);
@@ -742,9 +762,8 @@ adminRouter.delete(
         return res.status(409).json({ error: "Kysymyksiä voi poistaa vain julkaisemattomista kysymyssarjoista" });
       }
 
-      // Serialize shared-question unlinks before changing membership. Cleanup
-      // then sees the previous unlink's committed result in its fresh snapshot.
-      await lockQuestions(client, [req.params.questionId]);
+      // Cleanup must see the previous unlink's committed membership snapshot.
+      await serializeQuestionUnlinks(client, [req.params.questionId]);
       const { rowCount } = await client.query(
         "DELETE FROM question_set_questions WHERE question_id = $1 AND question_set_id = $2",
         [req.params.questionId, req.params.id]
@@ -790,9 +809,9 @@ adminRouter.delete("/:id", requireAdmin, validateUUIDParam("id"), async (req, re
       [req.params.id]
     );
 
-    // Acquire all question locks in the same order as answer saves and review,
-    // before the set deletion cascades to its links. Other unlinks wait here.
-    await lockQuestions(client, linked.map((l) => l.question_id));
+    // Serialize before the set deletion cascades to its links. Shared question
+    // rows remain available to merges; cleanup row-locks only actual orphans.
+    await serializeQuestionUnlinks(client, linked.map((l) => l.question_id));
     const { rowCount } = await client.query(
       `DELETE FROM question_sets WHERE id = $1`,
       [req.params.id]
