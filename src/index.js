@@ -79,9 +79,21 @@ const submissionLimiter = rateLimit({
 // while still capping a single abuser at ~5 req/s on the most expensive
 // endpoint. RATE_LIMIT_MATCH_MAX is the election-night dial, and is also
 // needed to run k6 load tests against a production-mode deployment.
+const rawMatchMax = process.env.RATE_LIMIT_MATCH_MAX;
+let matchMax = 300;
+// Compose can pass an unset variable as ""; both mean use the default.
+if (rawMatchMax !== undefined && rawMatchMax !== "") {
+  const parsed = Number(rawMatchMax);
+  // Reject partial parses ("300/min"), fractions and unsafe/overflowed values.
+  if (/^[0-9]+$/.test(rawMatchMax) && Number.isSafeInteger(parsed) && parsed > 0) {
+    matchMax = parsed;
+  } else {
+    console.warn("RATE_LIMIT_MATCH_MAX must be a positive safe integer; falling back to 300");
+  }
+}
 const matchLimiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1 minute
-  max: parseInt(process.env.RATE_LIMIT_MATCH_MAX || "300", 10),
+  max: matchMax,
   message: { error: "Liian monta pyyntöä. Yritä myöhemmin uudelleen." },
   skip: (req) => process.env.NODE_ENV !== 'production',
   store: redisStore("rl:match:"),
