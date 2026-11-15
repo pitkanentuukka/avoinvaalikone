@@ -35,14 +35,16 @@ afterEach(() => {
 // that settles once the script has ended the pool or called process.exit,
 // with a timeout so a script that does neither fails the test instead of
 // hanging it.
-function fakePool({ connectError, failOn } = {}) {
+function fakePool({ connectError, failOn, query } = {}) {
   let finish;
   const finished = new Promise((resolve) => (finish = resolve));
   process.exit.mockImplementation(() => finish());
 
   const client = {
-    query: jest.fn(async (sql) => {
+    query: jest.fn(async (sql, params) => {
       if (failOn && sql.includes(failOn)) throw new Error("boom");
+      if (query) return query(sql, params);
+      if (sql.includes("AS has_data")) return { rows: [{ has_data: false }] };
       return { rows: [] };
     }),
     release: jest.fn(),
@@ -76,6 +78,77 @@ function runScript(file) {
 const sqls = (client) => client.query.mock.calls.map(([sql]) => sql.trim());
 
 describe("migrations/seed.js", () => {
+  // Model the seed's rows across separate CLI invocations. Existing parties
+  // return no rows from INSERT ... ON CONFLICT DO NOTHING, as PostgreSQL does.
+  function seedDatabase(existing = {}) {
+    const tables = { parties: [], question_sets: [], questions: [], candidates: [], ...existing };
+    const query = (sql, params) => {
+      if (sql.includes("AS has_data")) {
+        return { rows: [{ has_data: Object.values(tables).some((rows) => rows.length) }] };
+      }
+      if (sql.includes("INSERT INTO parties")) {
+        if (tables.parties.length) return { rows: [] };
+        tables.parties = ["sd-2026-x7k9", "nc-2026-m3p1", "gl-2026-q8w2"]
+          .map((token, id) => ({ id, token }));
+        return { rows: tables.parties };
+      }
+      if (sql.includes("INSERT INTO question_sets")) {
+        const rows = ["Ilmasto", "Koulutus", "Digitaaliset"].map((title, id) => ({ id, title }));
+        tables.question_sets.push(...rows);
+        return { rows };
+      }
+      if (sql.includes("INSERT INTO questions ")) {
+        const rows = [{ id: tables.questions.length }];
+        tables.questions.push(...rows);
+        return { rows };
+      }
+      if (sql.includes("INSERT INTO candidates")) {
+        if (params.some((id) => id == null)) throw new Error("party_id must not be null");
+        const rows = ["Anna Virtanen", "Mikko Korhonen", "Liisa Mäkelä", "Jari Niemi"]
+          .map((name, id) => ({ id, name }));
+        tables.candidates.push(...rows);
+        return { rows };
+      }
+      return { rows: [] };
+    };
+    return { tables, query };
+  }
+
+  test("seeding twice succeeds and the second run leaves all sample data untouched", async () => {
+    const database = seedDatabase();
+    const first = fakePool(database);
+    runScript("seed.js");
+    await first.done();
+    expect(process.exitCode).toBeUndefined();
+    expect(database.tables.questions).toHaveLength(10);
+    expect(database.tables.candidates).toHaveLength(4);
+    const before = JSON.parse(JSON.stringify(database.tables));
+
+    const second = fakePool(database);
+    runScript("seed.js");
+    await second.done();
+    expect(process.exitCode).toBeUndefined();
+    expect(console.error).not.toHaveBeenCalled();
+    expect(database.tables).toEqual(before);
+    expect(sqls(second.client).some((sql) => /INSERT|UPDATE|DELETE/.test(sql))).toBe(false);
+    expect(sqls(second.client)).toContain("COMMIT");
+    expect(second.client.release).toHaveBeenCalledTimes(1);
+    expect(second.pool.end).toHaveBeenCalledTimes(1);
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining("ohitetaan"));
+  });
+
+  test.each(["parties", "question_sets", "questions", "candidates"])(
+    "existing %s alone prevents sample data from being added", async (table) => {
+      const database = seedDatabase({ [table]: [{ id: "existing" }] });
+      const { client, done } = fakePool(database);
+      runScript("seed.js");
+      await done();
+      expect(process.exitCode).toBeUndefined();
+      expect(sqls(client).some((sql) => /INSERT|UPDATE|DELETE/.test(sql))).toBe(false);
+      expect(sqls(client)).toContain("COMMIT");
+    }
+  );
+
   test("a failed query rolls back, releases the client and ends the pool", async () => {
     const { client, pool, done } = fakePool({ failOn: "INSERT INTO parties" });
     runScript("seed.js");

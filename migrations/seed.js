@@ -12,6 +12,24 @@ async function seed() {
     client = await pool.connect();
     await begin(client);
 
+    // Hold writers (including other seed runs) until the check and inserts
+    // commit. Readers can continue using the database during seeding.
+    await client.query(`
+      LOCK TABLE parties, question_sets, questions, candidates
+      IN SHARE ROW EXCLUSIVE MODE
+    `);
+    const { rows: [existing] } = await client.query(`
+      SELECT EXISTS (SELECT 1 FROM parties)
+          OR EXISTS (SELECT 1 FROM question_sets)
+          OR EXISTS (SELECT 1 FROM questions)
+          OR EXISTS (SELECT 1 FROM candidates) AS has_data
+    `);
+    if (existing.has_data) {
+      await commit(client);
+      console.log("✓ Tietokannassa on jo tietoja; esimerkkitietojen lisäys ohitetaan.");
+      return;
+    }
+
     // ─── Parties ───
     const { rows: parties } = await client.query(`
       INSERT INTO parties (name, token, email) VALUES
