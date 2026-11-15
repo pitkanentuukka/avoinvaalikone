@@ -246,7 +246,7 @@ Admins manage parties and moderate question sets. All admin endpoints require `A
 - Duplicate party name -> 409 (unique constraint on `name`)
 - Token is auto-generated and unique
 - Missing or invalid admin token -> 401 / 403
-- Rate limited: 30 requests per 15 minutes without a valid admin token (production only)
+- Rate limited: 30 requests per 15 minutes without a valid admin token
 
 ### UC-ADMIN-3: Delete a Party
 
