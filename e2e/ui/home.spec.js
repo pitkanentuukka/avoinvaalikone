@@ -45,7 +45,10 @@ test.describe("Home page", () => {
     await expect(goButton).toBeDisabled();
 
     // Type a token
-    await page.getByPlaceholder("esim. sd-2026-x7k9").fill("some-token");
+    const tokenInput = page.getByPlaceholder("esim. sd-2026-x7k9");
+    await expect(tokenInput).toBeVisible();
+    await tokenInput.fill("some-token");
+    await expect(tokenInput).toHaveValue("some-token");
     await expect(goButton).toBeEnabled();
   });
 });
