@@ -67,7 +67,7 @@ async function deleteOrphanQuestions(client, questionIds) {
   const { rows: locked } = await client.query(`SELECT q.id FROM questions q WHERE ${orphanFilter} ORDER BY q.id FOR UPDATE`, [questionIds]);
   // READ COMMITTED gives DELETE a fresh snapshot: never expand beyond the
   // questions this transaction actually locked in the stable order.
-  await client.query("DELETE FROM questions WHERE id = ANY($1)", [locked.map((q) => q.id)]);
+  await client.query(`DELETE FROM questions q WHERE ${orphanFilter}`, [locked.map((q) => q.id)]);
 }
 
 /**

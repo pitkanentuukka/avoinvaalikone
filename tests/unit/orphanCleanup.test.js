@@ -38,3 +38,24 @@ test.each([[[Q1]], [[]]])("cleanup deletes only its locked orphan subset %j", as
   expect(client.query.mock.calls.at(-1)).toEqual(["COMMIT"]);
   expect(client.release).toHaveBeenCalledTimes(1);
 });
+
+// A merge can add a new set link while cleanup's locking SELECT waits on the
+// canonical question row. The fresh DELETE snapshot must preserve that link.
+test("cleanup preserves a question linked by a merge while its lock was awaited", async () => {
+  const client = buildMockClient();
+  const remaining = new Set([Q1]);
+  client.query.mockImplementation(async (sql, params) => {
+    if (/SELECT question_id FROM question_set_questions/.test(sql)) return { rows: [{ question_id: Q1 }] };
+    if (/FOR UPDATE/.test(sql)) return { rows: [{ id: Q1 }] };
+    if (/DELETE FROM questions/.test(sql) && !/NOT EXISTS/.test(sql)) {
+      params[0].forEach(id => remaining.delete(id));
+    }
+    return { rows: [], rowCount: 1 };
+  });
+  const res = { status: jest.fn().mockReturnThis(), end: jest.fn() };
+  const next = jest.fn();
+  await handle({ params: { id: SET_ID } }, res, next);
+  expect(next).not.toHaveBeenCalled();
+  expect(res.status).toHaveBeenCalledWith(204);
+  expect([...remaining]).toEqual([Q1]);
+});
