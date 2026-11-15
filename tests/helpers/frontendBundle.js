@@ -23,7 +23,7 @@ const rawImports = {
 };
 
 // `source` is an ES module resolved from vaalikone-frontend/src; returns its exports.
-async function loadFrontend(source) {
+async function loadFrontend(source, plugins = []) {
   const { outputFiles } = await esbuild.build({
     stdin: { contents: source, resolveDir: path.join(FRONTEND, "src"), loader: "jsx" },
     bundle: true,
@@ -33,7 +33,7 @@ async function loadFrontend(source) {
     jsx: "automatic",
     loader: { ".md": "text" },
     define: { "import.meta.env": "{}" },
-    plugins: [rawImports],
+    plugins: [...plugins, rawImports],
     logLevel: "silent",
   });
   const module = { exports: {} };
