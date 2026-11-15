@@ -277,6 +277,10 @@ adminRouter.post("/merge-questions", requireAdmin, async (req, res, next) => {
     if (dropIds.includes(keepId)) {
       return res.status(400).json({ error: "Kysymystä ei voi yhdistää itseensä" });
     }
+    // PostgreSQL UUID equality ignores case, so case variants repeat too.
+    if (new Set(dropIds.map((id) => id.toLowerCase())).size !== dropIds.length) {
+      return res.status(400).json({ error: "Yhdistettävien kysymysten tunnisteet eivät saa toistua" });
+    }
 
     client = await db.getClient();
     await begin(client);
