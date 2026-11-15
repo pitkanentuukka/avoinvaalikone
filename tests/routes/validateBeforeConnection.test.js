@@ -39,6 +39,14 @@ const cases = [
   ["merge-questions: repeated dropId", () => merge({ keepId: QUESTION_ID, dropIds: [QUESTION_ID2, QUESTION_ID2] }), /eivät saa toistua/],
   ["merge-questions: repeated dropId in different case", () => merge({ keepId: QUESTION_ID, dropIds: [QUESTION_ID2, QUESTION_ID2.toUpperCase()] }), /eivät saa toistua/],
   ["merge-questions: merge into itself", () => merge({ keepId: QUESTION_ID, dropIds: [QUESTION_ID] })],
+  ...[
+    [QUESTION_ID, QUESTION_ID.toUpperCase()],
+    [QUESTION_ID.toUpperCase(), QUESTION_ID],
+  ].map(([keepId, dropId]) => [
+    `merge-questions: mixed-case self-merge ${keepId}`,
+    () => merge({ keepId, dropIds: [QUESTION_ID2, dropId] }),
+    /Kysymystä ei voi yhdistää itseensä/,
+  ]),
   ["review: missing reviews", () => review({})],
   ["review: edited statement too long", () => review({ reviews: [{ questionId: QUESTION_ID, editedStatement: "a".repeat(501) }] })],
   ["review: invalid duplicateOf", () => review({ reviews: [{ questionId: QUESTION_ID, duplicateOf: "nope" }] })],
