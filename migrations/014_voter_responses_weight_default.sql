@@ -7,11 +7,8 @@
 -- be told apart and are left as they are. The route always supplies the
 -- weight; this only keeps the column default consistent with it.
 
-BEGIN;
 
 ALTER TABLE voter_responses ALTER COLUMN weight SET DEFAULT 1;
 
 INSERT INTO schema_migrations (version) VALUES (14)
   ON CONFLICT DO NOTHING;
-
-COMMIT;

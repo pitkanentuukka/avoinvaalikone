@@ -1,5 +1,3 @@
-BEGIN;
-
 -- Anonymous voter response storage for aggregate analysis.
 -- No IP, no user agent, no precise timestamp — only a random session UUID and date.
 -- The session_id was generated server-side at match time when this migration was
@@ -18,5 +16,3 @@ CREATE INDEX IF NOT EXISTS idx_voter_responses_date     ON voter_responses (answ
 
 INSERT INTO schema_migrations (version) VALUES (5)
   ON CONFLICT DO NOTHING;
-
-COMMIT;

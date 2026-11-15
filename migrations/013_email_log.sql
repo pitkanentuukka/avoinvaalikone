@@ -8,7 +8,6 @@
 -- candidate_id / party_id are set for mail addressed to a candidate / party
 -- and cascade, so removing a candidate also removes their address from here.
 
-BEGIN;
 
 CREATE TABLE IF NOT EXISTS email_log (
   id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -25,5 +24,3 @@ CREATE INDEX IF NOT EXISTS idx_email_log_candidate ON email_log (candidate_id, c
 
 INSERT INTO schema_migrations (version) VALUES (13)
   ON CONFLICT DO NOTHING;
-
-COMMIT;

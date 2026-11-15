@@ -225,7 +225,7 @@ describe("migrations/run.js", () => {
     expect(database.state.committed).toContain("history:001_initial.sql");
   });
 
-  test("a failed history insert rolls back the schema and allows a clean retry", async () => {
+  test("a failed history insert rolls back the schema before unlocking", async () => {
     const database = migrationDatabase({ failHistory: true });
     const { client, done } = fakePool(database);
     runScript("run.js");

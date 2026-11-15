@@ -15,7 +15,6 @@
 --
 -- 24 random bytes (192 bits) from pgcrypto, same strength as party tokens.
 
-BEGIN;
 
 ALTER TABLE candidates ADD COLUMN IF NOT EXISTS token TEXT;
 UPDATE candidates SET token = encode(gen_random_bytes(24), 'hex') WHERE token IS NULL;
@@ -31,5 +30,3 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_parties_registration_token ON parties (reg
 
 INSERT INTO schema_migrations (version) VALUES (11)
   ON CONFLICT DO NOTHING;
-
-COMMIT;

@@ -1,7 +1,6 @@
 -- Vaalikone database schema
 -- Run with: npm run migrate
 
-BEGIN;
 
 -- ─── Extensions ───
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
@@ -77,5 +76,3 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 
 INSERT INTO schema_migrations (version) VALUES (1)
   ON CONFLICT DO NOTHING;
-
-COMMIT;
