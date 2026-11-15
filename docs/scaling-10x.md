@@ -146,9 +146,13 @@ the multi-server connection math work (§4.3).
    behind an env var (e.g. `CACHE_SMAXAGE_QUESTION_SETS`), flip it on election
    week. One origin fetch per upper-tier per hour.
 3. **Edge rate limit on `/api/voter/match`:** one Cloudflare rate-limiting
-   rule (free tier includes one): e.g. 100 req / 1 min per IP → managed
-   challenge or block. Abusive traffic burns Cloudflare's capacity, not ours;
-   the origin's Redis limiter (300/min) stays as the precise second line.
+   rule (free tier includes one): e.g. 600 req / 1 min per IP → managed
+   challenge or block. Keep the edge threshold at or above the configured
+   origin limit (`RATE_LIMIT_MATCH_MAX`, default 300/min/IP), and raise it
+   alongside any origin increase. Carrier CGNAT can put hundreds of voters
+   behind one IP; a stricter edge rule would bring back 429s that raising
+   `RATE_LIMIT_MATCH_MAX` cannot fix. The origin's Redis limiter stays as the
+   precise second line.
 4. **Break-glass bot control:** pre-create (disabled) a Turnstile/managed
    challenge rule for `/api/voter/match` to flip on if a bot wave hits during
    the event. Test it once beforehand so the frontend handles a challenge
