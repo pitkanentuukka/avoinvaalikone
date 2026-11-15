@@ -197,7 +197,7 @@ function ScaleInput({ value, onChange }) {
   return (
     <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
       {labels.map((label, i) => (
-        <button key={i} onClick={() => onChange(i)} style={{
+        <button key={i} aria-pressed={value === i} onClick={() => onChange(i)} style={{
           padding: "8px 14px", borderRadius: "6px", border: `1.5px solid ${value === i ? palette.accent : palette.border}`,
           background: value === i ? palette.accentLight : "transparent",
           color: value === i ? palette.accent : palette.textMuted,
@@ -2107,7 +2107,7 @@ function VoterView() {
           <div style={{ fontSize: "19px", fontWeight: 700, lineHeight: 1.5, marginBottom: "32px", maxWidth: 480, margin: "0 auto 32px" }}>"{q.statement}"</div>
           <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxWidth: 320, margin: "0 auto" }}>
             {labels.map((label, i) => (
-              <button key={i} onClick={() => answerQuestion(i)} style={{
+              <button key={i} aria-pressed={voterAnswers[q.id] === i} onClick={() => answerQuestion(i)} style={{
                 padding: "12px 20px", borderRadius: "8px",
                 border: `1.5px solid ${voterAnswers[q.id] === i ? palette.accent : palette.border}`,
                 background: voterAnswers[q.id] === i ? palette.accentLight : palette.surface,
