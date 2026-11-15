@@ -54,22 +54,15 @@ async function lockQuestions(client, questionIds) {
 }
 
 /**
- * Serialize unlinks before changing membership, without locking shared question
- * rows: a merge holds those rows while taking FK locks on the source sets.
- * Transaction advisory locks release on commit/rollback. Sort the distinct lock
- * keys themselves, so even a hash collision cannot invert acquisition order.
+ * Serialize administrative reviews/removals before taking any set row locks.
+ * This gives orphan cleanup a committed view of earlier unlinks. A single
+ * transaction advisory lock also avoids an inline merge waiting for the set
+ * held by another unlink that is itself waiting for this lock. These low-volume
+ * admin operations queue; shared question rows stay available to other merges.
+ * Commit/rollback releases the lock, including on error and early return.
  */
-async function serializeQuestionUnlinks(client, questionIds) {
-  if (questionIds.length === 0) return;
-  await client.query(
-    `SELECT pg_advisory_xact_lock(lock_id)
-     FROM (
-       SELECT DISTINCT hashtextextended(id::text, 92) AS lock_id
-       FROM unnest($1::uuid[]) AS ids(id)
-       ORDER BY lock_id
-     ) ordered_locks`,
-    [questionIds]
-  );
+async function serializeQuestionUnlinks(client) {
+  await client.query("SELECT pg_advisory_xact_lock(92, 1)");
 }
 
 /**
@@ -487,6 +480,7 @@ adminRouter.patch("/:id/review", requireAdmin, validateUUIDParam("id"), async (r
 
     client = await db.getClient();
     await begin(client);
+    await serializeQuestionUnlinks(client);
 
     const { rows: sets } = await client.query(
       "SELECT * FROM question_sets WHERE id = $1 FOR UPDATE",
@@ -503,7 +497,6 @@ adminRouter.patch("/:id/review", requireAdmin, validateUUIDParam("id"), async (r
       ...reviewIds,
       ...reviews.filter((r) => r.duplicateOf).map((r) => r.duplicateOf),
     ])];
-    await serializeQuestionUnlinks(client, referencedIds);
     const found = await lockQuestions(client, referencedIds);
     if (found.length !== referencedIds.length) {
       await rollback(client);
@@ -748,6 +741,7 @@ adminRouter.delete(
     try {
       client = await db.getClient();
       await begin(client);
+      await serializeQuestionUnlinks(client);
       // Serialize the staged check and edit with publishing, as in add above.
       const { rows: sets } = await client.query(
         "SELECT id, status, hidden FROM question_sets WHERE id = $1 FOR UPDATE",
@@ -762,8 +756,6 @@ adminRouter.delete(
         return res.status(409).json({ error: "Kysymyksiä voi poistaa vain julkaisemattomista kysymyssarjoista" });
       }
 
-      // Cleanup must see the previous unlink's committed membership snapshot.
-      await serializeQuestionUnlinks(client, [req.params.questionId]);
       const { rowCount } = await client.query(
         "DELETE FROM question_set_questions WHERE question_id = $1 AND question_set_id = $2",
         [req.params.questionId, req.params.id]
@@ -791,9 +783,10 @@ adminRouter.delete("/:id", requireAdmin, validateUUIDParam("id"), async (req, re
   try {
     client = await db.getClient();
     await begin(client);
+    await serializeQuestionUnlinks(client);
 
     // Stabilize membership against staged edits before collecting question IDs.
-    // Every unlink takes its set lock before its question locks, like review.
+    // The shared advisory lock was acquired before this set row lock.
     const { rows: sets } = await client.query(
       "SELECT id FROM question_sets WHERE id = $1 FOR UPDATE",
       [req.params.id]
@@ -809,9 +802,6 @@ adminRouter.delete("/:id", requireAdmin, validateUUIDParam("id"), async (req, re
       [req.params.id]
     );
 
-    // Serialize before the set deletion cascades to its links. Shared question
-    // rows remain available to merges; cleanup row-locks only actual orphans.
-    await serializeQuestionUnlinks(client, linked.map((l) => l.question_id));
     const { rowCount } = await client.query(
       `DELETE FROM question_sets WHERE id = $1`,
       [req.params.id]

@@ -45,8 +45,8 @@ describe.each(routes)("%s a staged question", (_name, method, path, successStatu
     expect(res.status).toHaveBeenCalledWith(successStatus);
     const sqls = client.query.mock.calls.map(([sql]) => sql);
     expect(sqls[0]).toBe("BEGIN");
-    expect(sqls[1]).toMatch(/SELECT id, status, hidden FROM question_sets WHERE id = \$1 FOR UPDATE/);
-    expect(client.query.mock.calls[1][1]).toEqual([SET_ID]);
+    expect(sqls[method === "delete" ? 2 : 1]).toMatch(/SELECT id, status, hidden FROM question_sets WHERE id = \$1 FOR UPDATE/);
+    expect(client.query.mock.calls[method === "delete" ? 2 : 1][1]).toEqual([SET_ID]);
     expect(sqls[sqls.length - 1]).toBe("COMMIT");
     expect(sqls).not.toContain("ROLLBACK");
     expect(client.release).toHaveBeenCalledTimes(1);
@@ -64,6 +64,7 @@ describe.each(routes)("%s a staged question", (_name, method, path, successStatu
     expect(res.status).toHaveBeenCalledWith(status);
     expect(client.query.mock.calls.map(([sql]) => sql)).toEqual([
       "BEGIN",
+      ...(method === "delete" ? ["SELECT pg_advisory_xact_lock(92, 1)"] : []),
       expect.stringMatching(/FROM question_sets WHERE id = \$1 FOR UPDATE/),
       "ROLLBACK",
     ]);

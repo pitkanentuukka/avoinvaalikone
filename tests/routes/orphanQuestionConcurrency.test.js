@@ -15,7 +15,7 @@ function deferred() {
   return { promise, resolve };
 }
 
-function invoke(kind, setId, questionId) {
+function invoke(kind, setId, questionId, body = { reviews: [{ questionId, rejected: true }] }) {
   const path = kind === "set" ? "/:id" : kind === "question" ? "/:id/questions/:questionId" : "/:id/review";
   const method = kind === "review" ? "patch" : "delete";
   const route = adminRouter.stack.find(l => l.route?.path === path && l.route.methods[method]).route;
@@ -23,7 +23,7 @@ function invoke(kind, setId, questionId) {
   const next = jest.fn();
   const done = route.stack.at(-1).handle({
     params: { id: setId, questionId },
-    body: { reviews: [{ questionId, rejected: true }] },
+    body,
   }, res, next);
   return { done, res, next };
 }
@@ -48,11 +48,16 @@ describeWithDb("concurrent shared-question unlinks (#92)", () => {
         question_id uuid REFERENCES questions(id) ON DELETE CASCADE,
         sort_order integer, PRIMARY KEY (question_set_id, question_id)
       );
+      CREATE TABLE candidates (id uuid PRIMARY KEY DEFAULT gen_random_uuid());
       CREATE TABLE candidate_answers (
-        question_id uuid REFERENCES questions(id) ON DELETE CASCADE, value integer
+        candidate_id uuid REFERENCES candidates(id) ON DELETE CASCADE,
+        question_id uuid REFERENCES questions(id) ON DELETE CASCADE, value integer,
+        explanation text, answered_at timestamptz DEFAULT now(),
+        PRIMARY KEY (candidate_id, question_id)
       );
       CREATE TABLE voter_responses (
-        question_id uuid REFERENCES questions(id) ON DELETE CASCADE, value integer
+        question_id uuid REFERENCES questions(id) ON DELETE CASCADE, value integer,
+        session_id uuid, weight integer, PRIMARY KEY (session_id, question_id)
       );
     `);
     first = await pool.connect();
@@ -63,12 +68,13 @@ describeWithDb("concurrent shared-question unlinks (#92)", () => {
     pending = [];
     gate = deferred();
     paused = deferred();
-    await observer.query("TRUNCATE question_sets, questions CASCADE");
+    await observer.query("TRUNCATE question_sets, questions, candidates CASCADE");
     setIds = (await observer.query("INSERT INTO question_sets (title) VALUES ('A'), ('B') RETURNING id")).rows.map(r => r.id);
     questionId = (await observer.query("INSERT INTO questions (statement) VALUES ('Shared') RETURNING id")).rows[0].id;
     await observer.query("INSERT INTO question_set_questions VALUES ($1, $3, 1), ($2, $3, 1)", [...setIds, questionId]);
-    await observer.query("INSERT INTO candidate_answers VALUES ($1, 2)", [questionId]);
-    await observer.query("INSERT INTO voter_responses VALUES ($1, 2)", [questionId]);
+    const candidateId = (await observer.query("INSERT INTO candidates DEFAULT VALUES RETURNING id")).rows[0].id;
+    await observer.query("INSERT INTO candidate_answers (candidate_id, question_id, value) VALUES ($1, $2, 2)", [candidateId, questionId]);
+    await observer.query("INSERT INTO voter_responses (question_id, value, session_id, weight) VALUES ($1, 2, gen_random_uuid(), 1)", [questionId]);
     db.getClient.mockReset();
     db.getClient.mockResolvedValueOnce({
       query: async (...args) => {
@@ -102,7 +108,7 @@ describeWithDb("concurrent shared-question unlinks (#92)", () => {
     pending.push(b.done);
     let finished = false;
     b.done.then(() => { finished = true; });
-    // The fixed second unlink waits for Q; without the fix it may finish its
+    // The fixed second unlink waits for administrative serialization; otherwise it may finish its
     // orphan check seeing the first transaction's uncommitted link removal.
     const deadline = Date.now() + 3000;
     let blocked = false;
@@ -159,6 +165,43 @@ describeWithDb("concurrent shared-question unlinks (#92)", () => {
     expect(removal.next).not.toHaveBeenCalled();
     expect(removal.res.status).toHaveBeenCalledWith(204);
     expect((await observer.query("SELECT id FROM questions WHERE id = $1", [questionId])).rows).toHaveLength(1);
+  });
+
+
+  test.each(["set", "question"])("inline review merge concurrent with %s removal avoids advisory/set lock cycles", async (kind) => {
+    const keepId = (await observer.query("INSERT INTO questions (statement) VALUES ('Canonical') RETURNING id")).rows[0].id;
+    const copyingLinks = deferred();
+    db.getClient.mockReset().mockResolvedValueOnce({
+      query: async (...args) => {
+        if (/INSERT INTO question_set_questions/.test(args[0])) {
+          copyingLinks.resolve(); await gate.promise;
+        }
+        return first.query(...args);
+      }, release: jest.fn(),
+    }).mockResolvedValueOnce({ query: (...args) => second.query(...args), release: jest.fn() });
+    const merge = invoke("review", setIds[0], questionId, { reviews: [{ questionId, duplicateOf: keepId }] });
+    pending.push(merge.done);
+    await Promise.race([copyingLinks.promise, merge.done.then(() => { throw new Error("Merge did not reach link copy"); })]);
+    const removal = invoke(kind, setIds[1], questionId);
+    pending.push(removal.done);
+    const deadline = Date.now() + 3000;
+    let blocked = false;
+    while (Date.now() < deadline) {
+      const { rows: [r] } = await observer.query(
+        "SELECT $2 = ANY(pg_blocking_pids($1)) AS blocked", [second.processID, first.processID]);
+      if (r.blocked) { blocked = true; break; }
+      await new Promise(r => setTimeout(r, 10));
+    }
+    gate.resolve();
+    await Promise.all(pending);
+    expect(blocked).toBe(true);
+    expect(merge.next).not.toHaveBeenCalled();
+    expect(removal.next).not.toHaveBeenCalled();
+    expect(merge.res.json).toHaveBeenCalledWith(expect.objectContaining({ status: "approved" }));
+    // The merge moved B's link to keepId before removal gets its turn.
+    expect(removal.res.status).toHaveBeenCalledWith(kind === "set" ? 204 : 404);
+    expect((await observer.query("SELECT id FROM questions WHERE id = $1", [questionId])).rows).toEqual([]);
+    expect((await observer.query("SELECT id FROM questions WHERE id = $1", [keepId])).rows).toHaveLength(1);
   });
 
 });

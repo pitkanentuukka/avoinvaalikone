@@ -392,6 +392,7 @@ describe("PATCH /api/admin/question-sets/:id/review", () => {
     const client = buildMockClient();
     client.query
       .mockResolvedValueOnce({})            // BEGIN
+      .mockResolvedValueOnce({}) // serialize unlinks
       .mockResolvedValueOnce({ rows: [] }); // SELECT FOR UPDATE → not found
     const res = await request(app)
       .patch(`/api/admin/question-sets/${VALID_UUID}/review`)
@@ -415,8 +416,8 @@ describe("PATCH /api/admin/question-sets/:id/review", () => {
     const updated = { ...stagedSet, reviewed_at: new Date().toISOString() };
     client.query
       .mockResolvedValueOnce({})                                                                          // BEGIN
-      .mockResolvedValueOnce({ rows: [pendingSet] })                                                     // SELECT FOR UPDATE
       .mockResolvedValueOnce({}) // serialize unlinks
+      .mockResolvedValueOnce({ rows: [pendingSet] })                                                     // SELECT FOR UPDATE
       .mockResolvedValueOnce({ rows: [{ id: Q1 }, { id: Q2 }] }) // lock all referenced questions
       .mockResolvedValueOnce({ rows: [{ question_id: Q1 }, { question_id: Q2 }] }) // verify set membership
       // no needOriginalIds (no edits, no rejections) → skip SELECT originals
@@ -446,8 +447,8 @@ describe("PATCH /api/admin/question-sets/:id/review", () => {
     const updated = { ...stagedSet, reviewed_at: new Date().toISOString() };
     client.query
       .mockResolvedValueOnce({})                                                                          // BEGIN
-      .mockResolvedValueOnce({ rows: [pendingSet] })                                                     // SELECT FOR UPDATE
       .mockResolvedValueOnce({}) // serialize unlinks
+      .mockResolvedValueOnce({ rows: [pendingSet] })                                                     // SELECT FOR UPDATE
       .mockResolvedValueOnce({ rows: [{ id: Q1 }, { id: Q2 }] }) // lock all referenced questions
       .mockResolvedValueOnce({ rows: [{ question_id: Q1 }, { question_id: Q2 }] }) // verify set membership
       .mockResolvedValueOnce({ rows: [{ id: Q1, statement: "Alkuperäinen" }] })                          // SELECT originals (edited)
@@ -482,8 +483,8 @@ describe("PATCH /api/admin/question-sets/:id/review", () => {
     const updated = { ...stagedSet, reviewed_at: new Date().toISOString() };
     client.query
       .mockResolvedValueOnce({})                                                  // BEGIN
-      .mockResolvedValueOnce({ rows: [pendingSet] })                              // SELECT FOR UPDATE
       .mockResolvedValueOnce({}) // serialize unlinks
+      .mockResolvedValueOnce({ rows: [pendingSet] })                              // SELECT FOR UPDATE
       .mockResolvedValueOnce({ rows: [{ id: Q1 }, { id: Q2 }] }) // lock all referenced questions
       .mockResolvedValueOnce({ rows: [{ question_id: Q1 }, { question_id: Q2 }] }) // verify set membership
       .mockResolvedValueOnce({ rows: [{ id: Q2, statement: "Väittämä 2" }] })    // SELECT originals (rejected)
@@ -518,7 +519,7 @@ describe("PATCH /api/admin/question-sets/:id/review", () => {
 
     // The rejected question is locked in id order before anything changes, so
     // a concurrent answer save can't deadlock with it (#16).
-    expect(client.query.mock.calls[2][0]).toMatch(/pg_advisory_xact_lock/);
+    expect(client.query.mock.calls[1][0]).toMatch(/pg_advisory_xact_lock/);
     expect(client.query.mock.calls[3]).toEqual([expect.stringMatching(/ORDER BY id FOR UPDATE/), [[Q1, Q2]]]);
   });
 
@@ -527,8 +528,8 @@ describe("PATCH /api/admin/question-sets/:id/review", () => {
     const updated = { ...pendingSet, status: "rejected", hidden: false, reviewed_at: new Date().toISOString() };
     client.query
       .mockResolvedValueOnce({})                                                                    // BEGIN
-      .mockResolvedValueOnce({ rows: [pendingSet] })                                               // SELECT FOR UPDATE
       .mockResolvedValueOnce({}) // serialize unlinks
+      .mockResolvedValueOnce({ rows: [pendingSet] })                                               // SELECT FOR UPDATE
       .mockResolvedValueOnce({ rows: [{ id: Q1 }, { id: Q2 }] }) // lock all referenced questions
       .mockResolvedValueOnce({ rows: [{ question_id: Q1 }, { question_id: Q2 }] }) // verify set membership
       .mockResolvedValueOnce({ rows: [{ id: Q1, statement: "Väittämä 1" }, { id: Q2, statement: "Väittämä 2" }] }) // SELECT originals (rejected)
@@ -561,8 +562,8 @@ describe("PATCH /api/admin/question-sets/:id/review", () => {
     const updated = { ...stagedSet, reviewed_at: new Date().toISOString() };
     client.query
       .mockResolvedValueOnce({})                                              // BEGIN
-      .mockResolvedValueOnce({ rows: [pendingSet] })                          // SELECT FOR UPDATE
       .mockResolvedValueOnce({}) // serialize unlinks
+      .mockResolvedValueOnce({ rows: [pendingSet] })                          // SELECT FOR UPDATE
       .mockResolvedValueOnce({ rows: [{ id: Q1 }, { id: Q2 }, { id: VALID_UUID }] }) // lock all referenced questions
       .mockResolvedValueOnce({ rows: [{ question_id: Q1 }, { question_id: Q2 }] }) // verify set membership
       .mockResolvedValueOnce({})                                              // merge: INSERT candidate_answers
@@ -585,7 +586,7 @@ describe("PATCH /api/admin/question-sets/:id/review", () => {
 
     expect(res.status).toBe(200);
     const sqls = client.query.mock.calls.map(([sql]) => sql);
-    expect(sqls[2]).toMatch(/pg_advisory_xact_lock/);
+    expect(sqls[1]).toMatch(/pg_advisory_xact_lock/);
     expect(sqls[3]).toMatch(/FROM questions\b[\s\S]*ORDER BY id FOR UPDATE/);
     expect(client.query.mock.calls[3][1][0]).toEqual(expect.arrayContaining([Q1, VALID_UUID]));
     expect(sqls[4]).toMatch(/SELECT question_id FROM question_set_questions/);
@@ -596,6 +597,7 @@ describe("PATCH /api/admin/question-sets/:id/review", () => {
     const client = buildMockClient();
     client.query
       .mockResolvedValueOnce({})                    // BEGIN
+      .mockResolvedValueOnce({}) // serialize unlinks
       .mockRejectedValueOnce(new Error("DB down")); // SELECT FOR UPDATE fails
 
     const res = await request(app)
@@ -750,7 +752,7 @@ describe("DELETE /api/admin/question-sets/:id/questions/:questionId", () => {
 
   test("set not found → 404", async () => {
     const client = buildMockClient();
-    client.query.mockResolvedValueOnce({}).mockResolvedValueOnce({ rows: [] }); // BEGIN, SELECT set
+    client.query.mockResolvedValueOnce({}).mockResolvedValueOnce({}).mockResolvedValueOnce({ rows: [] }); // BEGIN, serialization, SELECT set
     const res = await request(app)
       .delete(`/api/admin/question-sets/${VALID_UUID}/questions/${Q1}`)
       .set("Authorization", authHeader);
@@ -759,7 +761,7 @@ describe("DELETE /api/admin/question-sets/:id/questions/:questionId", () => {
 
   test("set is live (not staged) → 409", async () => {
     const client = buildMockClient();
-    client.query.mockResolvedValueOnce({}).mockResolvedValueOnce({ rows: [{ ...stagedSet, hidden: false }] }); // BEGIN, SELECT set
+    client.query.mockResolvedValueOnce({}).mockResolvedValueOnce({}).mockResolvedValueOnce({ rows: [{ ...stagedSet, hidden: false }] }); // BEGIN, serialization, SELECT set
     const res = await request(app)
       .delete(`/api/admin/question-sets/${VALID_UUID}/questions/${Q1}`)
       .set("Authorization", authHeader);
@@ -770,8 +772,8 @@ describe("DELETE /api/admin/question-sets/:id/questions/:questionId", () => {
     const client = buildMockClient();
     client.query
       .mockResolvedValueOnce({}) // BEGIN
+      .mockResolvedValueOnce({}) // serialize unlinks
       .mockResolvedValueOnce({ rows: [stagedSet] }) // SELECT set FOR UPDATE
-      .mockResolvedValueOnce({ rows: [{ id: Q1 }] }) // lock before unlink
       .mockResolvedValueOnce({ rowCount: 0 });      // DELETE link → no rows
     const res = await request(app)
       .delete(`/api/admin/question-sets/${VALID_UUID}/questions/${Q1}`)
@@ -783,8 +785,8 @@ describe("DELETE /api/admin/question-sets/:id/questions/:questionId", () => {
     const client = buildMockClient();
     client.query
       .mockResolvedValueOnce({}) // BEGIN
+      .mockResolvedValueOnce({}) // serialize unlinks
       .mockResolvedValueOnce({ rows: [stagedSet] }) // SELECT set FOR UPDATE
-      .mockResolvedValueOnce({ rows: [{ id: Q1 }] }) // lock before unlink
       .mockResolvedValueOnce({ rowCount: 1 })       // DELETE link
       .mockResolvedValueOnce({ rows: [{ id: Q1 }] }) // lock orphan candidate
       .mockResolvedValueOnce({})                    // DELETE orphan question
@@ -794,7 +796,7 @@ describe("DELETE /api/admin/question-sets/:id/questions/:questionId", () => {
       .set("Authorization", authHeader);
     expect(res.status).toBe(204);
     const sqls = client.query.mock.calls.map(([sql]) => sql);
-    expect(sqls[2]).toMatch(/pg_advisory_xact_lock/);
+    expect(sqls[1]).toMatch(/pg_advisory_xact_lock/);
     expect(sqls[3]).toMatch(/DELETE FROM question_set_questions/);
     expect(sqls[4]).toMatch(/ORDER BY q\.id FOR UPDATE/);
     expect(sqls[5]).toMatch(/DELETE FROM questions/);
@@ -807,8 +809,8 @@ describe("DELETE /api/admin/question-sets/:id/questions/:questionId", () => {
     const client = buildMockClient();
     client.query
       .mockResolvedValueOnce({}) // BEGIN
+      .mockResolvedValueOnce({}) // serialize unlinks
       .mockResolvedValueOnce({ rows: [stagedSet] }) // SELECT set FOR UPDATE
-      .mockResolvedValueOnce({ rows: [{ id: Q1 }] }) // lock before unlink
       .mockResolvedValueOnce({ rowCount: 0 })                                   // DELETE link → no rows
       .mockRejectedValueOnce(new Error("Connection terminated unexpectedly")); // ROLLBACK
     const res = await request(app)
@@ -822,7 +824,7 @@ describe("DELETE /api/admin/question-sets/:id/questions/:questionId", () => {
   // Issue #57: the staged-set lookup now runs inside the transaction.
   test("locked set lookup fails → 500, ROLLBACK, client released", async () => {
     const client = buildMockClient();
-    client.query.mockResolvedValueOnce({}).mockRejectedValueOnce(new Error("DB down")); // BEGIN, SELECT set
+    client.query.mockResolvedValueOnce({}).mockResolvedValueOnce({}).mockRejectedValueOnce(new Error("DB down")); // BEGIN, serialization, SELECT set
     jest.spyOn(console, "error").mockImplementation(() => {});
     const res = await request(app)
       .delete(`/api/admin/question-sets/${VALID_UUID}/questions/${Q1}`)
@@ -844,9 +846,9 @@ describe("DELETE /api/admin/question-sets/:id", () => {
     const client = buildMockClient();
     client.query
       .mockResolvedValueOnce({})                                            // BEGIN
+      .mockResolvedValueOnce({}) // serialize unlinks
       .mockResolvedValueOnce({ rows: [{ id: VALID_UUID }] })                 // lock set
       .mockResolvedValueOnce({ rows: [{ question_id: Q2 }, { question_id: Q1 }] }) // SELECT linked
-      .mockResolvedValueOnce({ rows: [{ id: Q1 }, { id: Q2 }] })            // lock before unlink
       .mockResolvedValueOnce({ rowCount: 1 })                               // DELETE set
       .mockResolvedValueOnce({ rows: [{ id: Q1 }, { id: Q2 }] })            // lock orphan candidates
       .mockResolvedValueOnce({})                                            // DELETE orphan questions
@@ -856,10 +858,10 @@ describe("DELETE /api/admin/question-sets/:id", () => {
       .set("Authorization", authHeader);
     expect(res.status).toBe(204);
     const sqls = client.query.mock.calls.map(([sql]) => sql);
-    // Membership is stable and every question is locked before cascading links.
-    expect(sqls[1]).toMatch(/FROM question_sets.*FOR UPDATE/);
-    expect(sqls[3]).toMatch(/pg_advisory_xact_lock/);
-    expect(client.query.mock.calls[3][1]).toEqual([[Q2, Q1]]);
+    // Administrative serialization precedes set locks and cascading link deletion.
+    expect(sqls[1]).toMatch(/pg_advisory_xact_lock/);
+    expect(sqls[2]).toMatch(/FROM question_sets.*FOR UPDATE/);
+    expect(client.query.mock.calls[3][1]).toEqual([VALID_UUID]);
     expect(sqls[4]).toMatch(/DELETE FROM question_sets/);
     expect(sqls[5]).toMatch(/NOT EXISTS[\s\S]*ORDER BY q\.id FOR UPDATE/);
     expect(sqls[6]).toMatch(/DELETE FROM questions/);
