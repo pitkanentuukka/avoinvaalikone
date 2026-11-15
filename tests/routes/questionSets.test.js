@@ -764,6 +764,7 @@ describe("DELETE /api/admin/question-sets/:id/questions/:questionId", () => {
     client.query
       .mockResolvedValueOnce({}) // BEGIN
       .mockResolvedValueOnce({ rows: [stagedSet] }) // SELECT set FOR UPDATE
+      .mockResolvedValueOnce({ rows: [{ id: Q1 }] }) // lock before unlink
       .mockResolvedValueOnce({ rowCount: 0 });      // DELETE link → no rows
     const res = await request(app)
       .delete(`/api/admin/question-sets/${VALID_UUID}/questions/${Q1}`)
@@ -776,6 +777,7 @@ describe("DELETE /api/admin/question-sets/:id/questions/:questionId", () => {
     client.query
       .mockResolvedValueOnce({}) // BEGIN
       .mockResolvedValueOnce({ rows: [stagedSet] }) // SELECT set FOR UPDATE
+      .mockResolvedValueOnce({ rows: [{ id: Q1 }] }) // lock before unlink
       .mockResolvedValueOnce({ rowCount: 1 })       // DELETE link
       .mockResolvedValueOnce({ rows: [{ id: Q1 }] }) // lock orphan candidate
       .mockResolvedValueOnce({})                    // DELETE orphan question
@@ -785,8 +787,10 @@ describe("DELETE /api/admin/question-sets/:id/questions/:questionId", () => {
       .set("Authorization", authHeader);
     expect(res.status).toBe(204);
     const sqls = client.query.mock.calls.map(([sql]) => sql);
-    expect(sqls[3]).toMatch(/ORDER BY q\.id FOR UPDATE/);
-    expect(sqls[4]).toMatch(/DELETE FROM questions/);
+    expect(sqls[2]).toMatch(/ORDER BY id FOR UPDATE/);
+    expect(sqls[3]).toMatch(/DELETE FROM question_set_questions/);
+    expect(sqls[4]).toMatch(/ORDER BY q\.id FOR UPDATE/);
+    expect(sqls[5]).toMatch(/DELETE FROM questions/);
   });
 
   // The 404 was decided on data already read, and pg discards the dead
@@ -797,6 +801,7 @@ describe("DELETE /api/admin/question-sets/:id/questions/:questionId", () => {
     client.query
       .mockResolvedValueOnce({}) // BEGIN
       .mockResolvedValueOnce({ rows: [stagedSet] }) // SELECT set FOR UPDATE
+      .mockResolvedValueOnce({ rows: [{ id: Q1 }] }) // lock before unlink
       .mockResolvedValueOnce({ rowCount: 0 })                                   // DELETE link → no rows
       .mockRejectedValueOnce(new Error("Connection terminated unexpectedly")); // ROLLBACK
     const res = await request(app)
@@ -832,7 +837,9 @@ describe("DELETE /api/admin/question-sets/:id", () => {
     const client = buildMockClient();
     client.query
       .mockResolvedValueOnce({})                                            // BEGIN
+      .mockResolvedValueOnce({ rows: [{ id: VALID_UUID }] })                 // lock set
       .mockResolvedValueOnce({ rows: [{ question_id: Q2 }, { question_id: Q1 }] }) // SELECT linked
+      .mockResolvedValueOnce({ rows: [{ id: Q1 }, { id: Q2 }] })            // lock before unlink
       .mockResolvedValueOnce({ rowCount: 1 })                               // DELETE set
       .mockResolvedValueOnce({ rows: [{ id: Q1 }, { id: Q2 }] })            // lock orphan candidates
       .mockResolvedValueOnce({})                                            // DELETE orphan questions
@@ -842,11 +849,14 @@ describe("DELETE /api/admin/question-sets/:id", () => {
       .set("Authorization", authHeader);
     expect(res.status).toBe(204);
     const sqls = client.query.mock.calls.map(([sql]) => sql);
-    // Only orphans are locked: a question another set shares isn't deleted.
-    expect(sqls[3]).toMatch(/FROM questions q\b[\s\S]*NOT EXISTS[\s\S]*ORDER BY q\.id FOR UPDATE/);
+    // Membership is stable and every question is locked before cascading links.
+    expect(sqls[1]).toMatch(/FROM question_sets.*FOR UPDATE/);
+    expect(sqls[3]).toMatch(/FROM questions.*ORDER BY id FOR UPDATE/);
     expect(client.query.mock.calls[3][1]).toEqual([[Q2, Q1]]);
-    expect(sqls[4]).toMatch(/DELETE FROM questions/);
-    expect(sqls[5]).toBe("COMMIT");
+    expect(sqls[4]).toMatch(/DELETE FROM question_sets/);
+    expect(sqls[5]).toMatch(/NOT EXISTS[\s\S]*ORDER BY q\.id FOR UPDATE/);
+    expect(sqls[6]).toMatch(/DELETE FROM questions/);
+    expect(sqls[7]).toBe("COMMIT");
   });
 });
 

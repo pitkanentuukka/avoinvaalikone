@@ -742,6 +742,9 @@ adminRouter.delete(
         return res.status(409).json({ error: "Kysymyksiä voi poistaa vain julkaisemattomista kysymyssarjoista" });
       }
 
+      // Serialize shared-question unlinks before changing membership. Cleanup
+      // then sees the previous unlink's committed result in its fresh snapshot.
+      await lockQuestions(client, [req.params.questionId]);
       const { rowCount } = await client.query(
         "DELETE FROM question_set_questions WHERE question_id = $1 AND question_set_id = $2",
         [req.params.questionId, req.params.id]
@@ -770,12 +773,26 @@ adminRouter.delete("/:id", requireAdmin, validateUUIDParam("id"), async (req, re
     client = await db.getClient();
     await begin(client);
 
+    // Stabilize membership against staged edits before collecting question IDs.
+    // Every unlink takes its set lock before its question locks, like review.
+    const { rows: sets } = await client.query(
+      "SELECT id FROM question_sets WHERE id = $1 FOR UPDATE",
+      [req.params.id]
+    );
+    if (sets.length === 0) {
+      await rollback(client);
+      return res.status(404).json({ error: "Kysymyssarjaa ei löytynyt" });
+    }
+
     // Remember which questions this set held so we can clean up any that become orphaned.
     const { rows: linked } = await client.query(
       "SELECT question_id FROM question_set_questions WHERE question_set_id = $1",
       [req.params.id]
     );
 
+    // Acquire all question locks in the same order as answer saves and review,
+    // before the set deletion cascades to its links. Other unlinks wait here.
+    await lockQuestions(client, linked.map((l) => l.question_id));
     const { rowCount } = await client.query(
       `DELETE FROM question_sets WHERE id = $1`,
       [req.params.id]
