@@ -10,7 +10,8 @@
 // BACKUP_DIR pointing at a temporary directory; the real database and object
 // storage are never touched. Every test runs under /bin/sh and, when it is
 // installed, busybox sh, the shell the backup sidecar (postgres:16-alpine)
-// actually uses.
+// actually uses. Only the shell changes: ls, flock, rm etc. still come from
+// the host's PATH, not busybox applets.
 
 const { spawnSync } = require("child_process");
 const fs = require("fs");
@@ -38,6 +39,12 @@ fi
 printf ' complete' >> "$out"
 `;
 
+// pg_restore stub: `pg_restore -l` succeeds only on a complete dump.
+const PG_RESTORE_STUB = `#!/bin/sh
+for arg; do f=$arg; done
+grep -q complete "$f"
+`;
+
 // rclone stub: logs each call; STUB_RCLONE_FAIL names a subcommand to fail.
 const RCLONE_STUB = `#!/bin/sh
 echo "$*" >> "$STUB_LOG"
@@ -61,9 +68,10 @@ if (spawnSync("busybox", ["sh", "-c", "true"]).status === 0) {
 
 let tmp, backupDir, binDir, logFile, nestedBase, seeded;
 
-function seedDump(name, hoursAgo = 10 - seeded++) {
+function seedDump(name, hoursAgo = 10 - seeded++, content = "PGDMP old complete") {
   const file = path.join(backupDir, name);
-  fs.writeFileSync(file, "PGDMP old complete");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, content);
   const t = new Date(Date.now() - hoursAgo * 3600 * 1000);
   fs.utimesSync(file, t, t);
 }
@@ -79,6 +87,7 @@ beforeEach(() => {
   fs.mkdirSync(binDir);
   fs.writeFileSync(path.join(binDir, "pg_dump"), PG_DUMP_STUB, { mode: 0o755 });
   fs.writeFileSync(path.join(binDir, "rclone"), RCLONE_STUB, { mode: 0o755 });
+  fs.writeFileSync(path.join(binDir, "pg_restore"), PG_RESTORE_STUB, { mode: 0o755 });
   fs.writeFileSync(path.join(binDir, "busybox-sh"), '#!/bin/sh\nexec busybox sh "$@"\n', {
     mode: 0o755,
   });
@@ -93,26 +102,32 @@ afterEach(() => {
 describe.each(SHELLS)("backup.sh under %s", (shell) => {
   const [shellCmd, ...shellArgs] = shell.split(" ");
 
+  // An env value of undefined removes that variable.
   function runBackup(env = {}) {
+    const fullEnv = {
+      PATH: `${binDir}:${process.env.PATH}`,
+      BACKUP_DIR: backupDir,
+      DATABASE_URL: "postgresql://stub/stub",
+      BACKUP_BUCKET: "bucket",
+      STUB_LOG: logFile,
+      STUB_SHELL: shellCmd === "busybox" ? path.join(binDir, "busybox-sh") : shellCmd,
+      STUB_SCRIPT: SCRIPT,
+      STUB_NESTED: nestedBase,
+      ...env,
+    };
+    for (const k of Object.keys(fullEnv)) if (fullEnv[k] === undefined) delete fullEnv[k];
     const result = spawnSync(shellCmd, [...shellArgs, SCRIPT], {
       encoding: "utf8",
-      env: {
-        PATH: `${binDir}:${process.env.PATH}`,
-        BACKUP_DIR: backupDir,
-        DATABASE_URL: "postgresql://stub/stub",
-        BACKUP_BUCKET: "bucket",
-        STUB_LOG: logFile,
-        STUB_SHELL: shellCmd === "busybox" ? path.join(binDir, "busybox-sh") : shellCmd,
-        STUB_SCRIPT: SCRIPT,
-        STUB_NESTED: nestedBase,
-        ...env,
-      },
+      env: fullEnv,
     });
     return {
       status: result.status,
       stderr: result.stderr,
-      // The run's .backup.lock is not a dump; leave it out.
-      files: fs.readdirSync(backupDir).filter((f) => !f.startsWith(".")).sort(),
+      // The run's .backup.lock and a restore/ directory are not dumps.
+      files: fs
+        .readdirSync(backupDir)
+        .filter((f) => !f.startsWith(".") && f !== "restore")
+        .sort(),
       rcloneCalls: fs.readFileSync(logFile, "utf8").split("\n").filter(Boolean),
     };
   }
@@ -181,7 +196,8 @@ describe.each(SHELLS)("backup.sh under %s", (shell) => {
   test("repeated upload failures do not accumulate local dumps", () => {
     let run;
     for (let i = 0; i < 3; i++) {
-      // Distinct stamps without waiting: seed an extra "previous run" dump each time.
+      // Runs in the same second reuse one stamp, so seed an extra dump before
+      // each run to check that every run, not just the first, prunes.
       seedDump(`vaalikone-2026010${3 + i}-030000.dump`, 1);
       run = runBackup({ STUB_RCLONE_FAIL: "copyto" });
       expect(run.status).not.toBe(0);
@@ -196,6 +212,7 @@ describe.each(SHELLS)("backup.sh under %s", (shell) => {
     const run = runBackup({ STUB_PGDUMP: "fail" });
 
     expect(run.status).not.toBe(0);
+    expect(run.stderr).toMatch(/ERROR: pg_dump failed/);
     // The partial output is gone, so it can never be picked as the newest dump.
     expect(newDumps(run.files)).toEqual([]);
     // The newest previous dump is kept as the recovery point; older ones are
@@ -243,6 +260,54 @@ describe.each(SHELLS)("backup.sh under %s", (shell) => {
     expect(newDumps(run.files)).not.toContain(name);
     expect(run.files[0]).toMatch(/^vaalikone-\d{8}-\d{6}\.dump$/);
     expect(contents(run.files[0])).toBe("PGDMP partial complete");
+  });
+
+  test("a truncated newest dump is not kept in place of the last good one", () => {
+    // The pre-#152 script wrote pg_dump output in place, so a failed run
+    // (ENOSPC) could leave a truncated dump with the newest mtime.
+    seedDump("vaalikone-20260103-030000.dump", 0, "PGDMP trunc");
+    const run = runBackup({ STUB_PGDUMP: "fail" });
+
+    expect(run.status).not.toBe(0);
+    expect(run.files).toEqual([OLD_DUMPS[1]]);
+  });
+
+  test("if no dump is readable the newest is kept rather than none", () => {
+    fs.rmSync(backupDir, { recursive: true });
+    fs.mkdirSync(backupDir);
+    seedDump("vaalikone-20260101-030000.dump", 2, "PGDMP trunc");
+    seedDump("vaalikone-20260102-030000.dump", 1, "PGDMP trunc");
+    const run = runBackup({ STUB_PGDUMP: "fail" });
+
+    expect(run.status).not.toBe(0);
+    expect(run.files).toEqual(["vaalikone-20260102-030000.dump"]);
+  });
+
+  test("a pg_dump failure on an empty volume reports it and leaves nothing", () => {
+    fs.rmSync(backupDir, { recursive: true });
+    fs.mkdirSync(backupDir);
+    const run = runBackup({ STUB_PGDUMP: "fail" });
+
+    expect(run.status).not.toBe(0);
+    expect(run.stderr).toMatch(/ERROR: pg_dump failed/);
+    expect(run.files).toEqual([]);
+  });
+
+  test("an abort by set -e still logs an ERROR line", () => {
+    const run = runBackup({ DATABASE_URL: undefined });
+
+    expect(run.status).not.toBe(0);
+    expect(run.stderr).toMatch(/ERROR: backup.sh exited with status/);
+  });
+
+  test("a dump fetched into restore/ for a restore survives a run", () => {
+    seedDump("restore/vaalikone-20251201-030000.dump", 100);
+    const run = runBackup({ STUB_PGDUMP: "fail" });
+
+    expect(run.status).not.toBe(0);
+    expect(fs.readdirSync(path.join(backupDir, "restore"))).toEqual([
+      "vaalikone-20251201-030000.dump",
+    ]);
   });
 
   test("an overlapping run refuses to start and leaves the running one intact", () => {

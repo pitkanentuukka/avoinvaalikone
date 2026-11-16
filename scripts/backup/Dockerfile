@@ -3,7 +3,8 @@
 FROM postgres:16-alpine
 
 # backup.sh serialises runs with flock (busybox applet); fail the build, not
-# the nightly run, if the base image ever stops shipping it.
+# the nightly run, if the base image ever stops shipping it. The unit tests
+# run with the host's flock, so this is the only check of the image's one.
 RUN apk add --no-cache rclone && command -v flock
 
 COPY backup.sh /usr/local/bin/backup.sh

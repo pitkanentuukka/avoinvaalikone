@@ -6,13 +6,18 @@
 #   docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backup backup.sh
 #
 # The local volume shares the host's disk with PostgreSQL, so local retention
-# runs on every path, whether or not pg_dump or the remote side works. A
-# failure still exits non-zero and logs an ERROR line to stderr, which crond
-# passes through to `docker compose logs backup`. pg_dump writes to a .partial
-# file that is renamed only on success, so a failed dump is never mistaken for
-# a backup.
+# runs on every path, whether or not pg_dump or the remote side works. Any
+# failure exits non-zero and logs an "ERROR:" line to stderr, which crond
+# passes through to the container log:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml logs backup
+# pg_dump writes to a .partial file that is renamed only on success, so a
+# failed dump is never mistaken for a backup.
 set -eu
 
+# Also covers aborts by set -e, which print only the shell's own message.
+trap 'rc=$?; [ "$rc" -eq 0 ] || echo "ERROR: backup.sh exited with status $rc" >&2' EXIT
+
+# BACKUP_DIR is a test hook (tests/unit/backupScript.test.js), not configuration.
 LOCAL_DIR=${BACKUP_DIR:-/backups}
 STAMP=$(date -u +%Y%m%d-%H%M%S)
 FILE="$LOCAL_DIR/vaalikone-$STAMP.dump"
@@ -39,15 +44,21 @@ keep_only() {
 # lock guarantees no other run is still writing one.
 rm -f "$LOCAL_DIR"/vaalikone-*.dump.partial
 
-# Down to the newest existing dump before dumping, so even a disk filled by
-# earlier dumps recovers and a pg_dump failure still leaves the store bounded.
-# Newest by mtime: it is when a dump completed, whatever its name says.
+# Down to one existing dump before dumping, so even a disk filled by earlier
+# dumps recovers and a pg_dump failure still leaves the store bounded. Keep
+# the newest (by mtime: when it completed, whatever its name says) whose
+# table of contents pg_restore can read; the script before #152 wrote dumps
+# in place, so a failed run may have left a truncated one as the newest. If
+# none is readable, keep the newest anyway rather than delete everything.
 NEWEST=$(ls -1t "$LOCAL_DIR"/vaalikone-*.dump 2>/dev/null | head -n 1 || true)
-[ -z "$NEWEST" ] || keep_only "$NEWEST"
+VALID=$(ls -1t "$LOCAL_DIR"/vaalikone-*.dump 2>/dev/null | while IFS= read -r f; do
+  if pg_restore -l "$f" >/dev/null 2>&1; then printf '%s\n' "$f"; break; fi
+done || true)
+[ -z "$NEWEST" ] || keep_only "${VALID:-$NEWEST}"
 
 if ! pg_dump "$DATABASE_URL" -Fc -f "$PARTIAL"; then
   rm -f "$PARTIAL"
-  echo "ERROR: pg_dump failed — previous local dump kept" >&2
+  echo "ERROR: pg_dump failed — no new dump written" >&2
   exit 1
 fi
 mv "$PARTIAL" "$FILE"
