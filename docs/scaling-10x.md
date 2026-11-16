@@ -200,6 +200,14 @@ Cloudflare (cache + LB, health-checked origin pool)
   via `requirepass`). If app1 dies, app2's limiters fail open (no limit, no
   per-process fallback; `src/middleware/rateLimitStore.js`) until Redis is
   back — degraded but functional. A Redis HA pair is overkill here.
+  Over a network, though, app1 vanishing without closing its connections
+  (power loss, a partition) leaves app2's connection looking open: each
+  limited request waits the store's 2 s deadline until 1000 commands are
+  waiting, then fails open at once, and only reconnects when TCP gives up
+  (~15 min with Linux defaults). Before going multi-host, set node-redis's
+  `socketTimeout` or `pingInterval` in `src/redis.js`; `socketTimeout` also
+  needs a custom `reconnectStrategy`, because the default one stops
+  reconnecting after a socket timeout (issue #149).
 - **Connection math:** 8 replicas × `PG_POOL_MAX=5` (post-§3.3) = 40
   connections; even ×2 headroom stays far under 200. **pgbouncer is not
   needed** if Phase A lands first — revisit only if pools are raised.
