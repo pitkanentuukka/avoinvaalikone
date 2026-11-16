@@ -14,12 +14,16 @@
 # failed dump is never mistaken for a backup.
 set -eu
 
-# fail MESSAGE: log it and exit 1. The EXIT trap covers everything else,
-# i.e. aborts by set -e, which print only the shell's own message.
+# report MESSAGE logs an error; fail MESSAGE also exits 1. A failure is
+# logged once: the EXIT trap adds a line only when nothing was reported,
+# i.e. for aborts by set -e, which print only the shell's own message.
 REPORTED=
-fail() {
+report() {
   echo "ERROR: $1" >&2
   REPORTED=1
+}
+fail() {
+  report "$1"
   exit 1
 }
 trap 'rc=$?; [ "$rc" -eq 0 ] || [ -n "$REPORTED" ] || echo "ERROR: backup.sh exited with status $rc" >&2' EXIT
@@ -60,7 +64,14 @@ NEWEST=$(ls -1t "$LOCAL_DIR"/vaalikone-*.dump 2>/dev/null | head -n 1 || true)
 VALID=$(ls -1t "$LOCAL_DIR"/vaalikone-*.dump 2>/dev/null | while IFS= read -r f; do
   if pg_restore -f /dev/null "$f" 2>/dev/null; then printf '%s\n' "$f"; break; fi
 done || true)
-[ -z "$NEWEST" ] || keep_only "${VALID:-$NEWEST}"
+if [ -n "$NEWEST" ]; then
+  if [ -z "$VALID" ]; then
+    echo "WARNING: no local dump reads in full; keeping the newest, $NEWEST, which may not restore" >&2
+  elif [ "$VALID" != "$NEWEST" ]; then
+    echo "WARNING: newest local dump $NEWEST does not read in full; keeping $VALID" >&2
+  fi
+  keep_only "${VALID:-$NEWEST}"
+fi
 
 if ! pg_dump "$DATABASE_URL" -Fc -f "$PARTIAL"; then
   rm -f "$PARTIAL"
@@ -81,11 +92,11 @@ if [ -n "${BACKUP_BUCKET:-}" ]; then
     # Prune only after a successful upload: with uploads failing, age-based
     # deletion would eventually empty the bucket.
     if ! rclone delete --min-age 30d "upcloud:$BACKUP_BUCKET/postgres/"; then
-      echo "ERROR: pruning old remote dumps failed" >&2
+      report "pruning old remote dumps failed"
       status=1
     fi
   else
-    echo "ERROR: upload to $BACKUP_BUCKET failed — dump kept locally only" >&2
+    report "upload to $BACKUP_BUCKET failed — dump kept locally only"
     status=1
   fi
 else

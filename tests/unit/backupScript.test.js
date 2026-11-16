@@ -170,7 +170,8 @@ describe.each(SHELLS)("backup.sh under %s", (shell) => {
     const run = runBackup({ STUB_RCLONE_FAIL: "copyto" });
 
     expect(run.status).not.toBe(0);
-    expect(run.stderr).toMatch(/upload/i);
+    expect(run.stderr).toMatch(/ERROR: upload/);
+    expect(run.stderr.match(/ERROR:/g)).toHaveLength(1);
     // Only the new, complete dump survives: it is the newest recovery point.
     expect(run.files).toHaveLength(1);
     expect(newDumps(run.files)).toEqual(run.files);
@@ -185,7 +186,8 @@ describe.each(SHELLS)("backup.sh under %s", (shell) => {
     const run = runBackup({ STUB_RCLONE_FAIL: "delete" });
 
     expect(run.status).not.toBe(0);
-    expect(run.stderr).toMatch(/prun/i);
+    expect(run.stderr).toMatch(/ERROR: pruning/);
+    expect(run.stderr.match(/ERROR:/g)).toHaveLength(1);
     expect(run.rcloneCalls).toEqual([
       expect.stringMatching(/^copyto /),
       expect.stringMatching(/^delete /),
@@ -272,6 +274,16 @@ describe.each(SHELLS)("backup.sh under %s", (shell) => {
 
     expect(run.status).not.toBe(0);
     expect(run.files).toEqual([OLD_DUMPS[1]]);
+    expect(run.stderr).toMatch(/WARNING: newest local dump .*20260103.* keeping .*20260102/);
+  });
+
+  test("before dumping, the dump kept is the newest by mtime, not by name", () => {
+    // Sorts last by name but completed earliest.
+    seedDump("vaalikone-29991231-235959.dump", 20);
+    const run = runBackup({ STUB_PGDUMP: "fail" });
+
+    expect(run.status).not.toBe(0);
+    expect(run.files).toEqual([OLD_DUMPS[1]]);
   });
 
   test("if no dump is readable the newest is kept rather than none", () => {
@@ -283,6 +295,7 @@ describe.each(SHELLS)("backup.sh under %s", (shell) => {
 
     expect(run.status).not.toBe(0);
     expect(run.files).toEqual(["vaalikone-20260102-030000.dump"]);
+    expect(run.stderr).toMatch(/WARNING: no local dump reads in full/);
   });
 
   test("a pg_dump failure on an empty volume reports it and leaves nothing", () => {
