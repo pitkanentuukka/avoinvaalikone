@@ -77,12 +77,13 @@ describeWithDb("migration reconciles duplicate registrations (#151)", () => {
       "INSERT INTO parties (name, token) VALUES ('Puolue', 'p1'), ('Toinen', 'p2') RETURNING id"
     );
     const [{ id: setId }] = await q("INSERT INTO question_sets (ngo_name, title) VALUES ('NGO', 'Setti') RETURNING id");
-    const [{ id: q1 }, { id: q2 }, { id: q3 }] = await q(
-      "INSERT INTO questions (statement) VALUES ('Q1'), ('Q2'), ('Q3') RETURNING id"
+    const [{ id: q1 }, { id: q2 }, { id: q3 }, { id: q4 }] = await q(
+      "INSERT INTO questions (statement) VALUES ('Q1'), ('Q2'), ('Q3'), ('Q4') RETURNING id"
     );
     await q(
-      "INSERT INTO question_set_questions (question_set_id, question_id, sort_order) VALUES ($1, $2, 1), ($1, $3, 2), ($1, $4, 3)",
-      [setId, q1, q2, q3]
+      `INSERT INTO question_set_questions (question_set_id, question_id, sort_order)
+       VALUES ($1, $2, 1), ($1, $3, 2), ($1, $4, 3), ($1, $5, 4)`,
+      [setId, q1, q2, q3, q4]
     );
     const insertCandidate = (party, name, email, createdAt) =>
       q(
@@ -106,8 +107,9 @@ describeWithDb("migration reconciles duplicate registrations (#151)", () => {
     await q(
       `INSERT INTO candidate_answers (candidate_id, question_id, value, explanation, answered_at) VALUES
          ($1, $3, 4, 'keep q1', '2026-02-01'), ($1, $4, 3, 'keep q2', '2026-02-01'),
+         ($1, $6, 2, 'keep q4', '2026-02-01'),
          ($2, $3, 0, 'extra q1', '2026-03-01'), ($2, $5, 1, 'extra q3', '2026-03-01')`,
-      [keep, extra, q1, q2, q3]
+      [keep, extra, q1, q2, q3, q4]
     );
     await q("INSERT INTO email_log (kind, recipient, candidate_id, status) VALUES ('candidate_link', 'eeva@example.fi', $1, 'sent')", [unused]);
 
@@ -127,6 +129,7 @@ describeWithDb("migration reconciles duplicate registrations (#151)", () => {
       { question_id: q3, value: 1, explanation: "extra q3" },
       { question_id: q1, value: 4, explanation: "keep q1" },
       { question_id: q2, value: 3, explanation: "keep q2" },
+      { question_id: q4, value: 2, explanation: "keep q4" },
     ]);
     expect(await q("SELECT 1 FROM email_log WHERE candidate_id = $1", [unused])).toEqual([]);
 
