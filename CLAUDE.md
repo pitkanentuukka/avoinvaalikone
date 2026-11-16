@@ -85,6 +85,8 @@ When a set or a per-set link is removed, the route layer deletes any question th
 
 **Email:** `src/email.js` sends everything through one pooled nodemailer transport (`SMTP_MAX_CONNECTIONS`, default 3), so bulk fire-and-forget sends queue instead of opening a connection per message. Every attempt is recorded in `email_log` (`sent | failed`, with the error); rows addressed to a candidate or party cascade on its deletion. The admin's per-party candidate list shows each candidate's latest outcome.
 
+**Registration identity:** a unique index (`idx_candidates_registration_identity`, migration 015) allows one candidate per `(party_id, lower(btrim(name)), lower(btrim(email)))`; rows without email are unconstrained. Self-registration inserts with `ON CONFLICT … DO NOTHING` on it and treats a conflict as a repeat sign-up (re-sends the existing link, never returns its token); a profile update that would collide gets 409. The index expressions, `FIND_REGISTRATION_SQL` and the `ON CONFLICT` target in `src/routes/candidates.js` must stay identical, or the lookup stops using the index and the insert stops inferring it.
+
 **Constituency constraint:** `candidates.constituency` has a CHECK constraint (`candidates_constituency_valid`) that allows only the 13 Finnish parliamentary constituencies (eduskuntavaalit). The same list is hardcoded in `FI_CONSTITUENCIES` in `vaalikone-frontend/src/App.jsx`. **If repurposing for other elections** (municipal elections, other countries), both must be updated: drop/replace the constraint in a new migration and update the frontend constant.
 
 ### Environment Variables

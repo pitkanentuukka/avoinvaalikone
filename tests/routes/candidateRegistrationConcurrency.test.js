@@ -28,7 +28,10 @@ async function createSchema(prefix) {
     options: `-c search_path=${schema},public -c statement_timeout=5000`,
     max: 6,
   });
-  await pool.query("CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public");
+  // IF NOT EXISTS still races with another Jest worker doing the same.
+  await pool.query("CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public").catch((err) => {
+    if (err.code !== "23505" && err.code !== "42710") throw err;
+  });
   await pool.query(`CREATE SCHEMA ${schema}`);
   await pool.query("CREATE TABLE schema_migrations (version integer PRIMARY KEY, applied_at timestamptz DEFAULT now())");
   return { schema, pool };

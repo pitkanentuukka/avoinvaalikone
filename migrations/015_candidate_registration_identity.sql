@@ -16,10 +16,21 @@
 -- carried over, the most recent one if several duplicates answered it. The
 -- duplicates are then deleted with their own answers and email_log rows; a
 -- candidate who still uses a deleted duplicate's link gets the kept link back
--- by signing up again with the same name and address.
+-- by signing up again with the same name and address. The number of merged
+-- duplicates is printed as a NOTICE (migrations/run.js logs notices).
+--
+-- Lock out writers for the merge: a backend still running the old code could
+-- otherwise save answers to a duplicate after the carry-over (lost with the
+-- cascade) or register a new duplicate before the index exists. The lock on
+-- candidate_answers is needed too, as answer inserts only take a KEY SHARE
+-- row lock on candidates, which SHARE ROW EXCLUSIVE does not block.
 
 
-CREATE TEMP TABLE candidate_duplicates ON COMMIT DROP AS
+LOCK TABLE candidates, candidate_answers IN SHARE ROW EXCLUSIVE MODE;
+
+-- Dropped explicitly below rather than ON COMMIT DROP: outside a transaction
+-- (psql -f by hand) that would drop it at the end of this very statement.
+CREATE TEMP TABLE candidate_duplicates AS
 SELECT id AS drop_id, keep_id
 FROM (
   SELECT c.id,
@@ -42,10 +53,21 @@ SELECT DISTINCT ON (d.keep_id, a.question_id)
        d.keep_id, a.question_id, a.value, a.explanation, a.answered_at
 FROM candidate_duplicates d
 JOIN candidate_answers a ON a.candidate_id = d.drop_id
-ORDER BY d.keep_id, a.question_id, a.answered_at DESC
+ORDER BY d.keep_id, a.question_id, a.answered_at DESC, a.candidate_id
 ON CONFLICT (candidate_id, question_id) DO NOTHING;
 
 DELETE FROM candidates WHERE id IN (SELECT drop_id FROM candidate_duplicates);
+
+DO $$
+DECLARE merged integer;
+BEGIN
+  SELECT count(*) INTO merged FROM candidate_duplicates;
+  IF merged > 0 THEN
+    RAISE NOTICE 'Merged % duplicate candidate registration(s) into the kept candidate; their links no longer work', merged;
+  END IF;
+END $$;
+
+DROP TABLE candidate_duplicates;
 
 -- The same expressions as the duplicate check and ON CONFLICT target in
 -- src/routes/candidates.js; they must stay identical for the index to be
