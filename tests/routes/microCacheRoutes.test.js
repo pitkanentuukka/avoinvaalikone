@@ -5,10 +5,9 @@ const request = require("supertest");
 const db = require("../../src/db/pool");
 const { resetDbMocks } = require("../helpers/mockDb");
 
-// Issue #150: the micro-cache keys on the declared route and lowercases its
-// params, which is only safe because the real routes validate the id as a
-// UUID before the cache runs. These tests mount the real routers, so a
-// reordered or newly cached route shows up here.
+// Issue #150: the unit tests rebuild the routes; these mount the real
+// candidate and question-set routers, so they fail if a cached route stops
+// sharing one entry across query strings and id case.
 
 const ID = "550e8400-e29b-41d4-a716-446655440000";
 const CANDIDATE = { id: ID, name: "Eeva Ehdokas", photo_url: null, bio: null, constituency: "Helsingin vaalipiiri", party_id: "p1", party_name: "Vihreät" };

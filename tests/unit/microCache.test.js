@@ -283,3 +283,35 @@ test("a hit answers HEAD and conditional GETs like a miss", async () => {
   expect(notModified.status).toBe(304);
   expect(notModified.headers["x-micro-cache"]).toBe("HIT");
 });
+
+test("concurrent misses for one key are counted once", async () => {
+  const microCache = createMicroCache();
+  const router = express.Router();
+  const body = { bio: "x".repeat(100) };
+  router.get("/", microCache(), (req, res) => {
+    setTimeout(() => res.json(body), 20);
+  });
+  const app = express();
+  app.use("/api/candidates", router);
+
+  // All four miss before the first one stores its body.
+  const responses = await Promise.all(Array.from({ length: 4 }, () => request(app).get("/api/candidates")));
+  for (const res of responses) expect(res.status).toBe(200);
+  expect(microCache.stats()).toEqual({ entries: 1, bytes: Buffer.byteLength(JSON.stringify(body)) });
+});
+
+test("RegExp and array routes pass through uncached", async () => {
+  const microCache = createMicroCache();
+  const router = express.Router();
+  router.get(/^\/a$/, microCache(), (req, res) => res.json({ route: "a" }));
+  router.get(/^\/b$/, microCache(), (req, res) => res.json({ route: "b" }));
+  router.get(["/x", "/y"], microCache(), (req, res) => res.json({ route: req.path }));
+  const app = express();
+  app.use("/api/candidates", router);
+
+  expect((await request(app).get("/api/candidates/a")).body).toEqual({ route: "a" });
+  expect((await request(app).get("/api/candidates/b")).body).toEqual({ route: "b" });
+  expect((await request(app).get("/api/candidates/x")).body).toEqual({ route: "/x" });
+  expect((await request(app).get("/api/candidates/y")).body).toEqual({ route: "/y" });
+  expect(microCache.stats().entries).toBe(0);
+});
