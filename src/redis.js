@@ -6,7 +6,21 @@ const { createClient } = require("redis");
 let client = null;
 
 if (process.env.REDIS_URL) {
-  client = createClient({ url: process.env.REDIS_URL });
+  client = createClient({
+    url: process.env.REDIS_URL,
+    // The rate limiters fail open on store errors, so while disconnected
+    // reject commands at once instead of queueing them until node-redis's
+    // 5 s command timeout: in an outage every limited request would wait it
+    // out first (issue #149).
+    disableOfflineQueue: true,
+    // Caps commands sent to a Redis that has stopped answering, which wait
+    // for a reply even after src/middleware/rateLimitStore.js has given up on
+    // them; past the cap new commands fail at once. A responsive Redis has
+    // only a handful in flight even on election night.
+    commandsQueueMaxLength: 1000,
+    // The default reconnect strategy retries with backoff (at most ~2.2 s
+    // apart) and never gives up, except after a socketTimeout, unset here.
+  });
   client.on("error", (err) => console.error("Redis error:", err.message));
   client.connect().catch((err) => console.error("Redis connect failed:", err.message));
 }

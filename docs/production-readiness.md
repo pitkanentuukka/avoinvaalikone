@@ -129,7 +129,11 @@ introduces.
   `REDIS_URL` (local dev) limiters fall back to per-process memory.
 - All limiters set `passOnStoreError: true` — they **fail open** if Redis is
   unreachable. Losing shared rate limiting during a Redis outage is far better
-  than dropping the voter-match endpoint on election night.
+  than dropping the voter-match endpoint on election night. Failing open is
+  fast: while disconnected, Redis commands are rejected at once (no offline
+  queue), and a limiter command Redis doesn't answer within 500 ms is given
+  up on. The store's script loads can fail without crashing the process, and
+  it reloads them once Redis is back (issue #149).
 - The voter-match limit is now `RATE_LIMIT_MATCH_MAX` (default **300**/min, up
   from 60). The higher default tolerates carrier CGNAT (many voters behind one
   IP) while still capping a single abuser at ~5 req/s, and is the dial for k6
