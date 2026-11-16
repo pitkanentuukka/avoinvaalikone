@@ -47,7 +47,9 @@ escape hatch: Cloudflare dashboard → Caching → Purge by URL.
 three public GET endpoints (production-only). Insurance against Cloudflare cache
 misses, purges, or a misconfigured edge rule. Returns `X-Micro-Cache: HIT` on
 hits. No cross-replica invalidation needed; 60 s sits within the accepted edge
-staleness window.
+staleness window. Entries are keyed by route and lowercased UUID param, not the
+raw URL, so query strings and path spelling variants can't multiply copies;
+retained bodies are capped at 500 entries and 32 MiB per replica.
 
 ### Compression
 
