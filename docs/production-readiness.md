@@ -188,11 +188,15 @@ introduces.
   format to the `backup_data` volume, uploads to S3-compatible UpCloud Object
   Storage, prunes remote dumps older than 30 days, and keeps only the newest
   local dump as a restore cache.
-- Local retention runs even when the upload or remote pruning fails, so a
-  long storage or credentials outage cannot fill the host disk (the volume
-  shares it with PostgreSQL); the script still exits non-zero. Remote pruning
-  is skipped after a failed upload. `pg_dump` writes to a `.partial` file that
-  is renamed only on success, so a failed dump never replaces the last good one.
+- Local retention runs on every path, including a failed upload, failed
+  remote pruning or a failed `pg_dump`, so a long storage or credentials
+  outage cannot fill the host disk (the volume shares it with PostgreSQL).
+  Failures exit non-zero and log an `ERROR:` line, visible in
+  `docker compose logs backup` (crond passes job output through). Remote
+  pruning is skipped after a failed upload. `pg_dump` writes to a `.partial`
+  file that is renamed only on success, so a failed dump never replaces the
+  last good one. Runs are serialised with `flock`, so a manual run during the
+  nightly one exits with an error instead of interfering.
 - Enabled in `docker-compose.prod.yml`. If the `BACKUP_S3_*` vars are unset the
   sidecar still runs and keeps a local dump, logging a warning instead of
   uploading. Restore steps: `scripts/backup/restore.md`.

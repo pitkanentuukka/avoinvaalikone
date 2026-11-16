@@ -2,7 +2,9 @@
 # driven by busybox crond. Nightly at 03:00 UTC.
 FROM postgres:16-alpine
 
-RUN apk add --no-cache rclone
+# backup.sh serialises runs with flock (busybox applet); fail the build, not
+# the nightly run, if the base image ever stops shipping it.
+RUN apk add --no-cache rclone && command -v flock
 
 COPY backup.sh /usr/local/bin/backup.sh
 RUN chmod +x /usr/local/bin/backup.sh && \
