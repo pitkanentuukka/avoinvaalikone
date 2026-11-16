@@ -24,11 +24,11 @@ async function increment() {
 
 const ops = {
   increment,
-  // An increment whose reply is held up past the command timeout by a busy
-  // event loop (a GC pause, a CPU-heavy request), though Redis ran it.
-  stalled: async () => {
+  // An increment held up by a busy event loop (a GC pause, a CPU-heavy
+  // request, a flood) for ms, though Redis answers at once.
+  stalled: async ({ ms }) => {
     const result = increment();
-    const until = Date.now() + 600;
+    const until = Date.now() + ms;
     while (Date.now() < until);
     return result;
   },

@@ -22,8 +22,9 @@ const CHILD = path.join(__dirname, "../helpers/rateLimitStoreChild.js");
 // waiting in node-redis's offline queue for the command timeout.
 const DOWN_BOUND_MS = 1000;
 // With Redis connected but not answering, an increment fails after the
-// store's 500 ms command timeout, once: a timed-out EVALSHA isn't retried.
-const HUNG_BOUND_MS = 900;
+// store's 2 s timeout, once: a timed-out EVALSHA isn't retried.
+const STORE_TIMEOUT_MS = 2000;
+const HUNG_BOUND_MS = STORE_TIMEOUT_MS + 500;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -99,7 +100,7 @@ function startChild(port) {
 }
 
 // Increments until one succeeds: node-redis reconnects with backoff (at most
-// ~2.2 s between attempts), and the store reloads its scripts after a failure.
+// ~2.2 s between attempts).
 async function eventuallyOk(store, timeoutMs = 10000) {
   const deadline = Date.now() + timeoutMs;
   let last;
@@ -125,6 +126,9 @@ test("Redis down at startup: requests fail open fast, the process survives, and 
   const down = await child.increment();
   expect(down.ok).toBe(false);
   expect(down.ms).toBeLessThan(DOWN_BOUND_MS);
+  // The crash in the issue came ~5 s after startup, when node-redis's default
+  // command timeout rejected a script load queued while offline.
+  await sleep(5500);
   await expectStillAlive(child);
 
   await startRedis("ok", port);
@@ -179,15 +183,26 @@ test("a connected Redis that stops answering fails requests open within the comm
   await expectStillAlive(child);
 });
 
+test("a busy event loop doesn't fail limiting open while Redis answers", async () => {
+  const { port } = await startRedis("ok");
+  child = startChild(port);
+  await child.ready;
+  expect((await eventuallyOk(child)).totalHits).toBe(1);
+
+  // A replica lagging under a flood is when limiting matters most.
+  const lagged = await child.run("stalled", { ms: 600 });
+  expect(lagged).toMatchObject({ ok: true, totalHits: 2 });
+});
+
 test("an increment Redis ran but answered too late for is counted once", async () => {
   const { port } = await startRedis("ok");
   child = startChild(port);
   await child.ready;
   expect((await eventuallyOk(child)).totalHits).toBe(1);
 
-  // The reply arrives after the command timeout has fired, so the request
+  // The reply is read only after the timeout has fired, so the request
   // fails open; retrying the EVALSHA would make Redis count it again.
-  const late = await child.run("stalled");
+  const late = await child.run("stalled", { ms: STORE_TIMEOUT_MS + 100 });
   expect(late.ok).toBe(false);
 
   const next = await child.increment();

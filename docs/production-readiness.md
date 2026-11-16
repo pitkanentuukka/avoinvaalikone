@@ -132,9 +132,10 @@ introduces.
   fallback then). Losing rate limiting during a Redis outage is far better
   than dropping the voter-match endpoint on election night. Failing open is
   fast: while disconnected, Redis commands are rejected at once (no offline
-  queue), a limiter command Redis doesn't answer within 500 ms is given up on
-  and not retried, and at most 1000 commands wait on a Redis that has stopped
-  answering. The store keeps no script state (EVALSHA, falling back to EVAL
+  queue), a limiter call Redis doesn't answer within 2 s is given up on and
+  not retried, and at most 1000 commands wait on a Redis that has stopped
+  answering; past that, requests fail open at once. (2 s rather than less,
+  because the deadline also counts event-loop lag on a busy replica.) The store keeps no script state (EVALSHA, falling back to EVAL
   on NOSCRIPT), so it works again as soon as Redis is back (issue #149).
 - The voter-match limit is now `RATE_LIMIT_MATCH_MAX` (default **300**/min, up
   from 60). The higher default tolerates carrier CGNAT (many voters behind one

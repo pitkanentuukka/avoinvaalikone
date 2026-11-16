@@ -47,7 +47,8 @@ app.use(helmet({
 // rejects a write (single instance, noeviction), the request is allowed
 // through instead of 500ing. Losing shared rate limiting during a Redis
 // outage is far better than dropping the voter-match endpoint on election
-// night — that would be strictly worse than the per-process fallback.
+// night. Until Redis is back no limit applies at all: there is no per-process
+// fallback then (only without REDIS_URL, in dev).
 
 // Rate limiting for admin endpoints (strict). It only exists to stop guessing
 // ADMIN_SECRET, so requests carrying the valid secret are skipped: one admin
