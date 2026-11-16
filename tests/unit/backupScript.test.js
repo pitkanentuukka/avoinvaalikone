@@ -39,10 +39,12 @@ fi
 printf ' complete' >> "$out"
 `;
 
-// pg_restore stub: `pg_restore -l` succeeds only on a complete dump.
+// pg_restore stub for the full read `pg_restore -f /dev/null FILE`, which
+// succeeds only on a complete dump. Any other form fails: `pg_restore -l`
+// reads just the table of contents, which a dump truncated mid-data still has.
 const PG_RESTORE_STUB = `#!/bin/sh
-for arg; do f=$arg; done
-grep -q complete "$f"
+[ "$1" = -f ] && [ "$2" = /dev/null ] && [ $# -eq 3 ] || exit 1
+grep -q complete "$3"
 `;
 
 // rclone stub: logs each call; STUB_RCLONE_FAIL names a subcommand to fail.
@@ -290,6 +292,8 @@ describe.each(SHELLS)("backup.sh under %s", (shell) => {
 
     expect(run.status).not.toBe(0);
     expect(run.stderr).toMatch(/ERROR: pg_dump failed/);
+    // Reported once, not again by the EXIT trap.
+    expect(run.stderr.match(/ERROR:/g)).toHaveLength(1);
     expect(run.files).toEqual([]);
   });
 

@@ -194,9 +194,9 @@ introduces.
   Failures exit non-zero and log an `ERROR:` line, visible in
   `docker compose -f docker-compose.yml -f docker-compose.prod.yml logs backup`
   (crond passes job output through). Before dumping, the script prunes to the
-  newest dump `pg_restore -l` can read, so a truncated dump left by an earlier
-  failure is not kept in place of a good one. Remote
-  pruning is skipped after a failed upload. `pg_dump` writes to a `.partial`
+  newest dump `pg_restore` reads to the end, so a truncated dump left by an
+  earlier failure is not kept in place of a good one. Remote pruning is
+  skipped after a failed upload. `pg_dump` writes to a `.partial`
   file that is renamed only on success, so a failed dump never replaces the
   last good one. Runs are serialised with `flock`, so a manual run during the
   nightly one exits with an error instead of interfering.
