@@ -9,6 +9,12 @@
 //   REDIS_TEST_URL=redis://localhost:6379 npm test -- rateLimitStoreRedis
 // CI runs it in the e2e-api job, which has a Redis service.
 
+// REQUIRE_REDIS_TEST (set in CI) turns a missing REDIS_TEST_URL into a
+// failure, so a renamed variable can't make the CI step pass as "skipped".
+if (process.env.REQUIRE_REDIS_TEST && !process.env.REDIS_TEST_URL) {
+  throw new Error("REQUIRE_REDIS_TEST is set but REDIS_TEST_URL is not");
+}
+
 const describeWithRedis = process.env.REDIS_TEST_URL ? describe : describe.skip;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -37,13 +43,32 @@ describeWithRedis("rate-limit store scripts on a real Redis (#149)", () => {
       createStore = require("../../src/middleware/rateLimitStore");
     });
     process.env.REDIS_URL = "";
-    if (!redis.isReady) await new Promise((resolve) => redis.once("ready", resolve));
+    if (!redis.isReady) {
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(
+          () => reject(new Error(`no Redis at REDIS_TEST_URL (${process.env.REDIS_TEST_URL})`)),
+          // Under Jest's 5 s hook timeout, so this message is what shows.
+          3000
+        );
+        redis.once("ready", () => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
+    }
   });
 
   afterAll(async () => {
-    const keys = await redis.sendCommand(["KEYS", `${prefix}*`]);
-    if (keys.length) await redis.sendCommand(["DEL", ...keys]);
-    redis.destroy();
+    // destroy() even when Redis is gone, or its reconnect loop keeps Jest
+    // from exiting.
+    try {
+      if (redis.isReady) {
+        const keys = await redis.sendCommand(["KEYS", `${prefix}*`]);
+        if (keys.length) await redis.sendCommand(["DEL", ...keys]);
+      }
+    } finally {
+      redis.destroy();
+    }
   });
 
   test("the first hit starts a window and later hits count within it", async () => {
@@ -64,8 +89,11 @@ describeWithRedis("rate-limit store scripts on a real Redis (#149)", () => {
     // caches it under Redis's hash; later calls must then hit that cache.
     await redis.sendCommand(["SCRIPT", "FLUSH"]);
     const s = store();
+    const before = await noscriptErrors();
     await s.increment("sha");
     const afterFirst = await noscriptErrors();
+    // The store did send EVALSHA, and fell back to EVAL.
+    expect(afterFirst).toBe(before + 1);
     await s.increment("sha");
     await s.increment("sha");
     expect(await noscriptErrors()).toBe(afterFirst);

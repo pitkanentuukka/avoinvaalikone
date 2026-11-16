@@ -135,8 +135,9 @@ introduces.
   queue), a limiter call Redis doesn't answer within 2 s is given up on and
   not retried, and at most 1000 commands wait on a Redis that has stopped
   answering; past that, requests fail open at once. (2 s rather than less,
-  because the deadline also counts event-loop lag on a busy replica.) The store keeps no script state (EVALSHA, falling back to EVAL
-  on NOSCRIPT), so it works again as soon as Redis is back (issue #149).
+  because the deadline also counts event-loop lag on a busy replica.) The
+  store keeps no script state (EVALSHA, falling back to EVAL on NOSCRIPT), so
+  it works again as soon as Redis is back (issue #149).
 - The voter-match limit is now `RATE_LIMIT_MATCH_MAX` (default **300**/min, up
   from 60). The higher default tolerates carrier CGNAT (many voters behind one
   IP) while still capping a single abuser at ~5 req/s, and is the dial for k6

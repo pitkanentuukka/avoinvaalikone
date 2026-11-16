@@ -16,8 +16,8 @@ if (process.env.REDIS_URL) {
     // Caps commands sent to a Redis that has stopped answering, which wait
     // for a reply even after src/middleware/rateLimitStore.js has given up on
     // them; past the cap new commands fail at once instead of each waiting
-    // out the store's timeout. A responsive Redis has
-    // only a handful in flight even on election night.
+    // out the store's timeout. A responsive Redis has only a handful in
+    // flight even on election night.
     commandsQueueMaxLength: 1000,
     // The default reconnect strategy retries with backoff (at most ~2.2 s
     // apart) and never gives up, except after a socketTimeout, unset here.

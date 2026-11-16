@@ -39,4 +39,8 @@ process.on("message", async ({ id, op = "increment", ...args }) => {
   process.send({ id, result: await ops[op](args) });
 });
 
+// Don't outlive a Jest worker that died without killing this process: the
+// Redis client's reconnect loop would keep it running.
+process.on("disconnect", () => process.exit(0));
+
 process.send({ ready: true });

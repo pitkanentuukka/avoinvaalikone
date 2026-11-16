@@ -37,6 +37,7 @@ jobs:
   e2e-api:
     name: E2E API tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     services:
       postgres:
         image: postgres:16-alpine
@@ -84,6 +85,7 @@ jobs:
         run: npm test -- rateLimitStoreRedis
         env:
           REDIS_TEST_URL: redis://localhost:6379
+          REQUIRE_REDIS_TEST: "1"
 
       - name: Run migrations
         run: npm run migrate

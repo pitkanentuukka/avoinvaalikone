@@ -170,7 +170,7 @@ test("Redis going away fails requests open fast, and a restarted Redis is used a
   expect(up.totalHits).toBe(1);
 });
 
-test("a connected Redis that stops answering fails requests open within the command timeout", async () => {
+test("a connected Redis that stops answering fails requests open within the store timeout", async () => {
   const { server, port } = await startRedis("ok");
   child = startChild(port);
   await child.ready;

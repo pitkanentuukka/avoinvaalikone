@@ -90,8 +90,16 @@ class RedisStore {
     return { totalHits: Number(totalHits), resetTime: new Date(Date.now() + Number(ttl)) };
   }
 
+  // express-rate-limit awaits this inside response "finish"/"close"/"error"
+  // handlers that catch nothing (skipFailedRequests, skipSuccessfulRequests),
+  // so a rejection here would exit Node; passOnStoreError doesn't cover it.
+  // Missing one uncount only leaves a hit counted.
   async decrement(key) {
-    await withTimeout(runScript(DECREMENT, this.prefix + key));
+    try {
+      await withTimeout(runScript(DECREMENT, this.prefix + key));
+    } catch (err) {
+      console.error("Rate-limit store decrement failed:", err.message);
+    }
   }
 
   async resetKey(key) {
