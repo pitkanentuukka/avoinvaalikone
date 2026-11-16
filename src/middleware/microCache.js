@@ -18,16 +18,13 @@ const MAX_BYTES = 32 * 1024 * 1024;
 // "/API/Candidates" and "/api/candidates?x=1" share an entry. Param values are
 // lowercased because every cached route's params are UUIDs, which Postgres
 // matches case-insensitively (validateUUIDParam runs first); a route with a
-// case-sensitive param must not be cached with this key. Mounted with
-// router.use() rather than on a route, req.route is unset and the matched
-// sub-path stands in for the declared one.
+// case-sensitive param must not be cached with this key. The mount path is
+// lowercased because the app keeps Express's default case-insensitive routing.
 function cacheKey(req) {
   const params = Object.keys(req.params)
     .sort()
-    .map((name) => `${name}=${String(req.params[name]).toLowerCase()}`)
-    .join("&");
-  const routePath = req.route ? req.route.path : req.path;
-  return `${req.baseUrl.toLowerCase()}${routePath}#${params}`;
+    .map((name) => [name, String(req.params[name]).toLowerCase()]);
+  return JSON.stringify([req.baseUrl.toLowerCase(), req.route.path, params]);
 }
 
 function createMicroCache({ maxEntries = MAX_ENTRIES, maxBytes = MAX_BYTES } = {}) {
@@ -65,6 +62,11 @@ function createMicroCache({ maxEntries = MAX_ENTRIES, maxBytes = MAX_BYTES } = {
     // Production only, like the rate limiters: in dev/tests a 60s stale window
     // hides writes from the very person making them.
     if (process.env.NODE_ENV !== "production") return next();
+    // Only reads are cached. Without req.route (mounted with router.use()
+    // instead of on a route) there is no declared path to key on, and the
+    // raw path would let spelling variants multiply entries again, so such a
+    // mount passes requests through uncached.
+    if ((req.method !== "GET" && req.method !== "HEAD") || !req.route) return next();
     const key = cacheKey(req);
     const hit = store.get(key);
     if (hit) {

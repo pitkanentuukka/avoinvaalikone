@@ -223,7 +223,9 @@ test("a hit serves non-Latin-1 text as identical UTF-8 JSON", async () => {
   expect(microCache.stats().bytes).toBe(Buffer.byteLength(miss.text));
 });
 
-test("mounted with router.use(), the query string is still ignored", async () => {
+test("mounted with router.use(), requests pass through uncached", async () => {
+  // Without a declared route path the raw path would be the key, and its
+  // spelling variants would multiply entries again.
   const microCache = createMicroCache();
   const router = express.Router();
   let calls = 0;
@@ -235,9 +237,49 @@ test("mounted with router.use(), the query string is still ignored", async () =>
   const app = express();
   app.use("/api/question-sets", router);
 
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 3; i++) {
     expect((await request(app).get(`/api/question-sets?unused=${i}`)).status).toBe(200);
   }
-  expect(calls).toBe(1);
+  expect(calls).toBe(3);
+  expect(microCache.stats().entries).toBe(0);
+});
+
+test("only GET and HEAD are served from the cache", async () => {
+  const microCache = createMicroCache();
+  const router = express.Router();
+  const calls = [];
+  router.all("/", microCache(), (req, res) => {
+    calls.push(req.method);
+    res.json({ method: req.method });
+  });
+  const app = express();
+  app.use("/api/question-sets", router);
+
+  expect((await request(app).get("/api/question-sets")).body).toEqual({ method: "GET" });
+  const post = await request(app).post("/api/question-sets").send({});
+  expect(post.headers["x-micro-cache"]).toBeUndefined();
+  expect(post.body).toEqual({ method: "POST" });
+  expect(calls).toEqual(["GET", "POST"]);
   expect(microCache.stats().entries).toBe(1);
+});
+
+test("a hit answers HEAD and conditional GETs like a miss", async () => {
+  const microCache = createMicroCache();
+  const { app } = buildApp(microCache);
+
+  const miss = await request(app).get("/api/candidates");
+  const hit = await request(app).get("/api/candidates");
+  expect(hit.headers["x-micro-cache"]).toBe("HIT");
+  for (const header of ["etag", "content-length", "content-type"]) {
+    expect(hit.headers[header]).toBe(miss.headers[header]);
+  }
+
+  const head = await request(app).head("/api/candidates");
+  expect(head.status).toBe(200);
+  expect(head.headers["x-micro-cache"]).toBe("HIT");
+  expect(head.headers["content-length"]).toBe(miss.headers["content-length"]);
+
+  const notModified = await request(app).get("/api/candidates").set("If-None-Match", miss.headers.etag);
+  expect(notModified.status).toBe(304);
+  expect(notModified.headers["x-micro-cache"]).toBe("HIT");
 });
