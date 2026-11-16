@@ -6,7 +6,7 @@
 #   docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backup backup.sh
 set -eu
 
-LOCAL_DIR=/backups
+LOCAL_DIR=${BACKUP_DIR:-/backups}
 STAMP=$(date -u +%Y%m%d-%H%M%S)
 FILE="$LOCAL_DIR/vaalikone-$STAMP.dump"
 
