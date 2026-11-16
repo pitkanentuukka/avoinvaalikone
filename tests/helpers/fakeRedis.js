@@ -1,14 +1,16 @@
 // Minimal RESP server for tests/unit/redisRateLimitStore.test.js. It answers
-// just what node-redis and rate-limit-redis send (HELLO, CLIENT SETINFO,
-// SCRIPT LOAD, EVALSHA), so the tests can take Redis down, bring it back,
-// hang it or make it refuse commands, without a real Redis server.
+// just what node-redis and src/middleware/rateLimitStore.js send (HELLO,
+// CLIENT SETINFO, EVALSHA, EVAL, DEL), so the tests can take Redis down,
+// bring it back, pause it or make it refuse commands, without a real Redis.
 //
 // mode:
 //   "ok"      — behaves like Redis. Scripts are kept per instance, so a new
-//               instance (a restarted Redis) answers NOSCRIPT until reloaded.
+//               instance (a restarted Redis) answers NOSCRIPT until EVAL.
 //   "loading" — connects, then answers every command with -LOADING, as Redis
 //               does while it loads its dataset after a restart.
-//   "hang"    — connects, then never answers a command.
+//   "hang"    — connects, then holds every command without answering, like a
+//               paused Redis. Setting another mode answers the held commands
+//               in order, as a resumed Redis would.
 
 const net = require("net");
 const crypto = require("crypto");
@@ -38,15 +40,30 @@ function parseCommands(buffer) {
   return { commands, rest: buffer.subarray(offset) };
 }
 
-const bulk = (s) => `$${Buffer.byteLength(s)}\r\n${s}\r\n`;
+const sha1 = (s) => crypto.createHash("sha1").update(s).digest("hex");
 
 class FakeRedis {
+  #mode;
+
   constructor(mode = "ok") {
-    this.mode = mode;
-    this.scripts = new Set();
+    this.#mode = mode;
+    this.held = [];
+    this.scripts = new Map();
     this.hits = new Map();
     this.sockets = new Set();
     this.server = net.createServer((socket) => this.#onConnection(socket));
+  }
+
+  get mode() {
+    return this.#mode;
+  }
+
+  set mode(mode) {
+    this.#mode = mode;
+    if (mode === "hang") return;
+    const held = this.held;
+    this.held = [];
+    for (const { socket, args } of held) this.#handle(socket, args);
   }
 
   listen(port = 0) {
@@ -70,32 +87,49 @@ class FakeRedis {
     socket.on("data", (chunk) => {
       const parsed = parseCommands(Buffer.concat([buffer, chunk]));
       buffer = parsed.rest;
-      for (const args of parsed.commands) {
-        const reply = this.#reply(args);
-        if (reply !== null) socket.write(reply);
-      }
+      for (const args of parsed.commands) this.#handle(socket, args);
     });
   }
 
-  #reply([name, ...args]) {
-    const command = name.toUpperCase();
-    if (command === "HELLO") return "%1\r\n+proto\r\n:3\r\n";
-    if (command === "CLIENT") return "+OK\r\n";
-    if (this.mode === "hang") return null;
-    if (this.mode === "loading") return "-LOADING Redis is loading the dataset in memory\r\n";
-    if (command === "SCRIPT" && args[0].toUpperCase() === "LOAD") {
-      const sha = crypto.createHash("sha1").update(args[1]).digest("hex");
-      this.scripts.add(sha);
-      return bulk(sha);
+  #handle(socket, args) {
+    const command = args[0].toUpperCase();
+    // The handshake goes through in every mode, so the client is connected.
+    if (command === "HELLO") return socket.write("%1\r\n+proto\r\n:3\r\n");
+    if (command === "CLIENT") return socket.write("+OK\r\n");
+    if (this.#mode === "hang") return this.held.push({ socket, args });
+    if (this.#mode === "loading") return socket.write("-LOADING Redis is loading the dataset in memory\r\n");
+    if (!socket.destroyed) socket.write(this.#reply(command, args.slice(1)));
+  }
+
+  #reply(command, args) {
+    if (command === "EVAL") {
+      this.scripts.set(sha1(args[0]), args[0]);
+      return this.#run(args[0], args[2]);
     }
     if (command === "EVALSHA") {
-      if (!this.scripts.has(args[0])) return "-NOSCRIPT No matching script. Please use EVAL.\r\n";
-      const key = args[2];
+      const source = this.scripts.get(args[0]);
+      if (!source) return "-NOSCRIPT No matching script. Please use EVAL.\r\n";
+      return this.#run(source, args[2]);
+    }
+    if (command === "DEL") {
+      const existed = this.hits.delete(args[0]);
+      return `:${existed ? 1 : 0}\r\n`;
+    }
+    return "+OK\r\n";
+  }
+
+  // Not a Lua interpreter: tells the store's scripts apart by what they call.
+  #run(source, key) {
+    if (source.includes('"INCR"')) {
       const hits = (this.hits.get(key) ?? 0) + 1;
       this.hits.set(key, hits);
       return `*2\r\n:${hits}\r\n:60000\r\n`;
     }
-    return "+OK\r\n";
+    if (source.includes('"DECR"')) {
+      if (this.hits.has(key)) this.hits.set(key, this.hits.get(key) - 1);
+      return ":0\r\n";
+    }
+    return "-ERR unknown script\r\n";
   }
 }
 

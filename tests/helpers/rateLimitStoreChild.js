@@ -12,14 +12,31 @@ const store = createStore("rl:test:");
 // express-rate-limit calls init() when the limiter is created.
 store.init({ windowMs: 60 * 1000 });
 
-process.on("message", async ({ id }) => {
+async function increment() {
   const started = Date.now();
   try {
     const { totalHits } = await store.increment("client");
-    process.send({ id, ok: true, totalHits, ms: Date.now() - started });
+    return { ok: true, totalHits, ms: Date.now() - started };
   } catch (err) {
-    process.send({ id, ok: false, error: `${err.name}: ${err.message}`, ms: Date.now() - started });
+    return { ok: false, error: `${err.name}: ${err.message}`, ms: Date.now() - started };
   }
+}
+
+const ops = {
+  increment,
+  // An increment whose reply is held up past the command timeout by a busy
+  // event loop (a GC pause, a CPU-heavy request), though Redis ran it.
+  stalled: async () => {
+    const result = increment();
+    const until = Date.now() + 600;
+    while (Date.now() < until);
+    return result;
+  },
+  burst: ({ count }) => Promise.all(Array.from({ length: count }, increment)),
+};
+
+process.on("message", async ({ id, op = "increment", ...args }) => {
+  process.send({ id, result: await ops[op](args) });
 });
 
 process.send({ ready: true });

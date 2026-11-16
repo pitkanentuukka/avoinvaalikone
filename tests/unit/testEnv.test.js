@@ -4,10 +4,6 @@ const path = require("path");
 
 jest.mock("../../src/db/pool");
 jest.mock("../../src/email");
-// Keeps the rate limiters off Redis, so a failing REDIS_URL test can close the
-// client without rejecting the stores' queued script loads. src/index.js still
-// requires src/redis.js itself, which is what the test checks.
-jest.mock("../../src/middleware/rateLimitStore", () => () => undefined);
 
 // Point src/index.js's own dotenv.config() call (with whatever options it
 // passes, e.g. a future override: true) at a .env like a developer's, which

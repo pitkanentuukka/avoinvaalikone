@@ -77,8 +77,7 @@ i.e. everything that arrives through Caddy/Cloudflare in production.
 
 ### Redis rate limiting
 
-`src/redis.js` + `src/middleware/rateLimitStore.js` + deps `redis`,
-`rate-limit-redis`:
+`src/redis.js` + `src/middleware/rateLimitStore.js` + dep `redis`:
 
 - All six rate limiters (admin, submission, match, plus the party, registration
   and candidate-token routes in `src/routes/candidates.js`) share a Redis

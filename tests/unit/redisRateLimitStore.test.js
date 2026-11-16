@@ -3,12 +3,12 @@ const path = require("path");
 const { FakeRedis, unusedPort } = require("../helpers/fakeRedis");
 
 // The Redis-backed rate-limit store must not take the backend down with
-// Redis (issue #149). rate-limit-redis loads its scripts when the store is
-// constructed and only awaits them on the first request, so a load that
-// failed first was an unhandled rejection and Node exited. The limiters pass
-// requests on store errors (passOnStoreError), so with Redis unavailable a
-// request should fail open quickly and the store should work again once Redis
-// is back.
+// Redis (issue #149). rate-limit-redis, which it used to be, loaded its
+// scripts when the store was constructed and only awaited them on the first
+// request, so a load that failed first was an unhandled rejection and Node
+// exited. The limiters pass requests on store errors (passOnStoreError), so
+// with Redis unavailable a request should fail open quickly, count once, and
+// the store should work again once Redis is back.
 //
 // The store runs in a child process (tests/helpers/rateLimitStoreChild.js) so
 // a crash shows up as that process exiting; the fake Redis runs here.
@@ -21,9 +21,9 @@ const CHILD = path.join(__dirname, "../helpers/rateLimitStoreChild.js");
 // listening, connection dropped) a limiter call must fail at once instead of
 // waiting in node-redis's offline queue for the command timeout.
 const DOWN_BOUND_MS = 1000;
-// With Redis connected but not answering, an increment is an EVALSHA plus a
-// script reload, each bounded by the client's command timeout.
-const HUNG_BOUND_MS = 2500;
+// With Redis connected but not answering, an increment fails after the
+// store's 500 ms command timeout, once: a timed-out EVALSHA isn't retried.
+const HUNG_BOUND_MS = 900;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -67,7 +67,7 @@ function startChild(port) {
   const ready = new Promise((resolve, reject) => {
     proc.on("message", (msg) => {
       if (msg.ready) return resolve();
-      pending.get(msg.id)?.resolve(msg);
+      pending.get(msg.id)?.resolve(msg.result);
       pending.delete(msg.id);
     });
     proc.on("exit", (code, signal) => {
@@ -82,12 +82,18 @@ function startChild(port) {
     ready,
     alive: () => exit === null,
     output: () => output,
-    increment: () => new Promise((resolve, reject) => {
-      if (exit !== null) return reject(exitError());
-      const id = nextId++;
-      pending.set(id, { resolve, reject });
-      proc.send({ id });
-    }),
+    // Runs one of the child's ops (tests/helpers/rateLimitStoreChild.js).
+    run(op, args = {}) {
+      return new Promise((resolve, reject) => {
+        if (exit !== null) return reject(exitError());
+        const id = nextId++;
+        pending.set(id, { resolve, reject });
+        proc.send({ id, op, ...args });
+      });
+    },
+    increment() {
+      return this.run("increment");
+    },
     kill: () => proc.kill("SIGKILL"),
   };
 }
@@ -126,7 +132,7 @@ test("Redis down at startup: requests fail open fast, the process survives, and 
   expect(up.totalHits).toBe(1);
 });
 
-test("Redis refusing script loads (LOADING after a restart) doesn't crash, and the store recovers", async () => {
+test("Redis answering with errors (LOADING after a restart) fails requests open, and the store recovers", async () => {
   const { server, port } = await startRedis("loading");
   child = startChild(port);
   await child.ready;
@@ -171,4 +177,41 @@ test("a connected Redis that stops answering fails requests open within the comm
   expect(hung.ok).toBe(false);
   expect(hung.ms).toBeLessThan(HUNG_BOUND_MS);
   await expectStillAlive(child);
+});
+
+test("an increment Redis ran but answered too late for is counted once", async () => {
+  const { port } = await startRedis("ok");
+  child = startChild(port);
+  await child.ready;
+  expect((await eventuallyOk(child)).totalHits).toBe(1);
+
+  // The reply arrives after the command timeout has fired, so the request
+  // fails open; retrying the EVALSHA would make Redis count it again.
+  const late = await child.run("stalled");
+  expect(late.ok).toBe(false);
+
+  const next = await child.increment();
+  expect(next.totalHits).toBe(3);
+});
+
+test("a paused Redis: past the queue cap requests fail at once, and the store works again on resume", async () => {
+  const { server, port } = await startRedis("ok");
+  child = startChild(port);
+  await child.ready;
+  await eventuallyOk(child);
+
+  server.mode = "hang";
+  // More than src/redis.js's commandsQueueMaxLength (1000).
+  const results = await child.run("burst", { count: 1200 });
+  expect(results.every((r) => !r.ok)).toBe(true);
+  const full = results.filter((r) => r.error.includes("The queue is full"));
+  expect(full.length).toBeGreaterThan(0);
+  for (const r of full) expect(r.ms).toBeLessThan(100);
+  for (const r of results) expect(r.ms).toBeLessThan(HUNG_BOUND_MS);
+  await expectStillAlive(child);
+
+  // Resuming answers the held commands, which frees the queue.
+  server.mode = "ok";
+  const up = await eventuallyOk(child);
+  expect(up.ok).toBe(true);
 });
