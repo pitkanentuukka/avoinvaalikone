@@ -17,30 +17,37 @@ const MAX_BYTES = 32 * 1024 * 1024;
 // (req.route.path) rather than as spelled, so "/api/candidates/",
 // "/API/Candidates" and "/api/candidates?x=1" share an entry. Param values are
 // lowercased because every cached route's params are UUIDs, which Postgres
-// matches case-insensitively; a route with a case-sensitive param must not be
-// cached with this key.
+// matches case-insensitively (validateUUIDParam runs first); a route with a
+// case-sensitive param must not be cached with this key. Mounted with
+// router.use() rather than on a route, req.route is unset and the matched
+// sub-path stands in for the declared one.
 function cacheKey(req) {
   const params = Object.keys(req.params)
     .sort()
     .map((name) => `${name}=${String(req.params[name]).toLowerCase()}`)
     .join("&");
-  return `${req.baseUrl.toLowerCase()}${req.route.path}#${params}`;
+  const routePath = req.route ? req.route.path : req.path;
+  return `${req.baseUrl.toLowerCase()}${routePath}#${params}`;
 }
 
 function createMicroCache({ maxEntries = MAX_ENTRIES, maxBytes = MAX_BYTES } = {}) {
-  const store = new Map(); // key -> { body, bytes, expires }, oldest first
+  // Bodies are kept as Buffers so their size is exactly what is counted: a
+  // JS string holding any non-Latin-1 character (an en dash or emoji in one
+  // bio) takes two bytes per character, double its UTF-8 length.
+  const store = new Map(); // key -> { body: Buffer, expires }, oldest first
   let totalBytes = 0;
 
   function remove(key) {
     const entry = store.get(key);
     if (!entry) return;
     store.delete(key);
-    totalBytes -= entry.bytes;
+    totalBytes -= entry.body.length;
   }
 
-  function put(key, body, ttlMs) {
+  function put(key, json, ttlMs) {
     remove(key); // re-inserting moves the key to the newest position
-    const bytes = Buffer.byteLength(body);
+    const body = Buffer.from(json);
+    const bytes = body.length;
     if (bytes > maxBytes) return;
     const now = Date.now();
     for (const [k, entry] of store) {
@@ -50,7 +57,7 @@ function createMicroCache({ maxEntries = MAX_ENTRIES, maxBytes = MAX_BYTES } = {
       remove(store.keys().next().value);
     }
     if (store.size >= maxEntries) return;
-    store.set(key, { body, bytes, expires: now + ttlMs });
+    store.set(key, { body, expires: now + ttlMs });
     totalBytes += bytes;
   }
 

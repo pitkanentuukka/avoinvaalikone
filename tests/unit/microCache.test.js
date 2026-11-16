@@ -1,6 +1,7 @@
 const express = require("express");
 const request = require("supertest");
 const { createMicroCache } = require("../../src/middleware/microCache");
+const { validateUUIDParam } = require("../../src/middleware/validation");
 
 // Issue #150: the public micro-cache keyed entries by req.originalUrl, so
 // every unused query string (?unused=1, ?unused=2, …) cost a database read
@@ -19,7 +20,9 @@ function buildApp(microCache, { listBody = [{ bio: "x".repeat(1000) }] } = {}) {
     calls.list++;
     res.json(listBody);
   });
-  candidates.get("/:id", microCache(), (req, res) => {
+  // As in src/routes/candidates.js, validation runs before the cache, which
+  // is what makes lowercasing the id in the key safe.
+  candidates.get("/:id", validateUUIDParam("id"), microCache(), (req, res) => {
     calls.one++;
     res.json({ id: req.params.id.toLowerCase() });
   });
@@ -177,4 +180,64 @@ test("the cache is off outside production", async () => {
   await request(app).get("/api/candidates");
   expect(calls.list).toBe(2);
   expect(microCache.stats().entries).toBe(0);
+});
+
+test("the entry limit evicts the oldest entries", async () => {
+  const microCache = createMicroCache({ maxEntries: 3 });
+  const { app, calls } = buildApp(microCache);
+  const ids = Array.from({ length: 10 }, (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`);
+
+  for (const id of ids) {
+    expect((await request(app).get(`/api/candidates/${id}`)).status).toBe(200);
+    expect(microCache.stats().entries).toBeLessThanOrEqual(3);
+  }
+  // The newest three are still cached, the oldest was evicted.
+  for (const id of ids.slice(-3)) {
+    expect((await request(app).get(`/api/candidates/${id}`)).headers["x-micro-cache"]).toBe("HIT");
+  }
+  expect((await request(app).get(`/api/candidates/${ids[0]}`)).headers["x-micro-cache"]).toBeUndefined();
+  expect(calls.one).toBe(11);
+});
+
+test("an invalid id is rejected before the cache and not stored", async () => {
+  const microCache = createMicroCache();
+  const { app, calls } = buildApp(microCache);
+
+  expect((await request(app).get("/api/candidates/not-a-uuid")).status).toBe(400);
+  expect(calls.one).toBe(0);
+  expect(microCache.stats().entries).toBe(0);
+});
+
+test("a hit serves non-Latin-1 text as identical UTF-8 JSON", async () => {
+  const microCache = createMicroCache();
+  const bio = "Ääni – \u201cvaalit\u201d 🗳️";
+  const { app } = buildApp(microCache, { listBody: [{ bio }] });
+
+  const miss = await request(app).get("/api/candidates");
+  const hit = await request(app).get("/api/candidates");
+  expect(hit.headers["x-micro-cache"]).toBe("HIT");
+  expect(hit.headers["content-type"]).toBe("application/json; charset=utf-8");
+  expect(hit.text).toBe(miss.text);
+  expect(hit.body).toEqual([{ bio }]);
+  // The counted size is the UTF-8 size actually retained.
+  expect(microCache.stats().bytes).toBe(Buffer.byteLength(miss.text));
+});
+
+test("mounted with router.use(), the query string is still ignored", async () => {
+  const microCache = createMicroCache();
+  const router = express.Router();
+  let calls = 0;
+  router.use(microCache());
+  router.get("/", (req, res) => {
+    calls++;
+    res.json([]);
+  });
+  const app = express();
+  app.use("/api/question-sets", router);
+
+  for (let i = 0; i < 5; i++) {
+    expect((await request(app).get(`/api/question-sets?unused=${i}`)).status).toBe(200);
+  }
+  expect(calls).toBe(1);
+  expect(microCache.stats().entries).toBe(1);
 });
