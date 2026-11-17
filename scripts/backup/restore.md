@@ -4,6 +4,8 @@ Dumps are `pg_dump -Fc` custom-format archives named `vaalikone-<UTC stamp>.dump
 The newest one is always in the `backup_data` volume (`/backups` inside the
 backup container); older ones live in the object-storage bucket under `postgres/`.
 
+Keep the restore clear of 03:00 UTC: the nightly backup would dump a half-restored database, keep it as the only local dump and upload it.
+
 ```bash
 # 1. Fetch a dump from the bucket if the local one isn't the version you need.
 #    Into /backups/restore/, not /backups/: backup.sh deletes every
