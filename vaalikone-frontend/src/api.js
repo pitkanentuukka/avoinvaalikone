@@ -115,9 +115,9 @@ export function createApi({
     // (session_id, question_id), so a retry after a lost response stores
     // nothing new. crypto.randomUUID is missing outside secure contexts
     // (plain-HTTP non-localhost); the server then picks the id and the
-    // request isn't retried.
-    voterMatch: (data) => {
-      const sessionId = globalThis.crypto?.randomUUID?.();
+    // request isn't retried. The voter's own retry of a failed match passes
+    // the submission's sessionId (src/voterMatch.js), for the same reason.
+    voterMatch: (data, { sessionId = globalThis.crypto?.randomUUID?.() } = {}) => {
       return apiFetch("/voter/match", {
         method: "POST",
         body: { ...data, sessionId },

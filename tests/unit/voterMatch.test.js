@@ -99,18 +99,23 @@ describe("the voter view's failure step", () => {
       name: "voter-match-failed",
       setup(build) {
         build.onLoad({ filter: /\/App\.jsx$/ }, async ({ path }) => {
-          let source = await fs.promises.readFile(path, "utf8");
+          const source = await fs.promises.readFile(path, "utf8");
           // Server rendering can't run the quiz. Start the voter view where a
           // failed match leaves it, rendering the actual component markup.
+          // Only VoterView's own initializers: other components have the same
+          // `error` state line.
+          const start = source.indexOf("function VoterView()");
+          if (start === -1) throw new Error("VoterView not found");
+          let body = source.slice(start);
           const patches = [
             ['const [step, setStep] = useState("loading");', 'const [step, setStep] = useState("match-failed");'],
             ["const [error, setError] = useState(null);", 'const [error, setError] = useState("Palvelinvirhe");'],
           ];
           for (const [from, to] of patches) {
-            if (!source.includes(from)) throw new Error(`VoterView state initializer not found: ${from}`);
-            source = source.replace(from, to);
+            if (!body.includes(from)) throw new Error(`VoterView state initializer not found: ${from}`);
+            body = body.replace(from, to);
           }
-          return { contents: `${source}\nexport { VoterView, LanguageContext };`, loader: "jsx" };
+          return { contents: `${source.slice(0, start)}${body}\nexport { VoterView, LanguageContext };`, loader: "jsx" };
         });
       },
     }]);
