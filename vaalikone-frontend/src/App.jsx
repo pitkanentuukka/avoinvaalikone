@@ -1967,6 +1967,7 @@ function VoterView() {
     if (outcome.step === "results") {
       setResults(outcome.results);
       setQuestionCount(outcome.questionCount);
+      submissionRef.current = null; // the next submission is a new session
     }
     setError(outcome.error);
     setStep(outcome.step);

@@ -19,8 +19,10 @@ const router = Router();
  *
  * sessionId keys the anonymous research rows. The frontend generates one per
  * submission and resends it when it retries after a transient upstream error,
- * so the retry's insert conflicts and stores no second session. Without one,
- * the server generates it.
+ * and when the voter retries a failed match or asks again without changing
+ * anything (vaalikone-frontend/src/voterMatch.js), so the retry's insert
+ * conflicts and stores no second session. Without one, the server generates
+ * it.
  *
  * Returns { sessionId, questionCount, results }: candidates ranked by match
  * percentage. questionCount is how many of the voter's questions were scored;

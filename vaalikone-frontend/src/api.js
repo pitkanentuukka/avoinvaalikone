@@ -86,9 +86,12 @@ export function createApi({
       res = await doFetch(); // a failure here is final: at most one retry
     }
     if (!res.ok) {
-      const data = await res.json().catch(() => ({ error: "Server error" }));
-      const err = new Error(data.error || `HTTP ${res.status}`);
+      const data = await res.json().catch(() => null);
+      const err = new Error(data?.error || (data ? `HTTP ${res.status}` : "Server error"));
       err.status = res.status;
+      // The message is the app's own (a JSON `error`), not a placeholder for
+      // a body that wasn't one (a proxy's HTML page, say).
+      err.serverMessage = typeof data?.error === "string";
       throw err;
     }
     if (res.status === 204) return null;

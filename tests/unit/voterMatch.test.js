@@ -54,11 +54,14 @@ describe("runMatch", () => {
   // The failure step explains itself; only the app's own messages (JSON
   // `error` on a 4xx, in Finnish) add anything. "Failed to fetch" or
   // "HTTP 503" would be English noise in the Finnish UI.
+  const htmlResponse = (status) => ({ ok: false, status, json: async () => { throw new SyntaxError("Unexpected token <"); } });
   test.each([
-    ["a network error", [new TypeError("Failed to fetch"), new TypeError("Failed to fetch")], null],
-    ["a 5xx", [jsonResponse(502, {}), jsonResponse(502, {})], null],
-    ["the app's own 4xx", [jsonResponse(429, { error: "Liian monta pyyntöä." })], "Liian monta pyyntöä."],
-  ])("after %s the failure step shows %p", async (_what, outcomes, error) => {
+    ["a network error", null, [new TypeError("Failed to fetch"), new TypeError("Failed to fetch")]],
+    ["a 5xx", null, [jsonResponse(502, {}), jsonResponse(502, {})]],
+    ["an HTML 4xx from a proxy or WAF", null, [htmlResponse(403)]],
+    ["a 4xx whose JSON has no error", null, [jsonResponse(413, { message: "too large" })]],
+    ["the app's own 4xx", "Liian monta pyyntöä.", [jsonResponse(429, { error: "Liian monta pyyntöä." })]],
+  ])("after %s the failure step shows %p", async (_what, error, outcomes) => {
     const { api } = apiWith(...outcomes);
     expect(await runMatch(api, newMatchSubmission(PAYLOAD))).toEqual({ step: "match-failed", error });
   });
@@ -187,6 +190,29 @@ describe("the voter view's match handlers", () => {
     expect(state.VoterAnswers).toEqual(PAYLOAD.answers);
     expect(state.Weights).toEqual(PAYLOAD.weights);
     expect([...state.SelectedSetIds]).toEqual(PAYLOAD.questionSetIds);
+  });
+
+  test("the app's own error is shown on the failure step, and cleared on the way back", async () => {
+    const { handlers, state } = voterHandlers([jsonResponse(429, { error: "Liian monta pyyntöä." })]);
+    await handlers.finishWeighting();
+    expect(state.step).toBe("match-failed");
+    expect(state.Error).toBe("Liian monta pyyntöä.");
+    handlers.backToWeighting();
+    expect(state.Error).toBeNull();
+  });
+
+  // Start over keeps the selected sets and the research choice, so the next
+  // voter on a shared computer can send an identical payload; it must be a
+  // session of its own, or the server keeps only the first.
+  test("after a successful match, the next submission is a new session even if identical", async () => {
+    const { handlers, fetch } = voterHandlers([
+      jsonResponse(200, { results: [], question_count: 2 }),
+      jsonResponse(200, { results: [], question_count: 2 }),
+    ]);
+    await handlers.finishWeighting();
+    await handlers.finishWeighting();
+    const [first, second] = sent(fetch);
+    expect(second.sessionId).not.toBe(first.sessionId);
   });
 
   test("Show results again with nothing changed is the same session", async () => {
