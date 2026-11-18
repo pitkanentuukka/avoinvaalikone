@@ -17,6 +17,7 @@ let redis;
 let createStore;
 let consoleError;
 let outageLog;
+let connectionLog;
 let failOpenLimiter;
 
 // node-redis reconnects with backoff, at most ~2.2 s apart.
@@ -57,6 +58,7 @@ beforeAll(() => {
       redis = require("../../src/redis");
       createStore = require("../../src/middleware/rateLimitStore");
       ({ outageLog } = createStore);
+      connectionLog = require("../../src/redisConnectionLog");
       // From the same module registry, so its StoreError is the store's.
       ({ failOpenLimiter } = require("../../src/middleware/rateLimiter"));
     });
@@ -65,18 +67,24 @@ beforeAll(() => {
 });
 
 beforeEach(async () => {
-  // express-rate-limit and src/redis.js log every store and connection error.
+  // The store and the client log outages; keep them out of the test output.
   consoleError = jest.spyOn(console, "error").mockImplementation(() => {});
   server = new FakeRedis("ok");
   await server.listen(port);
   await waitReady();
-  // The store's outage log is shared, so a test that left it failing would
-  // hide the next test's first failure line.
-  outageLog.recovered();
+  // Both outage logs are shared module state: a test that left one failing,
+  // or logged a line within the last minute, would hide the next test's
+  // lines. Reset them, then forget anything logged before the test.
+  outageLog.reset();
+  connectionLog.reset();
+  consoleError.mockClear();
 });
 
 afterEach(async () => {
   await server.stop();
+  // Until the client sees the dropped connection it still reports ready, and
+  // the next test's waitReady() would return before it has reconnected.
+  for (let i = 0; i < 50 && redis.isReady; i++) await new Promise((r) => setTimeout(r, 20));
   consoleError.mockRestore();
 });
 
@@ -130,15 +138,39 @@ test("a request let through by a failing store carries no made-up rate-limit cou
   expect(Object.keys(res.headers).filter((h) => /ratelimit/i.test(h))).toEqual([]);
 });
 
-test("the store's recovery is logged once Redis answers again", async () => {
+test("the store's recovery is noted once Redis answers again", async () => {
+  // The line itself may be held for up to a minute (src/outageLog.js, tested
+  // in outageLog.test.js); the store has to report the success.
   const app = limitedApp("rl:mw:recover:");
   await stopRedis();
   expect((await request(app).get("/")).status).toBe(200);
+  expect(outageLog.isFailing()).toBe(true);
   server = new FakeRedis("ok");
   await server.listen(port);
   await waitReady();
   expect((await request(app).get("/")).status).toBe(200);
-  expect(consoleError).toHaveBeenCalledWith(expect.stringMatching(/^Rate-limit store recovered/));
+  expect(outageLog.isFailing()).toBe(false);
+});
+
+test("the client's reconnect attempts are logged once, and the reconnect noted", async () => {
+  await stopRedis();
+  // node-redis retries with backoff; give it several attempts.
+  await new Promise((resolve) => setTimeout(resolve, 2500));
+  expect(connectionLog.isFailing()).toBe(true);
+  const lines = consoleError.mock.calls.filter(([l]) => String(l).startsWith("Redis connection"));
+  expect(lines).toEqual([[expect.stringMatching(/^Redis connection failing: /)]]);
+
+  server = new FakeRedis("ok");
+  await server.listen(port);
+  await waitReady();
+  expect(connectionLog.isFailing()).toBe(false);
+});
+
+test("a reply the store can't use fails open, not with a 500", async () => {
+  server.mode = "odd";
+  const app = limitedApp("rl:mw:odd:");
+  expect((await request(app).get("/")).status).toBe(200);
+  expect(consoleError).toHaveBeenCalledWith(expect.stringMatching(/^Rate-limit store failing: increment failed \(unexpected reply/));
 });
 
 test("errors other than the store's still reach Express", async () => {

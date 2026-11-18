@@ -17,8 +17,10 @@ const { StoreError } = require("./rateLimitStore");
 // req.rateLimit: nothing that could pass for a real count.
 function failOpenLimiter(options) {
   const limiter = rateLimit({ ...options, passOnStoreError: false });
-  return (req, res, next) =>
+  const failOpen = (req, res, next) =>
     limiter(req, res, (err) => (err instanceof StoreError ? next() : next(err)));
+  // Keep the limiter's own methods reachable through the wrapper.
+  return Object.assign(failOpen, { resetKey: limiter.resetKey, getKey: limiter.getKey });
 }
 
 module.exports = { failOpenLimiter };

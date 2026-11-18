@@ -45,7 +45,8 @@ app.use(helmet({
 //
 // failOpenLimiter (src/middleware/rateLimiter.js) lets requests through when
 // Redis is unreachable or rejects a write (single instance, noeviction),
-// instead of 500ing, and logs the outage once a minute at most.
+// instead of 500ing; the outage is logged at most a line a minute
+// (src/outageLog.js).
 
 // Rate limiting for admin endpoints (strict). It only exists to stop guessing
 // ADMIN_SECRET, so requests carrying the valid secret are skipped: one admin

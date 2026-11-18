@@ -2,7 +2,7 @@
 // are enforced across backend replicas. When REDIS_URL is unset (local dev
 // without compose), callers fall back to per-process behavior.
 const { createClient } = require("redis");
-const { createOutageLog } = require("./outageLog");
+const connectionLog = require("./redisConnectionLog");
 
 let client = null;
 
@@ -24,11 +24,10 @@ if (process.env.REDIS_URL) {
     // apart) and never gives up, except after a socketTimeout, unset here.
   });
   // An error is emitted for each reconnect attempt, ~2 s apart while Redis
-  // is down: log the outage, its progress once a minute and the reconnect,
-  // not every attempt (issue #156).
-  const outageLog = createOutageLog("Redis connection");
-  client.on("error", (err) => outageLog.failure(err.message));
-  client.on("ready", () => outageLog.recovered());
+  // is down: log the outage, then at most a line a minute, including the
+  // reconnect, not every attempt (issue #156).
+  client.on("error", (err) => connectionLog.failure(err.message));
+  client.on("ready", () => connectionLog.recovered());
   client.connect().catch((err) => console.error("Redis connect failed:", err.message));
 }
 
