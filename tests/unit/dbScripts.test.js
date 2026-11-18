@@ -47,6 +47,7 @@ function fakePool({ connectError, failOn, query } = {}) {
       if (sql.includes("AS has_data")) return { rows: [{ has_data: false }] };
       return { rows: [] };
     }),
+    on: jest.fn(),
     release: jest.fn(),
   };
   const pool = {

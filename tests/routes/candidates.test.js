@@ -258,6 +258,44 @@ describe("POST /api/candidates/register/:registrationToken", () => {
     expect(db.query).toHaveBeenCalledTimes(2); // no INSERT
   });
 
+  test("lost a race with an overlapping sign-up → 409 recovery for that candidate, no token", async () => {
+    const existing = { id: CANDIDATE_ID, name: PROFILE.name, email: PROFILE.email, token: CANDIDATE_TOKEN };
+    regParty();
+    db.query.mockResolvedValueOnce({ rows: [] }); // duplicate check passes
+    db.query.mockResolvedValueOnce({ rows: [] }); // INSERT ... ON CONFLICT DO NOTHING
+    db.query.mockResolvedValueOnce({ rows: [existing] }); // the other sign-up's row
+    sendCandidateLinkEmail.mockResolvedValueOnce();
+
+    const res = await request(app).post(url).send(PROFILE);
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/lähetimme/i);
+    expect(JSON.stringify(res.body)).not.toContain(CANDIDATE_TOKEN);
+    expect(sendCandidateLinkEmail).toHaveBeenCalledWith(existing, PARTY.name, expect.any(String));
+    expect(db.query.mock.calls[2][0]).toMatch(/ON CONFLICT \(party_id, lower\(btrim\(name\)\), lower\(btrim\(email\)\)\) DO NOTHING/);
+  });
+
+  test("conflicting candidate removed before recovery → inserted on the second round", async () => {
+    regParty();
+    db.query.mockResolvedValueOnce({ rows: [] });
+    db.query.mockResolvedValueOnce({ rows: [] }); // conflict
+    db.query.mockResolvedValueOnce({ rows: [] }); // ...but that candidate is gone
+    db.query.mockResolvedValueOnce({ rows: [{ id: CANDIDATE_ID, ...PROFILE, token: CANDIDATE_TOKEN }] });
+
+    const res = await request(app).post(url).send(PROFILE);
+    expect(res.status).toBe(201);
+    expect(res.body.token).toBe(CANDIDATE_TOKEN);
+  });
+
+  test("conflict on both rounds → 409 without a token", async () => {
+    regParty();
+    for (let i = 0; i < 4; i++) db.query.mockResolvedValueOnce({ rows: [] });
+
+    const res = await request(app).post(url).send(PROFILE);
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/yhteyshenkilöä/i);
+    expect(db.query).toHaveBeenCalledTimes(5);
+  });
+
   test("invalid constituency (CHECK violation) → 400", async () => {
     regParty();
     db.query.mockResolvedValueOnce({ rows: [] });
@@ -316,6 +354,37 @@ describe("PUT /api/candidates/me/:candidateToken", () => {
     expect(res.body.bio).toBe("Bio");
     const params = db.query.mock.calls[1][1];
     expect(params[params.length - 1]).toBe(CANDIDATE_ID);
+  });
+
+  // #151: another candidate of the party already has this name and address.
+  test("name and address of another candidate in the party → 409", async () => {
+    const conflict = Object.assign(new Error("duplicate key"), {
+      code: "23505",
+      constraint: "idx_candidates_registration_identity",
+    });
+    db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
+    db.query.mockRejectedValueOnce(conflict);
+    let res = await request(app).put(url).send(PROFILE);
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/jo ehdokas/i);
+
+    db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
+    const client = buildMockClient();
+    client.query.mockImplementation(async (sql) => {
+      if (/UPDATE candidates\s+SET name/.test(sql)) throw conflict;
+      return { rows: [] };
+    });
+    res = await request(app).put(url).send({ ...PROFILE, answers: {} });
+    expect(res.status).toBe(409);
+    expect(client.query.mock.calls.map(([sql]) => sql)).toContain("ROLLBACK");
+    expect(client.release).toHaveBeenCalled();
+  });
+
+  test("other unique violations are not reported as an identity conflict", async () => {
+    db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
+    db.query.mockRejectedValueOnce(Object.assign(new Error("duplicate key"), { code: "23505", constraint: "something_else" }));
+    const res = await request(app).put(url).send(PROFILE);
+    expect(res.status).toBe(500);
   });
 
   // #17: profile and answers are saved together, so a rejected answer

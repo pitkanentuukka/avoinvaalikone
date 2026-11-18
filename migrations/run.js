@@ -17,6 +17,13 @@ async function migrate() {
     // Advisory locks are session-scoped, so all lock-protected work must run
     // on this dedicated client, not on the pool.
     client = await pool.connect();
+    // Migrations report what they changed in data (e.g. merged duplicates)
+    // with RAISE NOTICE in a DO block; pg drops notices unless they are
+    // listened for. Only those, which carry a PL/pgSQL context (`where`): the
+    // "already exists, skipping" notices of IF [NOT] EXISTS DDL are noise.
+    client.on("notice", (msg) => {
+      if (msg.where) console.log(`  NOTICE: ${msg.message}`);
+    });
     await client.query("SELECT pg_advisory_lock($1)", [MIGRATION_LOCK_ID]);
 
     await client.query(`

@@ -38,6 +38,12 @@ const frontendBaseUrl = () => process.env.CORS_ORIGIN || "http://localhost:5173"
 // Postgres CHECK violation — candidates_constituency_valid rejects anything
 // outside the 13 parliamentary constituencies.
 const CHECK_VIOLATION = "23514";
+// A profile update that would give the candidate the same name and address
+// as another candidate of their party (idx_candidates_registration_identity).
+const UNIQUE_VIOLATION = "23505";
+const isIdentityConflict = (err) =>
+  err.code === UNIQUE_VIOLATION && err.constraint === "idx_candidates_registration_identity";
+const IDENTITY_CONFLICT_ERROR = "Puolueessasi on jo ehdokas tällä nimellä ja sähköpostiosoitteella";
 
 /**
  * Validate the candidate profile fields shared by self-registration and
@@ -244,6 +250,32 @@ router.get("/register/:registrationToken", requireRegistrationToken, (req, res) 
   res.json({ party: { name: req.party.name } });
 });
 
+// Same expressions as idx_candidates_registration_identity (migration 015),
+// so the lookup uses that index. Parameters: party id, trimmed name and email.
+const FIND_REGISTRATION_SQL = `SELECT id, name, email, token FROM candidates
+       WHERE party_id = $1 AND lower(btrim(name)) = lower($2) AND lower(btrim(email)) = lower($3)`;
+
+const ALREADY_REGISTERED_ASK_PARTY =
+  "Olet jo rekisteröitynyt näillä tiedoilla. Pyydä puolueesi yhteyshenkilöä lähettämään linkkisi uudelleen.";
+
+// A repeat sign-up: email the existing link to the registered address. The
+// response never carries the token — whoever submitted the form may not be
+// the candidate.
+async function recoverRegistration(res, existing, partyName) {
+  let sent = false;
+  try {
+    await sendCandidateLinkEmail(existing, partyName, frontendBaseUrl());
+    sent = true;
+  } catch (mailErr) {
+    console.error("Ehdokaslinkin lähetys epäonnistui:", mailErr);
+  }
+  return res.status(409).json({
+    error: sent
+      ? "Olet jo rekisteröitynyt näillä tiedoilla. Lähetimme henkilökohtaisen linkkisi sähköpostiisi."
+      : ALREADY_REGISTERED_ASK_PARTY,
+  });
+}
+
 // POST /api/candidates/register/:registrationToken — candidate signs up.
 // Returns the candidate's personal token; they are visible to voters at once.
 router.post("/register/:registrationToken", requireRegistrationToken, async (req, res, next) => {
@@ -253,39 +285,35 @@ router.post("/register/:registrationToken", requireRegistrationToken, async (req
       return res.status(400).json({ error });
     }
     const { name, photoUrl, bio, email, constituency } = req.body;
+    const identity = [req.party.id, name.trim(), email.trim()];
 
     // Signing up again with the same name and address is almost always a
     // candidate who lost their link. Don't create a duplicate visible to
     // voters — send the existing link to that (already registered) address
     // instead. Matching on name too lets a party office register several
     // candidates under one shared address.
-    const { rows: existing } = await db.query(
-      `SELECT id, name, email, token FROM candidates
-       WHERE party_id = $1 AND lower(email) = lower($2) AND lower(name) = lower($3)`,
-      [req.party.id, email.trim(), name.trim()]
-    );
-    if (existing.length > 0) {
-      let sent = false;
-      try {
-        await sendCandidateLinkEmail(existing[0], req.party.name, frontendBaseUrl());
-        sent = true;
-      } catch (mailErr) {
-        console.error("Ehdokaslinkin lähetys epäonnistui:", mailErr);
+    //
+    // The unique index enforces this identity (issue #151): when an
+    // overlapping sign-up inserts first, ON CONFLICT DO NOTHING returns no
+    // row and the next round finds and recovers that candidate. A second
+    // round only inserts if that candidate was removed in between.
+    let candidate;
+    for (let attempt = 0; attempt < 2 && !candidate; attempt++) {
+      const { rows: existing } = await db.query(FIND_REGISTRATION_SQL, identity);
+      if (existing.length > 0) {
+        return recoverRegistration(res, existing[0], req.party.name);
       }
-      return res.status(409).json({
-        error: sent
-          ? "Olet jo rekisteröitynyt näillä tiedoilla. Lähetimme henkilökohtaisen linkkisi sähköpostiisi."
-          : "Olet jo rekisteröitynyt näillä tiedoilla. Pyydä puolueesi yhteyshenkilöä lähettämään linkkisi uudelleen.",
-      });
+      ({ rows: [candidate] } = await db.query(
+        `INSERT INTO candidates (party_id, name, photo_url, bio, email, constituency)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (party_id, lower(btrim(name)), lower(btrim(email))) DO NOTHING
+         RETURNING id, name, photo_url, bio, email, constituency, token, created_at`,
+        [req.party.id, name.trim(), photoUrl?.trim() || null, bio?.trim() || null, email.trim(), constituency.trim()]
+      ));
     }
-
-    const { rows } = await db.query(
-      `INSERT INTO candidates (party_id, name, photo_url, bio, email, constituency)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING id, name, photo_url, bio, email, constituency, token, created_at`,
-      [req.party.id, name.trim(), photoUrl?.trim() || null, bio?.trim() || null, email.trim(), constituency.trim()]
-    );
-    const candidate = rows[0];
+    if (!candidate) {
+      return res.status(409).json({ error: ALREADY_REGISTERED_ASK_PARTY });
+    }
     res.status(201).json(candidate);
 
     // The link is also shown on screen, so a failed email isn't fatal.
@@ -451,6 +479,9 @@ router.put("/me/:candidateToken", requireCandidateToken, async (req, res, next) 
     await rollback(client);
     if (err.code === CHECK_VIOLATION) {
       return res.status(400).json({ error: "Virheellinen vaalipiiri" });
+    }
+    if (isIdentityConflict(err)) {
+      return res.status(409).json({ error: IDENTITY_CONFLICT_ERROR });
     }
     next(err);
   } finally {
