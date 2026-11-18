@@ -140,10 +140,14 @@ introduces.
   because the deadline also counts event-loop lag on a busy replica.) The
   store keeps no script state (EVALSHA, falling back to EVAL on NOSCRIPT), so
   it works again as soon as Redis is back (issue #149). An outage is logged
-  as it starts, then at most a line a minute (a count of further failures,
-  then the recovery), with no stack traces, rather than once per request
-  (issue #156); the `Rate-limit store` and `Redis connection` logs are
-  separate, so expect both.
+  at most a line a minute, with no stack traces, rather than once per request
+  (issue #156): `failing` when it starts, `still failing` with a count, then
+  `recovered`. A recovery within a minute of the previous line is held until
+  the minute is up. An outage that starts within a minute of the previous line
+  is first logged by the first failure after that minute (`failing again: N
+  failures …`); if it is over by then, it appears only in the recovery line
+  (`failed again and recovered: N failures …`). The `Rate-limit store` and
+  `Redis connection` logs are separate, so expect both.
 - The voter-match limit is now `RATE_LIMIT_MATCH_MAX` (default **300**/min, up
   from 60). The higher default tolerates carrier CGNAT (many voters behind one
   IP) while still capping a single abuser at ~5 req/s, and is the dial for k6

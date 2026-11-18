@@ -11,8 +11,9 @@
 //   "hang"    — connects, then holds every command without answering, like a
 //               paused Redis. Setting another mode answers the held commands
 //               in order, as a resumed Redis would.
-//   "odd"     — connects, then answers every command +OK: a reply the store
-//               can't use (a Redis-compatible proxy misbehaving).
+//   "odd"     — connects, then answers every command with the raw RESP in
+//               `reply` (default +OK): a reply the store can't use (a
+//               Redis-compatible proxy misbehaving).
 
 const net = require("net");
 const crypto = require("crypto");
@@ -100,7 +101,7 @@ class FakeRedis {
     if (command === "CLIENT") return socket.write("+OK\r\n");
     if (this.#mode === "hang") return this.held.push({ socket, args });
     if (this.#mode === "loading") return socket.write("-LOADING Redis is loading the dataset in memory\r\n");
-    if (this.#mode === "odd") return socket.write("+OK\r\n");
+    if (this.#mode === "odd") return socket.write(this.reply ?? "+OK\r\n");
     if (!socket.destroyed) socket.write(this.#reply(command, args.slice(1)));
   }
 

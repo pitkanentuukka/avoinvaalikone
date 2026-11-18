@@ -98,15 +98,19 @@ async function call(operation, what, parse = (reply) => reply) {
     outageLog.recovered();
     return result;
   } catch (err) {
-    outageLog.failure(`${what} failed (${err?.message ?? err}); letting requests through without rate limiting`);
+    outageLog.failure(`${what} failed: ${err?.message ?? err}; letting requests through without rate limiting`);
     throw new StoreError(err);
   }
 }
 
+// The INCREMENT script always answers [hits >= 1, ttl > 0]; anything else is
+// a reply the store can't trust (a misbehaving Redis-compatible proxy).
 function parseIncrement(reply) {
-  const [totalHits, ttl] = Array.isArray(reply) ? reply.map(Number) : [];
-  if (!Number.isFinite(totalHits) || !Number.isFinite(ttl)) {
-    throw new Error(`unexpected reply ${JSON.stringify(reply)}`);
+  const [totalHits, ttl] = Array.isArray(reply) && reply.length === 2 && reply.every((v) => typeof v === "number")
+    ? reply
+    : [];
+  if (!(Number.isInteger(totalHits) && totalHits >= 1 && ttl > 0)) {
+    throw new Error(`unexpected reply ${String(reply).slice(0, 100)}`);
   }
   return { totalHits, resetTime: new Date(Date.now() + ttl) };
 }
