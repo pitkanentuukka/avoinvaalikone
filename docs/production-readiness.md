@@ -79,9 +79,11 @@ introduces.
 
 ### Per-replica micro-cache
 - `src/middleware/microCache.js` caches successful GET bodies in-process for 60s
-  (keyed by `originalUrl`, capped at 500 entries). It is insurance for edge cache
-  misses/purges and is **production-only** — in dev/test a 60s stale window would
-  hide a writer's own changes. 60s per replica sits inside the 300s edge TTL, so
+  (keyed by route and lowercased UUID param, ignoring the query string; capped
+  at 500 entries and 32 MiB of bodies; expired entries dropped on lookup and on
+  every store). It is insurance for edge cache misses/purges and is
+  **production-only** — in dev/test a 60s stale window would hide a writer's
+  own changes. 60s per replica sits inside the 300s edge TTL, so
   there is no cross-replica invalidation.
 
 ### Match query index
