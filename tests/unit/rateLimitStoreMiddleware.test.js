@@ -1,11 +1,10 @@
 const express = require("express");
-const rateLimit = require("express-rate-limit");
 const request = require("supertest");
 const { FakeRedis, unusedPort } = require("../helpers/fakeRedis");
 
 // The Redis-backed store behind express-rate-limit, configured like the
 // limiters in src/index.js and src/routes/candidates.js (issue #149): it
-// limits while Redis answers, and passOnStoreError lets requests through,
+// limits while Redis answers, and failOpenLimiter lets requests through,
 // quickly, while Redis is down or not answering. Uses the fake Redis; the
 // scripts themselves are checked against a real one in
 // rateLimitStoreRedis.test.js.
@@ -17,6 +16,8 @@ let port;
 let redis;
 let createStore;
 let consoleError;
+let outageLog;
+let failOpenLimiter;
 
 // node-redis reconnects with backoff, at most ~2.2 s apart.
 function waitReady(timeoutMs = 5000) {
@@ -34,13 +35,13 @@ function waitReady(timeoutMs = 5000) {
   });
 }
 
-function limitedApp(prefix) {
+function limitedApp(prefix, options = {}) {
   const app = express();
-  app.use(rateLimit({
+  app.use(failOpenLimiter({
     windowMs: 60 * 1000,
     max: 2,
     store: createStore(prefix),
-    passOnStoreError: true,
+    ...options,
   }));
   app.get("/", (req, res) => res.send("ok"));
   return app;
@@ -55,6 +56,9 @@ beforeAll(() => {
       process.env.REDIS_URL = `redis://127.0.0.1:${port}`;
       redis = require("../../src/redis");
       createStore = require("../../src/middleware/rateLimitStore");
+      ({ outageLog } = createStore);
+      // From the same module registry, so its StoreError is the store's.
+      ({ failOpenLimiter } = require("../../src/middleware/rateLimiter"));
     });
     process.env.REDIS_URL = "";
   });
@@ -66,6 +70,9 @@ beforeEach(async () => {
   server = new FakeRedis("ok");
   await server.listen(port);
   await waitReady();
+  // The store's outage log is shared, so a test that left it failing would
+  // hide the next test's first failure line.
+  outageLog.recovered();
 });
 
 afterEach(async () => {
@@ -96,9 +103,54 @@ test("lets requests through at once while Redis is down", async () => {
   for (let i = 0; i < 3; i++) expect((await request(app).get("/")).status).toBe(200);
   expect(Date.now() - started).toBeLessThan(1000);
   expect(consoleError).toHaveBeenCalledWith(
-    expect.stringContaining("allowing request without rate-limiting"),
-    expect.anything()
+    expect.stringMatching(/^Rate-limit store failing: .*without rate limiting/)
   );
+});
+
+// Issue #156: one stack trace per request filled the logs in an outage.
+test("while Redis is down the outage is logged once, without a stack trace", async () => {
+  const app = limitedApp("rl:mw:quiet:");
+  await stopRedis();
+  consoleError.mockClear();
+
+  for (let i = 0; i < 20; i++) expect((await request(app).get("/")).status).toBe(200);
+
+  const storeCalls = consoleError.mock.calls.filter(([first]) => /rate.?limit/i.test(String(first)));
+  expect(storeCalls).toHaveLength(1);
+  for (const args of consoleError.mock.calls) {
+    for (const arg of args) expect(arg).not.toBeInstanceOf(Error);
+  }
+});
+
+test("a request let through by a failing store carries no made-up rate-limit counts", async () => {
+  const app = limitedApp("rl:mw:headers:", { standardHeaders: "draft-7" });
+  await stopRedis();
+  const res = await request(app).get("/");
+  expect(res.status).toBe(200);
+  expect(Object.keys(res.headers).filter((h) => /ratelimit/i.test(h))).toEqual([]);
+});
+
+test("the store's recovery is logged once Redis answers again", async () => {
+  const app = limitedApp("rl:mw:recover:");
+  await stopRedis();
+  expect((await request(app).get("/")).status).toBe(200);
+  server = new FakeRedis("ok");
+  await server.listen(port);
+  await waitReady();
+  expect((await request(app).get("/")).status).toBe(200);
+  expect(consoleError).toHaveBeenCalledWith(expect.stringMatching(/^Rate-limit store recovered/));
+});
+
+test("errors other than the store's still reach Express", async () => {
+  const app = limitedApp("rl:mw:other:", {
+    keyGenerator: () => {
+      throw new Error("key generator broke");
+    },
+  });
+  app.use((err, req, res, next) => res.status(500).send(err.message)); // eslint-disable-line no-unused-vars
+  const res = await request(app).get("/");
+  expect(res.status).toBe(500);
+  expect(res.text).toBe("key generator broke");
 });
 
 test("lets a request through within the store timeout while Redis doesn't answer", async () => {
@@ -120,21 +172,17 @@ test("decrement doesn't reject while Redis is down", async () => {
   await stopRedis();
 
   await expect(store.decrement("client")).resolves.toBeUndefined();
-  expect(consoleError).toHaveBeenCalledWith(
-    expect.stringContaining("decrement"),
-    expect.anything()
-  );
+  expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("decrement failed"));
 });
 
 test("a limiter that uncounts failed requests survives Redis going down mid-request", async () => {
   const app = express();
   let release;
   const held = new Promise((resolve) => { release = resolve; });
-  app.use(rateLimit({
+  app.use(failOpenLimiter({
     windowMs: 60 * 1000,
     max: 2,
     store: createStore("rl:mw:skip-failed:"),
-    passOnStoreError: true,
     skipFailedRequests: true,
   }));
   app.get("/", async (req, res) => {
@@ -150,8 +198,5 @@ test("a limiter that uncounts failed requests survives Redis going down mid-requ
   expect((await response).status).toBe(500);
   // The uncounting decrement runs on "finish"; give it time to fail.
   await new Promise((resolve) => setTimeout(resolve, 200));
-  expect(consoleError).toHaveBeenCalledWith(
-    expect.stringContaining("decrement"),
-    expect.anything()
-  );
+  expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("decrement failed"));
 });
