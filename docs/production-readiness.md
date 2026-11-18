@@ -72,7 +72,9 @@ introduces.
   `no-store` so they can never be edge-cached even if a broad rule matches the
   path.
 - `scripts/verify-edge-cache.sh [host]` checks that the edge rule is actually
-  active (two requests; the second must be `cf-cache-status: HIT`). It runs in
+  active (two requests; the second must be `cf-cache-status: HIT`, and so must a
+  third with a never-seen query string, since the rule's cache key must ignore
+  the query string). It runs in
   CI after deploy as a **warning** (never fails the deploy) and belongs in the
   election-night checklist, because the Cache Rule is manual dashboard state that
   disappears silently if the zone is recreated.

@@ -201,6 +201,11 @@ ssh user@80.69.172.220 "docker compose logs backend 2>&1 | grep -E '010|already 
      ```
    - **Cache eligibility:** Eligible for cache
    - **Edge TTL:** Respect origin headers
+   - **Cache key → Query string:** Ignore query string (API: `cache_key.custom_key.query_string.exclude.all = true`).
+     These endpoints ignore the query string, and so does the micro-cache. With
+     the default cache key, each new query string (`?x=<random>`) would be a
+     separate edge entry, so every such request would miss and reach the origin
+     (#159).
 4. Save and deploy the rule.
 
 **Safety:** The rule only caches responses where the origin sends
@@ -217,6 +222,10 @@ curl -sI https://avoinvaalikone.fi/api/question-sets | grep cf-cache-status
 # Second request — served from edge
 curl -sI https://avoinvaalikone.fi/api/question-sets | grep cf-cache-status
 # cf-cache-status: HIT
+
+# A new query string is served from the same edge entry
+curl -sI "https://avoinvaalikone.fi/api/question-sets?x=$RANDOM" | grep cf-cache-status
+# cf-cache-status: HIT  (MISS means the cache key still includes the query string)
 
 # Party-token route must NOT be cached
 curl -sI https://avoinvaalikone.fi/api/candidates/party/some-token | grep cf-cache-status
