@@ -85,6 +85,7 @@ afterEach(async () => {
   // Until the client sees the dropped connection it still reports ready, and
   // the next test's waitReady() would return before it has reconnected.
   for (let i = 0; i < 50 && redis.isReady; i++) await new Promise((r) => setTimeout(r, 20));
+  if (redis.isReady) throw new Error("the Redis client didn't notice the dropped connection within 1 s");
   consoleError.mockRestore();
 });
 
@@ -166,11 +167,37 @@ test("the client's reconnect attempts are logged once, and the reconnect noted",
   expect(connectionLog.isFailing()).toBe(false);
 });
 
-test("a reply the store can't use fails open, not with a 500", async () => {
-  server.mode = "odd";
-  const app = limitedApp("rl:mw:odd:");
+test("the wrapper keeps the limiter's resetKey and getKey", async () => {
+  const limiter = failOpenLimiter({
+    windowMs: 60 * 1000,
+    max: 1,
+    store: createStore("rl:mw:methods:"),
+    keyGenerator: () => "client",
+  });
+  const app = express();
+  app.use(limiter);
+  app.get("/", (req, res) => res.send("ok"));
   expect((await request(app).get("/")).status).toBe(200);
-  expect(consoleError).toHaveBeenCalledWith(expect.stringMatching(/^Rate-limit store failing: increment failed \(unexpected reply/));
+  expect((await request(app).get("/")).status).toBe(429);
+  await limiter.resetKey("client");
+  expect((await request(app).get("/")).status).toBe(200);
+  // The store has no get(), so express-rate-limit's getKey throws; it is
+  // still the limiter's own method.
+  expect(typeof limiter.getKey).toBe("function");
+});
+
+test.each([
+  ["a count of 0", "*2\r\n:0\r\n:60000\r\n"],
+  ["no time left", "*2\r\n:1\r\n:-5\r\n"],
+  ["a status string", "+OK\r\n"],
+])("a reply with %s fails open quietly, not with a 500", async (_what, reply) => {
+  server.reply = reply;
+  server.mode = "odd";
+  const app = limitedApp("rl:mw:bad:");
+  expect((await request(app).get("/")).status).toBe(200);
+  expect(consoleError.mock.calls.map(([l]) => l)).toEqual([
+    expect.stringMatching(/^Rate-limit store failing: increment failed \(unexpected reply/),
+  ]);
 });
 
 test("errors other than the store's still reach Express", async () => {
