@@ -85,7 +85,12 @@ i.e. everything that arrives through Caddy/Cloudflare in production.
   and candidate-token routes in `src/routes/candidates.js`) share a Redis
   store when `REDIS_URL` is set, so limits are enforced across backend replicas.
   The token-route limits are 60, 100 and 300 requests per 15 minutes per IP,
-  respectively; all six limiters apply only when `NODE_ENV=production`.
+  respectively. The public reads share a seventh limiter,
+  `src/middleware/publicReadLimiter.js` (1200 per minute per IP by default),
+  mounted after the micro-cache so only reads that reach the database count:
+  without it, random candidate UUIDs (each a 404 no cache keeps, and a new URL
+  to Cloudflare) were an unthrottled database read each (#158). All seven
+  limiters apply only when `NODE_ENV=production`.
 - Falls back to per-process in-memory store when `REDIS_URL` is unset (local
   dev without compose).
 - **Match limit raised 60 → 300 req/min/IP**. Finnish carriers (DNA/Elisa/Telia)
@@ -148,6 +153,7 @@ hostname every 10 seconds. Without this, nginx pins the IPs at startup and
 |----------|---------|---------|
 | `REDIS_URL` | _(unset)_ | Redis connection string. Required for shared rate limiting across replicas. Set automatically in compose. |
 | `PG_POOL_MAX` | `10` | DB connections per backend process. `replicas × PG_POOL_MAX` must stay under Postgres `max_connections` (100). |
+| `RATE_LIMIT_PUBLIC_READ_MAX` | `1200` | Public reads per IP per minute that reach the database (micro-cache hits are free). Same parsing as `RATE_LIMIT_MATCH_MAX`. |
 | `RATE_LIMIT_MATCH_MAX` | `300` | Match requests per IP per minute. Positive safe integer only; invalid values warn at startup and fall back to 300. Unset or empty uses 300 without warning. Raise for load testing in prod mode; lower is more conservative against abuse. |
 
 ---
@@ -202,6 +208,14 @@ ssh user@80.69.172.220 "docker compose logs backend 2>&1 | grep -E '010|already 
    - **Cache eligibility:** Eligible for cache
    - **Edge TTL:** Respect origin headers
 4. Save and deploy the rule.
+
+**Recommended (optional): a Cloudflare rate-limiting rule on `/api/*`.** The
+origin limits each client IP, but a flood spread over many addresses (random
+candidate UUIDs, say) still reaches the origin. A Cloudflare rule (Security →
+WAF → Rate limiting rules) on `starts_with(http.request.uri.path, "/api/")`,
+counting per IP with a threshold well above the origin limits, stops it at
+the edge. Keep the threshold loose: carrier CGNAT puts hundreds of voters
+behind one address.
 
 **Safety:** The rule only caches responses where the origin sends
 `Cache-Control: public, s-maxage=...`. Party-token and admin routes send
@@ -310,5 +324,6 @@ for the test.
 |-----------|--------|
 | Admin approves/hides a question set and it needs to be visible immediately | Cloudflare dashboard → Caching → Purge by URL → `https://avoinvaalikone.fi/api/question-sets` |
 | Voters behind one carrier IP getting 429 | Raise `RATE_LIMIT_MATCH_MAX` in `.env`, then `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d backend`. Keep both `-f` files (without the prod overlay this recreates a single backend with `TRUST_PROXY_HOPS=1`, which puts every voter in one rate-limit bucket, and publishes port 3000 past Caddy and Cloudflare), and don't use `restart`, which keeps the old environment. All replicas are recreated at once, so expect a few seconds of 502s (the match request retries once) |
+| Many 429s on public reads (`/api/candidates*`, `/api/question-sets`) behind one IP | Raise `RATE_LIMIT_PUBLIC_READ_MAX` the same way as `RATE_LIMIT_MATCH_MAX` above. A cold edge cache (right after a purge or rule change) makes more reads reach the origin until it warms |
 | DB pool exhaustion (`waiting > 0`) | Raise `PG_POOL_MAX` in `.env` (keep `replicas × PG_POOL_MAX` under 100), then `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d backend` |
 | One backend replica unhealthy | Find the unhealthy container with `docker compose -f docker-compose.yml -f docker-compose.prod.yml ps backend`, then run `docker restart <container>` for that container only. This leaves healthy replicas running; `docker compose restart backend` restarts them all. Restart is appropriate here because no environment values changed (unlike the rows above); migrations run on startup and nginx re-resolves DNS within 10 s |

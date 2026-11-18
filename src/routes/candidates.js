@@ -5,6 +5,7 @@ const { requirePartyToken, requireCandidateToken, requireRegistrationToken } = r
 const { isValidLength, isValidUrl, isValidEmail, validateUUIDParam, isValidUUID, quoteList } = require("../middleware/validation");
 const { publicCache, noStore } = require("../middleware/cacheControl");
 const microCache = require("../middleware/microCache");
+const publicReadLimiter = require("../middleware/publicReadLimiter");
 const redisStore = require("../middleware/rateLimitStore");
 const { failOpenLimiter } = require("../middleware/rateLimiter");
 const { sendCandidateLinkEmail } = require("../email");
@@ -13,7 +14,7 @@ const router = Router();
 
 // Party, candidate and registration tokens are bearer credentials. Rate-limit
 // the token-gated routes so the token space cannot be brute-forced (public
-// candidate reads below stay unthrottled).
+// candidate reads below have the looser publicReadLimiter instead).
 function tokenLimiter(prefix, max) {
   return failOpenLimiter({
     windowMs: 15 * 60 * 1000, // 15 minutes
@@ -101,7 +102,7 @@ function answersDict(rows) {
 // ─── Public ───
 
 // GET /api/candidates — list all candidates with party info
-router.get("/", publicCache(300), microCache(), async (req, res, next) => {
+router.get("/", publicCache(300), microCache(), publicReadLimiter, async (req, res, next) => {
   try {
     const { rows } = await db.query(
       `SELECT c.id, c.name, c.photo_url, c.bio, c.constituency, c.created_at,
@@ -117,7 +118,7 @@ router.get("/", publicCache(300), microCache(), async (req, res, next) => {
 });
 
 // GET /api/candidates/:id — single candidate with all answers
-router.get("/:id", validateUUIDParam("id"), publicCache(300), microCache(), async (req, res, next) => {
+router.get("/:id", validateUUIDParam("id"), publicCache(300), microCache(), publicReadLimiter, async (req, res, next) => {
   try {
     const { rows: cRows } = await db.query(
       `SELECT c.id, c.name, c.photo_url, c.bio, c.constituency, c.created_at,

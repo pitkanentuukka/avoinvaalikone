@@ -92,3 +92,36 @@ test("outside production public reads are not limited", async () => {
     expect((await request(app).get(randomCandidate())).status).toBe(404);
   }
 });
+
+test("with the rate-limit store failing, public reads still go through", async () => {
+  // As with Redis down: every store call fails (src/middleware/rateLimiter.js
+  // fails open on the store's StoreError).
+  let failingApp;
+  let failingDb;
+  jest.isolateModules(() => {
+    jest.doMock("../../src/middleware/rateLimitStore", () => {
+      class StoreError extends Error {}
+      const createStore = (prefix) => ({
+        prefix,
+        localKeys: false,
+        init() {},
+        increment: async () => {
+          throw new StoreError("Redis down");
+        },
+        decrement: async () => {},
+        resetKey: async () => {},
+      });
+      createStore.StoreError = StoreError;
+      return createStore;
+    });
+    failingDb = require("../../src/db/pool");
+    failingApp = require("../../src/index");
+  });
+  jest.dontMock("../../src/middleware/rateLimitStore");
+  failingDb.query.mockResolvedValue({ rows: [] });
+
+  for (let i = 0; i < LIMIT * 2; i++) {
+    expect((await request(failingApp).get(randomCandidate())).status).toBe(404);
+  }
+  expect((await request(failingApp).get("/api/question-sets")).status).toBe(200);
+});
