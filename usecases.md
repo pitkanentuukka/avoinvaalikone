@@ -346,7 +346,7 @@ All limits apply only in production (`NODE_ENV=production`).
 - Admin endpoints: 30 req / 15 min, counting only requests without a valid admin token
 - NGO submission: 20 req / 15 min
 - Voter match: 300 req / 1 min by default (`RATE_LIMIT_MATCH_MAX`)
-- Public reads (candidates, question sets): 1200 req / 1 min by default (`RATE_LIMIT_PUBLIC_READ_MAX`), counting only reads that reach the database
+- Public reads (candidates, question sets): 300 failed reads / 1 min by default (`RATE_LIMIT_PUBLIC_READ_MAX`), counting only failed reads (e.g. unknown candidate ids) that reach the database
 - Exceeding limits -> 429 with Finnish error message
 
 ### CC-3: Input Validation

@@ -77,6 +77,8 @@ const submissionLimiter = failOpenLimiter({
 // endpoint. RATE_LIMIT_MATCH_MAX is the election-night dial, and is also
 // needed to run k6 load tests against a production-mode deployment.
 const matchLimiter = failOpenLimiter({
+  // The policy name (only sent in draft-8 RateLimit-Policy headers, which
+  // are off); tests/unit/matchRateLimit.test.js finds the limiter by it.
   identifier: "match",
   windowMs: 1 * 60 * 1000, // 1 minute
   max: limitFromEnv("RATE_LIMIT_MATCH_MAX", 300),
