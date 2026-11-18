@@ -116,6 +116,23 @@ describe("saveOwnProfile", () => {
   });
 });
 
+describe("error messages", () => {
+  const htmlResponse = (status) => ({ ok: false, status, json: async () => { throw new SyntaxError("Unexpected token <"); } });
+  test.each([
+    ["an HTML body", htmlResponse(403), "Server error", false],
+    ["a JSON body without error", jsonResponse(413, { message: "too large" }), "HTTP 413", false],
+    ["a JSON null body", jsonResponse(400, null), "Server error", false],
+    ["an empty JSON error", jsonResponse(400, { error: "" }), "HTTP 400", false],
+    ["the app's JSON error", jsonResponse(429, { error: "Liian monta pyyntöä." }), "Liian monta pyyntöä.", true],
+  ])("%s gives the message %p (serverMessage %p)", async (_what, response, message, serverMessage) => {
+    const { api } = apiWith(response);
+    const err = await api.submitQuestionSet({}).catch((e) => e);
+    expect(err.message).toBe(message);
+    expect(err.status).toBe(response.status);
+    expect(err.serverMessage).toBe(serverMessage);
+  });
+});
+
 describe("voterMatch", () => {
   const sentBody = (fetch, call) => JSON.parse(fetch.mock.calls[call][1].body);
 
