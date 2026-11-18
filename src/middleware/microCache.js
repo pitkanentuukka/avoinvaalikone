@@ -6,10 +6,17 @@
 //
 // Memory is bounded by entry count and by the bytes of the retained bodies,
 // and expired entries are dropped rather than left until evicted (issue #150).
+// When a bound is hit, the least recently used entry goes first, so a walk
+// over many candidate pages can't push out the list everyone reads (#160).
 const DEFAULT_TTL_MS = 60_000;
-const MAX_ENTRIES = 500;
+// Room for every one of the ~2,500 public candidate pages, twice over, plus
+// the list and the question sets: the cap must not be below the number of
+// distinct cacheable URLs, or a cyclic walk over them never hits.
+const MAX_ENTRIES = 5000;
 // The full candidate list (~2,500 candidates with 1,000-character bios) is a
-// few MB, so this leaves room for it plus hundreds of single candidates.
+// few MB. A candidate page is a few KB, but with long answer explanations
+// (up to 500 characters each) on every question all of them may not fit; the
+// budget then decides, and LRU keeps the ones being read.
 const MAX_BYTES = 32 * 1024 * 1024;
 
 // One key per resource, not per URL: the cached endpoints ignore the query
@@ -33,7 +40,9 @@ function createMicroCache({ maxEntries = MAX_ENTRIES, maxBytes = MAX_BYTES } = {
   // held: a JS string holding any non-Latin-1 character (an en dash or emoji
   // in one bio) takes two bytes per character, double its UTF-8 length, and
   // Buffer.from() would put a small body in a shared 8 KiB pool slab.
-  const store = new Map(); // key -> { body: Buffer, expires }, oldest first
+  // A Map iterates in insertion order; a hit re-inserts its key, so the
+  // first key is always the least recently used.
+  const store = new Map(); // key -> { body: Buffer, expires }
   let totalBytes = 0;
 
   function remove(key) {
@@ -76,6 +85,8 @@ function createMicroCache({ maxEntries = MAX_ENTRIES, maxBytes = MAX_BYTES } = {
     const hit = store.get(key);
     if (hit) {
       if (hit.expires > Date.now()) {
+        store.delete(key);
+        store.set(key, hit);
         return res.set("X-Micro-Cache", "HIT").type("json").send(hit.body);
       }
       remove(key);
