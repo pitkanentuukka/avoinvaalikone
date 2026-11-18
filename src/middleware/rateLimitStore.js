@@ -83,20 +83,32 @@ const outageLog = createOutageLog("Rate-limit store");
 // express-rate-limit's passOnStoreError logs; the outage log has the message.
 class StoreError extends Error {
   constructor(cause) {
-    super(cause?.message ?? String(cause));
+    super(cause?.message ?? String(cause), { cause });
     this.name = "StoreError";
   }
 }
 
-async function call(operation, what) {
+// Runs one store operation against Redis. Every way it can fail, including a
+// reply it can't use (parse throws), becomes a StoreError, so the limiter
+// fails open rather than 500ing. Whichever operation fails first, the line
+// says what failing means for requests.
+async function call(operation, what, parse = (reply) => reply) {
   try {
-    const result = await withTimeout(operation());
+    const result = parse(await withTimeout(operation()));
     outageLog.recovered();
     return result;
   } catch (err) {
-    outageLog.failure(`${what}: ${err?.message ?? err}`);
+    outageLog.failure(`${what} failed (${err?.message ?? err}); letting requests through without rate limiting`);
     throw new StoreError(err);
   }
+}
+
+function parseIncrement(reply) {
+  const [totalHits, ttl] = Array.isArray(reply) ? reply.map(Number) : [];
+  if (!Number.isFinite(totalHits) || !Number.isFinite(ttl)) {
+    throw new Error(`unexpected reply ${JSON.stringify(reply)}`);
+  }
+  return { totalHits, resetTime: new Date(Date.now() + ttl) };
 }
 
 class RedisStore {
@@ -112,11 +124,7 @@ class RedisStore {
   }
 
   async increment(key) {
-    const [totalHits, ttl] = await call(
-      () => runScript(INCREMENT, this.prefix + key, String(this.windowMs)),
-      "increment failed, letting requests through without rate limiting"
-    );
-    return { totalHits: Number(totalHits), resetTime: new Date(Date.now() + Number(ttl)) };
+    return call(() => runScript(INCREMENT, this.prefix + key, String(this.windowMs)), "increment", parseIncrement);
   }
 
   // express-rate-limit awaits this inside response "finish"/"close"/"error"
@@ -125,14 +133,14 @@ class RedisStore {
   // Missing one uncount only leaves a hit counted.
   async decrement(key) {
     try {
-      await call(() => runScript(DECREMENT, this.prefix + key), "decrement failed");
+      await call(() => runScript(DECREMENT, this.prefix + key), "decrement");
     } catch {
       // Logged by call().
     }
   }
 
   async resetKey(key) {
-    await call(() => redis.sendCommand(["DEL", this.prefix + key]), "reset failed");
+    await call(() => redis.sendCommand(["DEL", this.prefix + key]), "reset");
   }
 }
 
