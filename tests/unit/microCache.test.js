@@ -182,7 +182,7 @@ test("the cache is off outside production", async () => {
   expect(microCache.stats().entries).toBe(0);
 });
 
-test("the entry limit evicts the oldest entries", async () => {
+test("the entry limit evicts the least recently used entries", async () => {
   const microCache = createMicroCache({ maxEntries: 3 });
   const { app, calls } = buildApp(microCache);
   const ids = Array.from({ length: 10 }, (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`);
@@ -191,7 +191,7 @@ test("the entry limit evicts the oldest entries", async () => {
     expect((await request(app).get(`/api/candidates/${id}`)).status).toBe(200);
     expect(microCache.stats().entries).toBeLessThanOrEqual(3);
   }
-  // The newest three are still cached, the oldest was evicted.
+  // The newest three are still cached, the oldest (never hit) was evicted.
   for (const id of ids.slice(-3)) {
     expect((await request(app).get(`/api/candidates/${id}`)).headers["x-micro-cache"]).toBe("HIT");
   }
@@ -314,4 +314,123 @@ test("RegExp and array routes pass through uncached", async () => {
   expect((await request(app).get("/api/candidates/x")).body).toEqual({ route: "/x" });
   expect((await request(app).get("/api/candidates/y")).body).toEqual({ route: "/y" });
   expect(microCache.stats().entries).toBe(0);
+});
+
+// Issue #160: eviction was oldest-first by insertion, and a hit didn't
+// refresh an entry, so with the 500-entry cap a walk over ~500 distinct
+// candidate pages pushed the candidate list (the most expensive entry) out,
+// and a cyclic walk over all ~2,500 candidates never hit at all.
+const CANDIDATES = 2500; // the expected candidate count, all ids public
+const candidateId = (i) => `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`;
+
+describe("eviction under the default limits", () => {
+  let server;
+  afterEach((done) => {
+    const s = server;
+    server = undefined;
+    s ? s.close(done) : done();
+  });
+
+  test("500 candidate reads don't evict the candidate list", async () => {
+    const { app, calls } = buildApp(createMicroCache());
+    server = app.listen(0);
+
+    expect((await request(server).get("/api/candidates")).status).toBe(200);
+    for (let i = 0; i < 500; i++) {
+      expect((await request(server).get(`/api/candidates/${candidateId(i)}`)).status).toBe(200);
+    }
+    const res = await request(server).get("/api/candidates");
+    expect(res.headers["x-micro-cache"]).toBe("HIT");
+    expect(calls.list).toBe(1);
+  });
+
+  test("a second walk over every candidate page is served from the cache", async () => {
+    const { app, calls } = buildApp(createMicroCache());
+    server = app.listen(0);
+
+    expect((await request(server).get("/api/candidates")).status).toBe(200);
+    for (let pass = 0; pass < 2; pass++) {
+      for (let i = 0; i < CANDIDATES; i++) {
+        expect((await request(server).get(`/api/candidates/${candidateId(i)}`)).status).toBe(200);
+      }
+    }
+    expect(calls.one).toBe(CANDIDATES);
+    expect((await request(server).get("/api/candidates")).headers["x-micro-cache"]).toBe("HIT");
+  }, 60_000);
+});
+
+test("a hit makes an entry the last to be evicted by the entry limit", async () => {
+  const microCache = createMicroCache({ maxEntries: 3 });
+  const { app, calls } = buildApp(microCache);
+  const get = (path) => request(app).get(path);
+
+  await get("/api/candidates"); // oldest
+  await get(`/api/candidates/${candidateId(1)}`);
+  await get(`/api/candidates/${candidateId(2)}`);
+  expect((await get("/api/candidates")).headers["x-micro-cache"]).toBe("HIT");
+  await get(`/api/candidates/${candidateId(3)}`); // evicts id 1, not the list
+
+  expect((await get("/api/candidates")).headers["x-micro-cache"]).toBe("HIT");
+  expect(calls.list).toBe(1);
+  expect((await get(`/api/candidates/${candidateId(1)}`)).headers["x-micro-cache"]).toBeUndefined();
+});
+
+test("a hit makes an entry the last to be evicted by the byte budget", async () => {
+  // Each body is a little over 1000 bytes; the budget fits three of them.
+  const microCache = createMicroCache({ maxBytes: 3500 });
+  const candidates = express.Router();
+  let runs = 0;
+  candidates.get("/:id", microCache(), (req, res) => {
+    runs++;
+    res.json({ id: req.params.id, bio: "x".repeat(1000) });
+  });
+  const app = express();
+  app.use("/api/candidates", candidates);
+  const get = (i) => request(app).get(`/api/candidates/${candidateId(i)}`);
+
+  await get(0);
+  await get(1);
+  await get(2);
+  expect((await get(0)).headers["x-micro-cache"]).toBe("HIT");
+  await get(3); // evicts 1, the least recently used
+
+  expect((await get(0)).headers["x-micro-cache"]).toBe("HIT");
+  expect((await get(1)).headers["x-micro-cache"]).toBeUndefined();
+  expect(runs).toBe(5);
+});
+
+test("a hit doesn't extend an entry's lifetime", async () => {
+  const microCache = createMicroCache();
+  const { app, calls } = buildApp(microCache);
+  let now = 1_000_000;
+  jest.spyOn(Date, "now").mockImplementation(() => now);
+
+  await request(app).get("/api/candidates");
+  now += 30_000;
+  expect((await request(app).get("/api/candidates")).headers["x-micro-cache"]).toBe("HIT");
+  now += 31_000; // 61 s after it was stored, 31 s after the hit
+  expect((await request(app).get("/api/candidates")).headers["x-micro-cache"]).toBeUndefined();
+  expect(calls.list).toBe(2);
+});
+
+test("expired entries are still reclaimed after an early entry is replaced", async () => {
+  // The skipped sweep relies on the earliest expiry; replacing the entry
+  // that set it must not stop later entries from being reclaimed.
+  const microCache = createMicroCache();
+  const { app } = buildApp(microCache);
+  let now = 1_000_000;
+  jest.spyOn(Date, "now").mockImplementation(() => now);
+  const get = (path) => request(app).get(path);
+
+  await get("/api/candidates"); // expires at +60 s
+  now += 30_000;
+  await get(`/api/candidates/${ID}`); // expires at +90 s
+  now += 31_000;
+  await get("/api/candidates"); // expired: replaced, now expires at +121 s
+  expect(microCache.stats().entries).toBe(2);
+
+  now += 30_000; // +91 s: the candidate page has expired
+  await get("/api/question-sets");
+  expect(microCache.stats().entries).toBe(2); // the list and the sets
+  expect((await get(`/api/candidates/${ID}`)).headers["x-micro-cache"]).toBeUndefined();
 });
