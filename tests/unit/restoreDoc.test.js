@@ -4,11 +4,12 @@
 // operator's host shell normally has neither, so they must expand inside the
 // container, not in the host shell before `docker compose exec` runs.
 //
-// The test runs the doc's bash block under /bin/sh with a stub `docker` that
-// behaves like `docker compose exec <service> <argv…>`: it runs argv directly
-// (no shell, as exec does) with the backup container's environment. rclone,
-// pg_restore and rm are stubs that record their arguments; nothing real is
-// touched.
+// The test runs each of the doc's bash blocks under /bin/sh with a stub
+// `docker` that behaves like `docker compose exec <service> <argv…>`: it runs
+// argv directly (no shell, as exec does) with the backup container's
+// environment. rclone,
+// pg_restore, psql and rm are stubs that record their arguments; nothing real
+// is touched.
 
 const { spawnSync } = require("child_process");
 const fs = require("fs");
@@ -39,20 +40,18 @@ shift 2
 exec env BACKUP_BUCKET="$STUB_BUCKET" DATABASE_URL="$STUB_DB_URL" "$@"
 `;
 
-function runDoc() {
+function runBlock(block) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "restore-doc-"));
   const bin = path.join(dir, "bin");
   fs.mkdirSync(bin);
-  for (const name of ["rclone", "pg_restore", "rm"]) {
+  for (const name of ["rclone", "pg_restore", "psql", "rm"]) {
     fs.writeFileSync(path.join(bin, name), RECORDER, { mode: 0o755 });
   }
   fs.writeFileSync(path.join(bin, "docker"), DOCKER_STUB, { mode: 0o755 });
   const log = path.join(dir, "log");
   fs.writeFileSync(log, "");
 
-  const script = bashBlocks(fs.readFileSync(DOC, "utf8"))
-    .join("\n")
-    .replaceAll("<stamp>", STAMP);
+  const script = block.replaceAll("<stamp>", STAMP);
 
   const env = {
     PATH: `${bin}:/usr/bin:/bin`,
@@ -73,33 +72,46 @@ function runDoc() {
   return { res, calls };
 }
 
-describe("scripts/backup/restore.md", () => {
+const blocks = bashBlocks(fs.readFileSync(DOC, "utf8"));
+const LIVE = CONTAINER_DB_URL;
+const DRILL = CONTAINER_DB_URL.replace(/\/[^/]*$/, "/restore_drill");
+
+function dbTarget(call) {
+  const i = call.args.indexOf("-d");
+  return i >= 0 ? call.args[i + 1] : call.args[0];
+}
+
+test("the doc has the restore and the drill blocks", () => {
+  expect(blocks).toHaveLength(2);
+});
+
+describe.each([
+  ["restore", 0],
+  ["drill", 1],
+])("%s block", (_name, index) => {
   let res, calls;
   beforeAll(() => {
-    ({ res, calls } = runDoc());
+    ({ res, calls } = runBlock(blocks[index]));
   });
 
-  test("the commands run as written", () => {
+  test("runs as written", () => {
     expect(res.stderr).toBe("");
     expect(res.status).toBe(0);
   });
 
-  test("rclone fetches from the bucket configured in the backup container", () => {
+  test("rclone reads the bucket configured in the backup container", () => {
     const rclone = calls.filter((c) => c.name === "rclone");
-    expect(rclone).toHaveLength(1);
-    expect(rclone[0].args).toEqual([
+    expect(rclone.length).toBeGreaterThan(0);
+    for (const c of rclone) {
+      expect(c.args[1]).toMatch(new RegExp(`^upcloud:${BUCKET}/postgres/`));
+    }
+    const copy = rclone.filter((c) => c.args[0] === "copy");
+    expect(copy).toHaveLength(1);
+    expect(copy[0].args).toEqual([
       "copy",
       `upcloud:${BUCKET}/postgres/vaalikone-${STAMP}.dump`,
       "/backups/restore/",
     ]);
-  });
-
-  test("pg_restore restores into the database the backup container points at", () => {
-    const restore = calls.filter((c) => c.name === "pg_restore");
-    expect(restore).toHaveLength(1);
-    const { args } = restore[0];
-    expect(args[args.indexOf("-d") + 1]).toBe(CONTAINER_DB_URL);
-    expect(args).toContain(`/backups/restore/vaalikone-${STAMP}.dump`);
   });
 
   test("every container command goes to the backup service", () => {
@@ -109,4 +121,32 @@ describe("scripts/backup/restore.md", () => {
     expect(execs.length).toBeGreaterThan(0);
     expect(new Set(execs)).toEqual(new Set(["backup"]));
   });
+
+  test("pg_restore reads the fetched dump", () => {
+    const restore = calls.filter((c) => c.name === "pg_restore");
+    expect(restore).toHaveLength(1);
+    expect(restore[0].args).toContain(`/backups/restore/vaalikone-${STAMP}.dump`);
+  });
+});
+
+test("the restore goes into the database the backup container points at", () => {
+  const { calls } = runBlock(blocks[0]);
+  const restore = calls.filter((c) => c.name === "pg_restore");
+  expect(dbTarget(restore[0])).toBe(LIVE);
+});
+
+test("the drill restores into the scratch database, never the live one", () => {
+  const { calls } = runBlock(blocks[1]);
+  const restore = calls.filter((c) => c.name === "pg_restore");
+  expect(dbTarget(restore[0])).toBe(DRILL);
+  expect(restore[0].args).not.toContain("--clean");
+
+  const psql = calls.filter((c) => c.name === "psql");
+  const sql = psql.map((c) => [dbTarget(c), c.args[c.args.indexOf("-c") + 1]]);
+  expect(sql).toEqual([
+    [LIVE, "CREATE DATABASE restore_drill"],
+    [DRILL, "SELECT count(*) FROM candidates"],
+    [LIVE, "SELECT count(*) FROM candidates"],
+    [LIVE, "DROP DATABASE restore_drill"],
+  ]);
 });
