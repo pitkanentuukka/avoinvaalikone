@@ -7,9 +7,10 @@
 //
 // The test runs the doc's bash blocks under /bin/sh with a stub `docker` that
 // behaves like `docker compose exec <service> <argv…>`: it runs argv directly
-// (no shell, as exec does) with the backup container's environment. rclone,
-// pg_restore, psql and rm are stubs that record their arguments, and whether
-// they ran inside the "container"; nothing real is touched.
+// (no shell, as exec does) with the backup container's environment, and runs
+// `sh` as busybox sh, the container's shell, when busybox is installed.
+// rclone, pg_restore, psql and rm are stubs that record their arguments, and
+// whether they ran inside the "container"; nothing real is touched.
 
 const { spawnSync } = require("child_process");
 const fs = require("fs");
@@ -46,6 +47,7 @@ const DOCKER_STUB = `#!/bin/sh
 while [ $# -gt 0 ] && [ "$1" != exec ]; do shift; done
 [ $# -eq 0 ] && exit 0
 shift 2
+if [ "$1" = sh ] && command -v busybox > /dev/null; then shift; set -- busybox sh "$@"; fi
 exec env STUB_IN_CONTAINER=container BACKUP_BUCKET="$STUB_BUCKET" DATABASE_URL="$STUB_DB_URL" "$@"
 `;
 
@@ -141,14 +143,52 @@ describe.each(Object.keys(runs))("%s block", (name) => {
   });
 
   test("pg_restore reads the fetched dump", () => {
-    expect(of("pg_restore")).toHaveLength(1);
-    expect(pgRestore(name).args.at(-1)).toBe(DUMP);
+    expect(of("pg_restore").length).toBeGreaterThan(0);
+    for (const c of of("pg_restore")) expect(c.args.at(-1)).toBe(DUMP);
   });
 
   test("the fetched dump is removed at the end", () => {
     expect(of("rm").map((c) => c.args)).toEqual([["-rf", "/backups/restore"]]);
     expect(calls.at(-1).name).toBe("rm");
   });
+});
+
+// Each call as one string: the tool, then its db target or docker subcommand.
+function sequence(name) {
+  return runs[name].calls.map((c) => {
+    if (c.name === "docker") {
+      const i = c.args.findIndex((a) => ["exec", "stop", "start"].includes(a));
+      return `docker ${c.args[i]} ${c.args[i + 1]}`;
+    }
+    if (c.name === "psql") return `psql ${dbTarget(c)} ${c.args[c.args.indexOf("-c") + 1]}`;
+    if (c.name === "pg_restore") return `pg_restore ${dbTarget(c)}`;
+    return `${c.name} ${c.args[0]}`;
+  }).filter((step) => !step.startsWith("docker exec"));
+}
+
+test("the restore runs its steps in order, with the backends stopped", () => {
+  expect(sequence("restore")).toEqual([
+    "rclone copy",
+    "docker stop backend",
+    `pg_restore ${LIVE}`,
+    "docker start backend",
+    "rm -rf",
+  ]);
+});
+
+test("the drill runs its steps in order and leaves the backends running", () => {
+  expect(sequence("drill")).toEqual([
+    "rclone lsf",
+    "rclone copy",
+    `psql ${LIVE} DROP DATABASE IF EXISTS restore_drill WITH (FORCE)`,
+    `psql ${LIVE} CREATE DATABASE restore_drill`,
+    `pg_restore ${DRILL}`,
+    `pg_restore ${DRILL}`, // again, into a populated database, as step 3
+    `psql ${DRILL} SELECT count(*) FROM candidates`,
+    `psql ${LIVE} SELECT count(*) FROM candidates`,
+    `psql ${LIVE} DROP DATABASE IF EXISTS restore_drill WITH (FORCE)`,
+    "rm -rf",
+  ]);
 });
 
 test("the restore goes into the database the backup container points at", () => {
@@ -165,19 +205,6 @@ describe("drill", () => {
     expect(flags(pgRestore("drill"))).toEqual([
       ...flags(pgRestore("restore")),
       "--exit-on-error",
-    ]);
-  });
-
-  test("is re-runnable and cleans up its scratch database", () => {
-    const sql = runs.drill.calls
-      .filter((c) => c.name === "psql")
-      .map((c) => [dbTarget(c), c.args[c.args.indexOf("-c") + 1]]);
-    expect(sql).toEqual([
-      [LIVE, "DROP DATABASE IF EXISTS restore_drill"],
-      [LIVE, "CREATE DATABASE restore_drill"],
-      [DRILL, "SELECT count(*) FROM candidates"],
-      [LIVE, "SELECT count(*) FROM candidates"],
-      [LIVE, "DROP DATABASE restore_drill"],
     ]);
   });
 });

@@ -44,20 +44,24 @@ newest bucket dump into a scratch database, `restore_drill`, next to the live
 one: the backends keep running and the live database isn't touched.
 
 ```bash
-# 1. Pick the newest dump in the bucket and fetch it as in step 1 above.
+# 1. Print the newest dump's <stamp> and fetch it as in step 1 above.
 docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backup \
-  sh -c 'rclone lsf "upcloud:$BACKUP_BUCKET/postgres/" | sort | tail -n 1'
+  sh -c 'rclone lsf "upcloud:$BACKUP_BUCKET/postgres/" | sort | tail -n 1 | sed "s/^vaalikone-//; s/\.dump\$//"'
 docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backup \
   sh -c 'rclone copy "upcloud:$BACKUP_BUCKET/postgres/vaalikone-<stamp>.dump" /backups/restore/'
 
 # 2. Restore it into a fresh scratch database, with step 3's flags plus
-#    --exit-on-error so a bad dump stops the drill. The DROP clears a
-#    restore_drill left over from an interrupted drill. ${DATABASE_URL%/*} is
-#    the server URL without the database name (the URL has no ?query part).
+#    --exit-on-error so a bad dump stops the drill, then restore it again:
+#    the second pass runs into a populated database, so its --clean drops
+#    run as they do in step 3. The DROP clears a restore_drill left over from
+#    an interrupted drill. ${DATABASE_URL%/*} is the server URL without the
+#    database name (the URL has no ?query part).
 docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backup \
-  sh -c 'psql "$DATABASE_URL" -c "DROP DATABASE IF EXISTS restore_drill"'
+  sh -c 'psql "$DATABASE_URL" -c "DROP DATABASE IF EXISTS restore_drill WITH (FORCE)"'
 docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backup \
   sh -c 'psql "$DATABASE_URL" -c "CREATE DATABASE restore_drill"'
+docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backup \
+  sh -c 'pg_restore --clean --if-exists --exit-on-error -d "${DATABASE_URL%/*}/restore_drill" /backups/restore/vaalikone-<stamp>.dump'
 docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backup \
   sh -c 'pg_restore --clean --if-exists --exit-on-error -d "${DATABASE_URL%/*}/restore_drill" /backups/restore/vaalikone-<stamp>.dump'
 
@@ -70,7 +74,7 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backup \
 
 # 4. Clean up. Also after a failed drill.
 docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backup \
-  sh -c 'psql "$DATABASE_URL" -c "DROP DATABASE restore_drill"'
+  sh -c 'psql "$DATABASE_URL" -c "DROP DATABASE IF EXISTS restore_drill WITH (FORCE)"'
 docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backup \
   rm -rf /backups/restore
 ```
