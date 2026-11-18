@@ -98,7 +98,7 @@ async function call(operation, what, parse = (reply) => reply) {
     outageLog.recovered();
     return result;
   } catch (err) {
-    outageLog.failure(`${what} failed (${err?.message ?? err}); letting requests through without rate limiting`);
+    outageLog.failure(`${what} failed: ${err?.message ?? err}; letting requests through without rate limiting`);
     throw new StoreError(err);
   }
 }

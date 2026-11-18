@@ -142,9 +142,11 @@ introduces.
   it works again as soon as Redis is back (issue #149). An outage is logged
   at most a line a minute, with no stack traces, rather than once per request
   (issue #156): `failing` when it starts, `still failing` with a count, then
-  `recovered`. A line that would come within a minute of the previous one is
-  held, so the first line of an outage soon after the last (`failing again`)
-  or the recovery can be up to a minute late. The `Rate-limit store` and
+  `recovered`. A recovery within a minute of the previous line is held until
+  the minute is up. An outage that starts within a minute of the previous line
+  is first logged by the first failure after that minute (`failing again: N
+  failures …`); if it is over by then, it appears only in the recovery line
+  (`failed again and recovered: N failures …`). The `Rate-limit store` and
   `Redis connection` logs are separate, so expect both.
 - The voter-match limit is now `RATE_LIMIT_MATCH_MAX` (default **300**/min, up
   from 60). The higher default tolerates carrier CGNAT (many voters behind one

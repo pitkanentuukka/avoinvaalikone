@@ -196,7 +196,7 @@ test.each([
   const app = limitedApp("rl:mw:bad:");
   expect((await request(app).get("/")).status).toBe(200);
   expect(consoleError.mock.calls.map(([l]) => l)).toEqual([
-    expect.stringMatching(/^Rate-limit store failing: increment failed \(unexpected reply/),
+    expect.stringMatching(/^Rate-limit store failing: increment failed: unexpected reply/),
   ]);
 });
 
