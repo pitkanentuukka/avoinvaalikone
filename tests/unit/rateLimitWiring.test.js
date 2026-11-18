@@ -7,7 +7,7 @@ const { unusedPort } = require("../helpers/fakeRedis");
 // (issue #149). Each request below goes through one limiter and is answered
 // without the database, so its status shows what the limiter did: the
 // route's own 4xx when it let the request through, a 500 when the store
-// error reached Express (a limiter without passOnStoreError).
+// error reached Express (a limiter that doesn't fail open).
 //
 // While Redis is down, the outage is logged a bounded number of times and
 // without stack traces, not once per request (issue #156): at election-night

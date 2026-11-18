@@ -129,8 +129,8 @@ introduces.
   `src/middleware/rateLimitStore.js` is a Redis-backed store so limits
   hold **across replicas** instead of multiplying by the replica count. Without
   `REDIS_URL` (local dev) limiters fall back to per-process memory.
-- All limiters set `passOnStoreError: true` — they **fail open** if Redis is
-  unreachable: no limit applies until it is back (there is no per-process
+- All limiters are built with `failOpenLimiter` (`src/middleware/rateLimiter.js`)
+  — they **fail open** if Redis is unreachable: no limit applies until it is back (there is no per-process
   fallback then). Losing rate limiting during a Redis outage is far better
   than dropping the voter-match endpoint on election night. Failing open is
   fast: while disconnected, Redis commands are rejected at once (no offline
@@ -139,7 +139,9 @@ introduces.
   answering; past that, requests fail open at once. (2 s rather than less,
   because the deadline also counts event-loop lag on a busy replica.) The
   store keeps no script state (EVALSHA, falling back to EVAL on NOSCRIPT), so
-  it works again as soon as Redis is back (issue #149).
+  it works again as soon as Redis is back (issue #149). An outage is logged
+  once when it starts, then at most once a minute with a count, and once on
+  recovery, with no stack traces, rather than once per request (issue #156).
 - The voter-match limit is now `RATE_LIMIT_MATCH_MAX` (default **300**/min, up
   from 60). The higher default tolerates carrier CGNAT (many voters behind one
   IP) while still capping a single abuser at ~5 req/s, and is the dial for k6

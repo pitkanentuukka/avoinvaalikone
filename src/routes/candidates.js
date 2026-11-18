@@ -1,5 +1,4 @@
 const { Router } = require("express");
-const rateLimit = require("express-rate-limit");
 const db = require("../db/pool");
 const { begin, commit, rollback } = require("../db/transaction");
 const { requirePartyToken, requireCandidateToken, requireRegistrationToken } = require("../middleware/auth");
@@ -7,6 +6,7 @@ const { isValidLength, isValidUrl, isValidEmail, validateUUIDParam, isValidUUID,
 const { publicCache, noStore } = require("../middleware/cacheControl");
 const microCache = require("../middleware/microCache");
 const redisStore = require("../middleware/rateLimitStore");
+const { failOpenLimiter } = require("../middleware/rateLimiter");
 const { sendCandidateLinkEmail } = require("../email");
 
 const router = Router();
@@ -15,15 +15,15 @@ const router = Router();
 // the token-gated routes so the token space cannot be brute-forced (public
 // candidate reads below stay unthrottled).
 function tokenLimiter(prefix, max) {
-  return rateLimit({
+  return failOpenLimiter({
     windowMs: 15 * 60 * 1000, // 15 minutes
     max,
     message: { error: "Liian monta pyyntöä. Yritä myöhemmin uudelleen." },
     skip: (req) => process.env.NODE_ENV !== "production",
     store: redisStore(prefix),
-    // Fail open on Redis errors: tokens are high-entropy, so a transient outage
-    // dropping the brute-force cap is a lesser evil than 500ing candidate edits.
-    passOnStoreError: true,
+    // Fails open on Redis errors: tokens are high-entropy, so a transient
+    // outage dropping the brute-force cap is a lesser evil than 500ing
+    // candidate edits.
   });
 }
 

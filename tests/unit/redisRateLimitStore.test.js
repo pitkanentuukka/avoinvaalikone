@@ -6,7 +6,7 @@ const { FakeRedis, unusedPort } = require("../helpers/fakeRedis");
 // Redis (issue #149). rate-limit-redis, which it used to be, loaded its
 // scripts when the store was constructed and only awaited them on the first
 // request, so a load that failed first was an unhandled rejection and Node
-// exited. The limiters pass requests on store errors (passOnStoreError), so
+// exited. The limiters pass requests on store errors (failOpenLimiter), so
 // with Redis unavailable a request should fail open quickly, count once, and
 // the store should work again once Redis is back.
 //
