@@ -124,12 +124,20 @@ introduces.
 ## Rate limiting
 
 - `src/redis.js` creates an optional Redis client when `REDIS_URL` is set;
-  `src/middleware/rateLimitStore.js` wires a `rate-limit-redis` store so limits
+  `src/middleware/rateLimitStore.js` is a Redis-backed store so limits
   hold **across replicas** instead of multiplying by the replica count. Without
   `REDIS_URL` (local dev) limiters fall back to per-process memory.
 - All limiters set `passOnStoreError: true` — they **fail open** if Redis is
-  unreachable. Losing shared rate limiting during a Redis outage is far better
-  than dropping the voter-match endpoint on election night.
+  unreachable: no limit applies until it is back (there is no per-process
+  fallback then). Losing rate limiting during a Redis outage is far better
+  than dropping the voter-match endpoint on election night. Failing open is
+  fast: while disconnected, Redis commands are rejected at once (no offline
+  queue), a limiter call Redis doesn't answer within 2 s is given up on and
+  not retried, and at most 1000 commands wait on a Redis that has stopped
+  answering; past that, requests fail open at once. (2 s rather than less,
+  because the deadline also counts event-loop lag on a busy replica.) The
+  store keeps no script state (EVALSHA, falling back to EVAL on NOSCRIPT), so
+  it works again as soon as Redis is back (issue #149).
 - The voter-match limit is now `RATE_LIMIT_MATCH_MAX` (default **300**/min, up
   from 60). The higher default tolerates carrier CGNAT (many voters behind one
   IP) while still capping a single abuser at ~5 req/s, and is the dial for k6
@@ -208,7 +216,8 @@ All optional; defaults keep local dev working unchanged. See `.env.example`.
 
 ## New dependencies
 
-- Backend: `@sentry/node`, `redis`, `rate-limit-redis`.
+- Backend: `@sentry/node`, `redis` (`rate-limit-redis` was dropped for an
+  in-repo store in issue #149).
 - Frontend: `@sentry/react`.
 
 ## Related docs
