@@ -13,10 +13,13 @@ URL="https://$HOST/api/question-sets"
 
 # Prints the response's CF-Cache-Status, HTTP_<code> for an HTTP error, or
 # MISSING when there is no header (or no response at all); always one word.
+# -D - can write several header blocks (a proxy's CONNECT reply, a 103 Early
+# Hints); each status line starts a new one, so only the final response's
+# block counts.
 status_of() {
   { curl -sS -o /dev/null -D - "${1:-$URL}" || true; } | tr -d '\r' |
     awk 'BEGIN { s = "MISSING" }
-         NR == 1 { code = $2 }
+         /^HTTP\// { code = $2; s = "MISSING" }
          tolower($1) == "cf-cache-status:" { s = toupper($2) }
          END { if (code + 0 >= 400) s = "HTTP_" code; print s }'
 }

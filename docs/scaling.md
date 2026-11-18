@@ -226,7 +226,8 @@ curl -sI https://avoinvaalikone.fi/api/question-sets | grep cf-cache-status
 
 # A new query string is served from the same edge entry
 curl -sI "https://avoinvaalikone.fi/api/question-sets?x=$(date +%s)$$" | grep cf-cache-status
-# cf-cache-status: HIT  (MISS means the cache key still includes the query string)
+# cf-cache-status: HIT  (UPDATING/EXPIRED/REVALIDATED if the entry just
+# expired are fine too; MISS means the cache key still includes the query string)
 
 # Party-token route must NOT be cached
 curl -sI https://avoinvaalikone.fi/api/candidates/party/some-token | grep cf-cache-status
