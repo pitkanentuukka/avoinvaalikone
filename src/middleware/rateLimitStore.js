@@ -1,5 +1,6 @@
 const crypto = require("crypto");
 const redis = require("../redis");
+const { createOutageLog } = require("../outageLog");
 
 // Redis-backed express-rate-limit store, so limits are shared across backend
 // replicas. It used to be rate-limit-redis, which loads its Lua scripts with
@@ -12,7 +13,7 @@ const redis = require("../redis");
 // EVAL only when Redis answers NOSCRIPT (as node-redis's own scripts do).
 
 // The limiters are in front of every API request and pass requests on store
-// errors (passOnStoreError), so a Redis problem may cost a request at most
+// errors (failOpenLimiter), so a Redis problem may cost a request at most
 // this long. node-redis's own command timeout doesn't bound it: it only
 // covers a command still waiting to be written, and one already sent to a
 // Redis that stopped answering waits for the reply indefinitely.
@@ -73,6 +74,47 @@ async function runScript({ source, sha }, key, ...args) {
   }
 }
 
+// One log for every limiter's store: they share one Redis, so an outage is
+// one outage (issue #156).
+const outageLog = createOutageLog("Rate-limit store");
+
+// What the store throws when Redis fails. src/middleware/rateLimiter.js lets
+// the request through on it, without the per-request stack trace
+// express-rate-limit's passOnStoreError logs; the outage log has the message.
+class StoreError extends Error {
+  constructor(cause) {
+    super(cause?.message ?? String(cause), { cause });
+    this.name = "StoreError";
+  }
+}
+
+// Runs one store operation against Redis. Every way it can fail, including a
+// reply it can't use (parse throws), becomes a StoreError, so the limiter
+// fails open rather than 500ing. Whichever operation fails first, the line
+// says what failing means for requests.
+async function call(operation, what, parse = (reply) => reply) {
+  try {
+    const result = parse(await withTimeout(operation()));
+    outageLog.recovered();
+    return result;
+  } catch (err) {
+    outageLog.failure(`${what} failed: ${err?.message ?? err}; letting requests through without rate limiting`);
+    throw new StoreError(err);
+  }
+}
+
+// The INCREMENT script always answers [hits >= 1, ttl > 0]; anything else is
+// a reply the store can't trust (a misbehaving Redis-compatible proxy).
+function parseIncrement(reply) {
+  const [totalHits, ttl] = Array.isArray(reply) && reply.length === 2 && reply.every((v) => typeof v === "number")
+    ? reply
+    : [];
+  if (!(Number.isInteger(totalHits) && totalHits >= 1 && ttl > 0)) {
+    throw new Error(`unexpected reply ${String(reply).slice(0, 100)}`);
+  }
+  return { totalHits, resetTime: new Date(Date.now() + ttl) };
+}
+
 class RedisStore {
   constructor(prefix) {
     // express-rate-limit reads prefix and localKeys to check that no request
@@ -86,27 +128,28 @@ class RedisStore {
   }
 
   async increment(key) {
-    const [totalHits, ttl] = await withTimeout(runScript(INCREMENT, this.prefix + key, String(this.windowMs)));
-    return { totalHits: Number(totalHits), resetTime: new Date(Date.now() + Number(ttl)) };
+    return call(() => runScript(INCREMENT, this.prefix + key, String(this.windowMs)), "increment", parseIncrement);
   }
 
   // express-rate-limit awaits this inside response "finish"/"close"/"error"
   // handlers that catch nothing (skipFailedRequests, skipSuccessfulRequests),
-  // so a rejection here would exit Node; passOnStoreError doesn't cover it.
+  // so a rejection here would exit Node; failing open doesn't cover it.
   // Missing one uncount only leaves a hit counted.
   async decrement(key) {
     try {
-      await withTimeout(runScript(DECREMENT, this.prefix + key));
-    } catch (err) {
-      console.error("Rate-limit store decrement failed:", err.message);
+      await call(() => runScript(DECREMENT, this.prefix + key), "decrement");
+    } catch {
+      // Logged by call().
     }
   }
 
   async resetKey(key) {
-    await withTimeout(redis.sendCommand(["DEL", this.prefix + key]));
+    await call(() => redis.sendCommand(["DEL", this.prefix + key]), "reset");
   }
 }
 
 // Returns undefined when REDIS_URL is unset, which makes express-rate-limit
 // fall back to its per-process MemoryStore (dev).
 module.exports = (prefix) => (redis ? new RedisStore(prefix) : undefined);
+module.exports.StoreError = StoreError;
+module.exports.outageLog = outageLog;

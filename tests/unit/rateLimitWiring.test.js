@@ -7,7 +7,12 @@ const { unusedPort } = require("../helpers/fakeRedis");
 // (issue #149). Each request below goes through one limiter and is answered
 // without the database, so its status shows what the limiter did: the
 // route's own 4xx when it let the request through, a 500 when the store
-// error reached Express (a limiter without passOnStoreError).
+// error reached Express (a limiter that doesn't fail open).
+//
+// While Redis is down, the outage is logged a bounded number of times and
+// without stack traces, not once per request (issue #156): at election-night
+// rates that filled the log rotation within minutes and added a synchronous
+// stderr write to every request.
 //
 // The app runs in a child process (tests/helpers/appRequestsChild.js) in
 // production mode, the only mode in which the limiters run.
@@ -31,13 +36,19 @@ const REQUESTS = [
   // matchLimiter, then the match request's validation
   { limiter: "match", method: "POST", path: "/api/voter/match", body: {}, expected: 400 },
 ];
+// A burst on the match endpoint, as on election night.
+const BURST = 50;
+const SENT = [
+  ...REQUESTS,
+  ...Array.from({ length: BURST }, () => REQUESTS.find((r) => r.limiter === "match")),
+];
 
 let results;
 let output = "";
 
 beforeAll(async () => {
   const redisPort = await unusedPort();
-  const child = fork(CHILD, [JSON.stringify(REQUESTS)], {
+  const child = fork(CHILD, [JSON.stringify(SENT)], {
     execArgv: [],
     silent: true,
     env: {
@@ -70,5 +81,16 @@ test.each(REQUESTS.map((r) => [r.limiter, r]))(
 
 test("the store errors were what the limiters passed over", () => {
   // Without this, a limiter that skipped the store entirely would also pass.
-  expect(output).toContain("allowing request without rate-limiting");
+  expect(output).toMatch(/Rate-limit store failing: .*letting requests through without rate limiting/);
+});
+
+test("the burst got through too", () => {
+  expect(results).toHaveLength(SENT.length);
+  for (const r of results.slice(REQUESTS.length)) expect(r.status).toBe(400);
+});
+
+test("the outage is logged once, without stack traces, not per request", () => {
+  expect(output).not.toMatch(/^\s+at /m);
+  const storeLines = output.split("\n").filter((l) => /rate.?limit/i.test(l));
+  expect(storeLines).toHaveLength(1);
 });

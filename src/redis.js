@@ -2,6 +2,7 @@
 // are enforced across backend replicas. When REDIS_URL is unset (local dev
 // without compose), callers fall back to per-process behavior.
 const { createClient } = require("redis");
+const connectionLog = require("./redisConnectionLog");
 
 let client = null;
 
@@ -22,7 +23,15 @@ if (process.env.REDIS_URL) {
     // The default reconnect strategy retries with backoff (at most ~2.2 s
     // apart) and never gives up, except after a socketTimeout, unset here.
   });
-  client.on("error", (err) => console.error("Redis error:", err.message));
+  // An error is emitted for each reconnect attempt, ~2 s apart while Redis
+  // is down: log the outage, then at most a line a minute, including the
+  // reconnect, not every attempt (issue #156). A RESP decoder error is also
+  // emitted as "error" but isn't followed by a reconnect, so no "ready" ends
+  // it: the log then reads failing until the next outage's reconnect. Rare
+  // (protocol corruption, a misbehaving proxy), and the store's own log still
+  // tracks whether commands work.
+  client.on("error", (err) => connectionLog.failure(err.message));
+  client.on("ready", () => connectionLog.recovered());
   client.connect().catch((err) => console.error("Redis connect failed:", err.message));
 }
 
