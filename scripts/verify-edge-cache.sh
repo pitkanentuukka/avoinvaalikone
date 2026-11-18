@@ -11,13 +11,19 @@ set -euo pipefail
 HOST="${1:-avoinvaalikone.fi}"
 URL="https://$HOST/api/question-sets"
 
+# Prints the response's CF-Cache-Status, HTTP_<code> for an HTTP error, or
+# MISSING when there is no header (or no response at all); always one word.
 status_of() {
-  curl -fsS -o /dev/null -D - "${1:-$URL}" | tr -d '\r' | grep -i '^cf-cache-status:' | awk '{print toupper($2)}'
+  { curl -sS -o /dev/null -D - "${1:-$URL}" || true; } | tr -d '\r' |
+    awk 'BEGIN { s = "MISSING" }
+         NR == 1 { code = $2 }
+         tolower($1) == "cf-cache-status:" { s = toupper($2) }
+         END { if (code + 0 >= 400) s = "HTTP_" code; print s }'
 }
 
-first=$(status_of || echo "MISSING")
+first=$(status_of)
 sleep 2
-second=$(status_of || echo "MISSING")
+second=$(status_of)
 
 echo "CF-Cache-Status: first=$first second=$second"
 
@@ -25,14 +31,19 @@ if [ "$second" = "HIT" ]; then
   # The endpoints ignore the query string, so the rule's cache key must too:
   # with Cloudflare's default key, every new query string is a MISS that goes
   # to the origin (#159). A never-seen query string must hit the entry the
-  # requests above just cached.
-  probe=$(status_of "$URL?cache-key-check=$(date +%s)-$$-$RANDOM" || echo "MISSING")
+  # requests above just cached. If that entry expired in between, the probe
+  # finds it stale (UPDATING, EXPIRED, …), which proves the same thing.
+  probe=$(status_of "$URL?cache-key-check=$(date +%s)-$$-$RANDOM")
   echo "CF-Cache-Status with a new query string: $probe"
-  if [ "$probe" = "HIT" ]; then
-    echo "OK: edge cache is serving $URL"
-    exit 0
-  fi
-  echo "FAIL: a new query string missed the edge cache ($probe) — the Cache Rule's cache key includes the query string. Set Cache key → Query string → Ignore query string (docs/scaling.md)." >&2
+  case "$probe" in
+    HIT|UPDATING|STALE|REVALIDATED|EXPIRED)
+      echo "OK: edge cache is serving $URL, whatever the query string"
+      exit 0 ;;
+    MISS)
+      echo "FAIL: a new query string missed the edge cache — the Cache Rule's cache key includes the query string. Set Cache key → Query string → Ignore query string (docs/scaling.md)." >&2 ;;
+    *)
+      echo "FAIL: the query-string check got $probe, so the cache key couldn't be checked; run the script again." >&2 ;;
+  esac
   exit 1
 fi
 

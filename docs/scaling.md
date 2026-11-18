@@ -201,11 +201,12 @@ ssh user@80.69.172.220 "docker compose logs backend 2>&1 | grep -E '010|already 
      ```
    - **Cache eligibility:** Eligible for cache
    - **Edge TTL:** Respect origin headers
-   - **Cache key → Query string:** Ignore query string (API: `cache_key.custom_key.query_string.exclude.all = true`).
-     These endpoints ignore the query string, and so does the micro-cache. With
-     the default cache key, each new query string (`?x=<random>`) would be a
-     separate edge entry, so every such request would miss and reach the origin
-     (#159).
+   - **Cache key → Query string:** Ignore query string. Unlike most cache key
+     options, Cloudflare offers this one outside Enterprise too. These
+     endpoints ignore the query string, and so does the micro-cache. With the
+     default cache key, each new query string (`?x=<random>`) would be a
+     separate edge entry, so every such request would miss and reach the
+     origin (#159).
 4. Save and deploy the rule.
 
 **Safety:** The rule only caches responses where the origin sends
@@ -224,7 +225,7 @@ curl -sI https://avoinvaalikone.fi/api/question-sets | grep cf-cache-status
 # cf-cache-status: HIT
 
 # A new query string is served from the same edge entry
-curl -sI "https://avoinvaalikone.fi/api/question-sets?x=$RANDOM" | grep cf-cache-status
+curl -sI "https://avoinvaalikone.fi/api/question-sets?x=$(date +%s)$$" | grep cf-cache-status
 # cf-cache-status: HIT  (MISS means the cache key still includes the query string)
 
 # Party-token route must NOT be cached
@@ -304,7 +305,7 @@ for the test.
 
 ## Election-night checklist
 
-- [ ] Cache Rule active in Cloudflare (verify `cf-cache-status: HIT`)
+- [ ] Cache Rule active in Cloudflare and ignoring the query string: `scripts/verify-edge-cache.sh` passes
 - [ ] 3 backend replicas healthy (`docker compose ps`)
 - [ ] Redis healthy (`docker compose exec redis redis-cli ping`)
 - [ ] `RATE_LIMIT_MATCH_MAX` set appropriately (raise if CGNAT complaints)

@@ -91,6 +91,11 @@ one Cache Rule for the zone:
   (URI path starts with `/api/question-sets` OR URI path starts with `/api/candidates`)
 - **Cache eligibility:** Eligible for cache
 - **Edge TTL:** Respect origin headers
+- **Cache key → Query string:** Ignore query string (the endpoints ignore it;
+  with the default key every new query string reaches the origin, #159)
+
+[docs/scaling.md](../../docs/scaling.md) §3 is the full setup;
+`scripts/verify-edge-cache.sh` checks it.
 
 The backend sends `Cache-Control: public, s-maxage=300` on the public GET
 endpoints and `Cache-Control: no-store` on party-token and admin routes, so
