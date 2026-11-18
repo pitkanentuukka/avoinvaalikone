@@ -49,8 +49,9 @@ misses, purges, or a misconfigured edge rule. Returns `X-Micro-Cache: HIT` on
 hits. No cross-replica invalidation needed; 60 s sits within the accepted edge
 staleness window. Entries are keyed by route and lowercased UUID param, not the
 raw URL, so query strings and path spelling variants can't multiply copies;
-retained bodies are capped at 5,000 entries (every candidate page fits) and
-32 MiB per replica, evicting the least recently used entry first.
+retained bodies are capped at 5,000 entries (room for every candidate page)
+and 32 MiB per replica (pages with long answer explanations may not all fit),
+evicting the least recently used entry first.
 
 ### Compression
 

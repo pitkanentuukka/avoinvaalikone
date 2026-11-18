@@ -182,7 +182,7 @@ test("the cache is off outside production", async () => {
   expect(microCache.stats().entries).toBe(0);
 });
 
-test("the entry limit evicts the oldest entries", async () => {
+test("the entry limit evicts the least recently used entries", async () => {
   const microCache = createMicroCache({ maxEntries: 3 });
   const { app, calls } = buildApp(microCache);
   const ids = Array.from({ length: 10 }, (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`);
@@ -191,7 +191,7 @@ test("the entry limit evicts the oldest entries", async () => {
     expect((await request(app).get(`/api/candidates/${id}`)).status).toBe(200);
     expect(microCache.stats().entries).toBeLessThanOrEqual(3);
   }
-  // The newest three are still cached, the oldest was evicted.
+  // The newest three are still cached, the oldest (never hit) was evicted.
   for (const id of ids.slice(-3)) {
     expect((await request(app).get(`/api/candidates/${id}`)).headers["x-micro-cache"]).toBe("HIT");
   }
@@ -325,7 +325,11 @@ const candidateId = (i) => `00000000-0000-4000-8000-${String(i).padStart(12, "0"
 
 describe("eviction under the default limits", () => {
   let server;
-  afterEach(() => server && server.close());
+  afterEach((done) => {
+    const s = server;
+    server = undefined;
+    s ? s.close(done) : done();
+  });
 
   test("500 candidate reads don't evict the candidate list", async () => {
     const { app, calls } = buildApp(createMicroCache());
@@ -393,4 +397,40 @@ test("a hit makes an entry the last to be evicted by the byte budget", async () 
   expect((await get(0)).headers["x-micro-cache"]).toBe("HIT");
   expect((await get(1)).headers["x-micro-cache"]).toBeUndefined();
   expect(runs).toBe(5);
+});
+
+test("a hit doesn't extend an entry's lifetime", async () => {
+  const microCache = createMicroCache();
+  const { app, calls } = buildApp(microCache);
+  let now = 1_000_000;
+  jest.spyOn(Date, "now").mockImplementation(() => now);
+
+  await request(app).get("/api/candidates");
+  now += 30_000;
+  expect((await request(app).get("/api/candidates")).headers["x-micro-cache"]).toBe("HIT");
+  now += 31_000; // 61 s after it was stored, 31 s after the hit
+  expect((await request(app).get("/api/candidates")).headers["x-micro-cache"]).toBeUndefined();
+  expect(calls.list).toBe(2);
+});
+
+test("expired entries are still reclaimed after an early entry is replaced", async () => {
+  // The skipped sweep relies on the earliest expiry; replacing the entry
+  // that set it must not stop later entries from being reclaimed.
+  const microCache = createMicroCache();
+  const { app } = buildApp(microCache);
+  let now = 1_000_000;
+  jest.spyOn(Date, "now").mockImplementation(() => now);
+  const get = (path) => request(app).get(path);
+
+  await get("/api/candidates"); // expires at +60 s
+  now += 30_000;
+  await get(`/api/candidates/${ID}`); // expires at +90 s
+  now += 31_000;
+  await get("/api/candidates"); // expired: replaced, now expires at +121 s
+  expect(microCache.stats().entries).toBe(2);
+
+  now += 30_000; // +91 s: the candidate page has expired
+  await get("/api/question-sets");
+  expect(microCache.stats().entries).toBe(2); // the list and the sets
+  expect((await get(`/api/candidates/${ID}`)).headers["x-micro-cache"]).toBeUndefined();
 });

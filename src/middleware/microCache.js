@@ -4,14 +4,14 @@
 // inside the 300s edge TTL already accepted, so there is no cross-replica
 // invalidation.
 //
-// Memory is bounded by entry count and by the bytes of the retained bodies,
-// and expired entries are dropped rather than left until evicted (issue #150).
+// Memory is bounded by entry count and by the bytes of the retained bodies
+// (plus a few hundred bytes of bookkeeping per entry), and expired entries are dropped rather than left until evicted (issue #150).
 // When a bound is hit, the least recently used entry goes first, so a walk
 // over many candidate pages can't push out the list everyone reads (#160).
 const DEFAULT_TTL_MS = 60_000;
-// Room for every one of the ~2,500 public candidate pages, twice over, plus
-// the list and the question sets: the cap must not be below the number of
-// distinct cacheable URLs, or a cyclic walk over them never hits.
+// About twice the ~2,500 cacheable resources (a page per candidate, the list
+// and the question sets): the cap must not be below their number, or a
+// cyclic walk over them never hits.
 const MAX_ENTRIES = 5000;
 // The full candidate list (~2,500 candidates with 1,000-character bios) is a
 // few MB. A candidate page is a few KB, but with long answer explanations
@@ -44,6 +44,10 @@ function createMicroCache({ maxEntries = MAX_ENTRIES, maxBytes = MAX_BYTES } = {
   // first key is always the least recently used.
   const store = new Map(); // key -> { body: Buffer, expires }
   let totalBytes = 0;
+  // No entry expires before this, so put() skips its sweep until then; with
+  // LRU order the Map isn't in expiry order, so a sweep scans every entry.
+  // Removing an entry can leave it too early, which only costs a sweep.
+  let nextExpiry = Infinity;
 
   function remove(key) {
     const entry = store.get(key);
@@ -59,8 +63,12 @@ function createMicroCache({ maxEntries = MAX_ENTRIES, maxBytes = MAX_BYTES } = {
     const body = Buffer.allocUnsafeSlow(bytes);
     body.write(json);
     const now = Date.now();
-    for (const [k, entry] of store) {
-      if (entry.expires <= now) remove(k);
+    if (now >= nextExpiry) {
+      nextExpiry = Infinity;
+      for (const [k, entry] of store) {
+        if (entry.expires <= now) remove(k);
+        else nextExpiry = Math.min(nextExpiry, entry.expires);
+      }
     }
     while (store.size > 0 && (store.size >= maxEntries || totalBytes + bytes > maxBytes)) {
       remove(store.keys().next().value);
@@ -68,6 +76,7 @@ function createMicroCache({ maxEntries = MAX_ENTRIES, maxBytes = MAX_BYTES } = {
     if (store.size >= maxEntries) return;
     store.set(key, { body, expires: now + ttlMs });
     totalBytes += bytes;
+    nextExpiry = Math.min(nextExpiry, now + ttlMs);
   }
 
   const microCache = (ttlMs = DEFAULT_TTL_MS) => (req, res, next) => {
