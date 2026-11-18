@@ -50,12 +50,16 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backup \
 docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backup \
   sh -c 'rclone copy "upcloud:$BACKUP_BUCKET/postgres/vaalikone-<stamp>.dump" /backups/restore/'
 
-# 2. Restore it into a fresh scratch database. ${DATABASE_URL%/*} is the
-#    server URL without the database name.
+# 2. Restore it into a fresh scratch database, with step 3's flags plus
+#    --exit-on-error so a bad dump stops the drill. The DROP clears a
+#    restore_drill left over from an interrupted drill. ${DATABASE_URL%/*} is
+#    the server URL without the database name (the URL has no ?query part).
+docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backup \
+  sh -c 'psql "$DATABASE_URL" -c "DROP DATABASE IF EXISTS restore_drill"'
 docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backup \
   sh -c 'psql "$DATABASE_URL" -c "CREATE DATABASE restore_drill"'
 docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backup \
-  sh -c 'pg_restore --exit-on-error -d "${DATABASE_URL%/*}/restore_drill" /backups/restore/vaalikone-<stamp>.dump'
+  sh -c 'pg_restore --clean --if-exists --exit-on-error -d "${DATABASE_URL%/*}/restore_drill" /backups/restore/vaalikone-<stamp>.dump'
 
 # 3. Compare with the live database: the counts should match up to the day's
 #    changes since the dump.
@@ -64,7 +68,7 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backup \
 docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backup \
   sh -c 'psql "$DATABASE_URL" -c "SELECT count(*) FROM candidates"'
 
-# 4. Clean up.
+# 4. Clean up. Also after a failed drill.
 docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backup \
   sh -c 'psql "$DATABASE_URL" -c "DROP DATABASE restore_drill"'
 docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backup \

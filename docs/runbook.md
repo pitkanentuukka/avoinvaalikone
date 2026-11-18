@@ -39,7 +39,7 @@ token, and a wrong token counts toward the admin rate limit). Errors: Sentry (ba
 
 - [ ] `scripts/verify-edge-cache.sh` passes (CF-Cache-Status: HIT)
 - [ ] Latest nightly dump exists in the backup bucket (`postgres/vaalikone-<yesterday>.dump`); take a fresh manual one: `docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backup backup.sh`
-- [ ] Restore drill done in the weeks before, not on the night ([scripts/backup/restore.md](../scripts/backup/restore.md#restore-drill)): the newest bucket dump restores into a scratch database and its counts look right
+- [ ] Restore drill done in the weeks before the election (date: ____), not tonight ([scripts/backup/restore.md](../scripts/backup/restore.md#restore-drill))
 - [ ] Sentry receiving events (send a test event, check the project dashboard)
 - [ ] `RATE_LIMIT_MATCH_MAX` set for the night (default 300/min/IP)
 - [ ] `docker compose -f docker-compose.yml -f docker-compose.prod.yml ps` — all services healthy, 3 backend replicas
