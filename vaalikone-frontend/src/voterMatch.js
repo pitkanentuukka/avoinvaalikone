@@ -8,23 +8,34 @@
 // session_id, question_id) stores nothing new if an earlier attempt's
 // response was only lost. crypto.randomUUID is missing outside secure
 // contexts; the server then picks the id on each attempt.
-export function newMatchSubmission(payload) {
-  return {
-    // A copy, so the retry sends what the first attempt did. Plain JSON;
-    // structuredClone would leave out Safari before 15.4.
-    payload: JSON.parse(JSON.stringify(payload)),
-    sessionId: globalThis.crypto?.randomUUID?.(),
-  };
+//
+// `previous` is the last submission: if the voter went back to weighting and
+// asks for the results again without changing anything, it is the same
+// session, which an earlier attempt may already have stored. Anything
+// changed gets a new session; under the old id the server would keep the old
+// answers.
+export function newMatchSubmission(payload, previous = null) {
+  // A copy, so a retry sends what the first attempt did. Plain JSON;
+  // structuredClone would leave out Safari before 15.4.
+  const json = JSON.stringify(payload);
+  if (previous && JSON.stringify(previous.payload) === json) return previous;
+  return { payload: JSON.parse(json), sessionId: globalThis.crypto?.randomUUID?.() };
 }
 
 // The step to show after one attempt, and what it shows. A failure has a
 // step of its own: the results screen would read as "no candidates matched"
 // and its Start over would throw the answers away.
+//
+// The failure step explains itself; the error is shown only when it is the
+// app's own message (a JSON `error` on a 4xx, e.g. the rate limit's). A
+// network failure ("Failed to fetch") or a 5xx ("HTTP 503") would be
+// technical English in the Finnish UI.
 export async function runMatch(api, { payload, sessionId }) {
   try {
     const { results, questionCount } = await api.voterMatch(payload, { sessionId });
     return { step: "results", results: results ?? [], questionCount: questionCount ?? 0, error: null };
   } catch (e) {
-    return { step: "match-failed", error: e.message };
+    const own = e.status >= 400 && e.status < 500;
+    return { step: "match-failed", error: own ? e.message : null };
   }
 }

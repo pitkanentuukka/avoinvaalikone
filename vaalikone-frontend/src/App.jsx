@@ -1979,8 +1979,19 @@ function VoterView() {
       questionSetIds: [...selectedSetIds],
       constituency: constituency || null,
       includeInResearch,
-    });
+    }, submissionRef.current);
     return sendMatch();
+  }
+
+  // From the failure step: the same submission again, or back to weighting
+  // with everything kept.
+  function retryMatch() {
+    return sendMatch();
+  }
+
+  function backToWeighting() {
+    setError(null);
+    setStep("weight");
   }
 
   if (step === "loading" || step === "loading-results") return <LoadingState text={step === "loading-results" ? t.voterCalculating : t.loading} />;
@@ -1992,10 +2003,10 @@ function VoterView() {
       <div style={{ maxWidth: 560, margin: "0 auto", padding: "40px 24px" }}>
         <h2 style={{ fontSize: "26px", fontWeight: 800, letterSpacing: "-0.02em", marginBottom: "12px" }}>{t.voterMatchFailedTitle}</h2>
         <p style={{ color: palette.textMuted, lineHeight: 1.7, marginBottom: "20px" }}>{t.voterMatchFailedDesc}</p>
-        <ErrorBanner message={error} />
+        {error && <ErrorBanner message={error} />}
         <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
-          <Button size="lg" onClick={sendMatch}>{t.retry}</Button>
-          <Button variant="ghost" size="lg" onClick={() => { setError(null); setStep("weight"); }}>{t.voterBackToWeighting}</Button>
+          <Button size="lg" onClick={retryMatch}>{t.retry}</Button>
+          <Button variant="ghost" size="lg" onClick={backToWeighting}>{t.voterBackToWeighting}</Button>
         </div>
       </div>
     );
@@ -2208,7 +2219,6 @@ function VoterView() {
     <div style={{ maxWidth: 740, margin: "0 auto", padding: "40px 24px" }}>
       <h2 style={{ fontSize: "28px", fontWeight: 800, letterSpacing: "-0.02em", marginBottom: "8px" }}>{t.voterResultsTitle}</h2>
       <p style={{ color: palette.textMuted, marginBottom: "28px" }}>{t.voterResultsDesc}</p>
-      {error && <ErrorBanner message={error} />}
       {results.length === 0 && <p style={{ color: palette.textLight }}>{t.voterNoCandidates}</p>}
       {results.map((c) => {
         const isExpanded = expandedCandidate === c.id;

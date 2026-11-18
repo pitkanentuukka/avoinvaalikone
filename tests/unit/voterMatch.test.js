@@ -1,4 +1,5 @@
 const fs = require("fs");
+const path = require("path");
 const { loadFrontend } = require("../helpers/frontendBundle");
 
 // Issue #153: when the match request still failed after the API client's
@@ -47,7 +48,19 @@ describe("runMatch", () => {
     const { api, fetch } = apiWith(jsonResponse(503, {}), jsonResponse(503, {}));
     const outcome = await runMatch(api, newMatchSubmission(PAYLOAD));
     expect(fetch).toHaveBeenCalledTimes(2);
-    expect(outcome).toEqual({ step: "match-failed", error: expect.any(String) });
+    expect(outcome).toEqual({ step: "match-failed", error: null });
+  });
+
+  // The failure step explains itself; only the app's own messages (JSON
+  // `error` on a 4xx, in Finnish) add anything. "Failed to fetch" or
+  // "HTTP 503" would be English noise in the Finnish UI.
+  test.each([
+    ["a network error", [new TypeError("Failed to fetch"), new TypeError("Failed to fetch")], null],
+    ["a 5xx", [jsonResponse(502, {}), jsonResponse(502, {})], null],
+    ["the app's own 4xx", [jsonResponse(429, { error: "Liian monta pyyntöä." })], "Liian monta pyyntöä."],
+  ])("after %s the failure step shows %p", async (_what, outcomes, error) => {
+    const { api } = apiWith(...outcomes);
+    expect(await runMatch(api, newMatchSubmission(PAYLOAD))).toEqual({ step: "match-failed", error });
   });
 
   test("a retry resends the same submission with the same sessionId", async () => {
@@ -72,6 +85,20 @@ describe("runMatch", () => {
     expect(newMatchSubmission(PAYLOAD).sessionId).not.toBe(newMatchSubmission(PAYLOAD).sessionId);
   });
 
+  // Back to weighting, then Show results with nothing changed: the earlier
+  // attempt may have reached the server, so it is the same session.
+  test("resubmitting unchanged answers keeps the earlier sessionId", () => {
+    const first = newMatchSubmission(PAYLOAD);
+    expect(newMatchSubmission({ ...PAYLOAD }, first)).toBe(first);
+  });
+
+  test("resubmitting changed answers gets a new sessionId", () => {
+    const first = newMatchSubmission(PAYLOAD);
+    const changed = newMatchSubmission({ ...PAYLOAD, weights: { q1: 0 } }, first);
+    expect(changed.sessionId).not.toBe(first.sessionId);
+    expect(changed.payload.weights).toEqual({ q1: 0 });
+  });
+
   test("a submission keeps its own copy of the payload", () => {
     const payload = { ...PAYLOAD, answers: { ...PAYLOAD.answers } };
     const submission = newMatchSubmission(payload);
@@ -84,6 +111,94 @@ describe("runMatch", () => {
     expect(await runMatch(api, newMatchSubmission(PAYLOAD))).toEqual({
       step: "results", results: [], questionCount: 2, error: null,
     });
+  });
+});
+
+// The actual handlers from VoterView in App.jsx, run with the API and state
+// injected (as in tokenViewLoad.test.js): no DOM is needed to check which
+// step a failure leads to and what Retry and Back to weighting do.
+function voterHandlers(fetchOutcomes) {
+  const source = fs.readFileSync(path.join(__dirname, "../../vaalikone-frontend/src/App.jsx"), "utf8");
+  const component = source.slice(source.indexOf("function VoterView("));
+  const start = component.indexOf("async function sendMatch()");
+  const end = component.indexOf("\n  if (step === \"loading\"", start);
+  if (start < 0 || end < 0) throw new Error("VoterView match handlers not found");
+  const { api, fetch } = apiWith(...fetchOutcomes);
+  const state = {
+    step: "weight",
+    VoterAnswers: { ...PAYLOAD.answers },
+    Weights: { ...PAYLOAD.weights },
+    SelectedSetIds: new Set(PAYLOAD.questionSetIds),
+  };
+  const setter = (key) => (value) => {
+    state[key] = typeof value === "function" ? value(state[key]) : value;
+  };
+  const deps = {
+    api, runMatch, newMatchSubmission,
+    submissionRef: { current: null },
+    voterAnswers: state.VoterAnswers,
+    weights: state.Weights,
+    selectedSetIds: state.SelectedSetIds,
+    constituency: PAYLOAD.constituency,
+    includeInResearch: PAYLOAD.includeInResearch,
+    setStep: setter("step"),
+    ...Object.fromEntries([
+      "Error", "Results", "QuestionCount", "VoterAnswers", "Weights", "SelectedSetIds", "Constituency",
+    ].map((key) => [`set${key}`, setter(key)])),
+  };
+  const handlers = new Function(
+    ...Object.keys(deps),
+    `${component.slice(start, end)}\nreturn { finishWeighting, retryMatch, backToWeighting };`,
+  )(...Object.values(deps));
+  return { handlers, state, fetch };
+}
+
+describe("the voter view's match handlers", () => {
+  test("a failed match leads to the failure step, keeping every answer and choice", async () => {
+    const { handlers, state } = voterHandlers([jsonResponse(503, {}), jsonResponse(503, {})]);
+    await handlers.finishWeighting();
+    expect(state.step).toBe("match-failed");
+    expect(state.VoterAnswers).toEqual(PAYLOAD.answers);
+    expect(state.Weights).toEqual(PAYLOAD.weights);
+    expect([...state.SelectedSetIds]).toEqual(PAYLOAD.questionSetIds);
+    expect(state.Constituency).toBeUndefined(); // never touched
+  });
+
+  test("Retry resends the same submission and sessionId, and shows the results", async () => {
+    const { handlers, state, fetch } = voterHandlers([
+      jsonResponse(503, {}), jsonResponse(503, {}),
+      jsonResponse(200, { results: [{ id: "c1", match: 80 }], question_count: 2 }),
+    ]);
+    await handlers.finishWeighting();
+    await handlers.retryMatch();
+    expect(state.step).toBe("results");
+    expect(state.Results).toEqual([{ id: "c1", match: 80 }]);
+    const bodies = sent(fetch);
+    expect(bodies).toHaveLength(3);
+    for (const body of bodies) expect(body).toEqual({ ...PAYLOAD, sessionId: bodies[0].sessionId });
+  });
+
+  test("Back to weighting keeps every answer and choice", async () => {
+    const { handlers, state } = voterHandlers([jsonResponse(503, {}), jsonResponse(503, {})]);
+    await handlers.finishWeighting();
+    handlers.backToWeighting();
+    expect(state.step).toBe("weight");
+    expect(state.Error).toBeNull();
+    expect(state.VoterAnswers).toEqual(PAYLOAD.answers);
+    expect(state.Weights).toEqual(PAYLOAD.weights);
+    expect([...state.SelectedSetIds]).toEqual(PAYLOAD.questionSetIds);
+  });
+
+  test("Show results again with nothing changed is the same session", async () => {
+    const { handlers, fetch } = voterHandlers([
+      jsonResponse(503, {}), jsonResponse(503, {}),
+      jsonResponse(200, { results: [], question_count: 2 }),
+    ]);
+    await handlers.finishWeighting();
+    handlers.backToWeighting();
+    await handlers.finishWeighting();
+    const bodies = sent(fetch);
+    expect(new Set(bodies.map((b) => b.sessionId)).size).toBe(1);
   });
 });
 
@@ -121,6 +236,8 @@ describe("the voter view's failure step", () => {
     }]);
   }, 30_000);
 
+  // Rendered without browser storage (no localStorage under Node), as with
+  // storage declined: nothing outside the view's state holds the answers.
   test.each(["fi", "en"])("offers a retry and a way back to weighting, not Start over (%s)", (lang) => {
     const t = ui.translations[lang];
     const h = ui.createElement;
