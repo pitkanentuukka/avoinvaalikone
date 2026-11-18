@@ -60,6 +60,7 @@ describe("runMatch", () => {
     ["a 5xx", null, [jsonResponse(502, {}), jsonResponse(502, {})]],
     ["an HTML 4xx from a proxy or WAF", null, [htmlResponse(403)]],
     ["a 4xx whose JSON has no error", null, [jsonResponse(413, { message: "too large" })]],
+    ["the app's own 5xx (outside production, raw internals)", null, [jsonResponse(500, { error: "connect ECONNREFUSED 127.0.0.1:5432" })]],
     ["the app's own 4xx", "Liian monta pyyntöä.", [jsonResponse(429, { error: "Liian monta pyyntöä." })]],
   ])("after %s the failure step shows %p", async (_what, error, outcomes) => {
     const { api } = apiWith(...outcomes);
@@ -107,6 +108,13 @@ describe("runMatch", () => {
     const submission = newMatchSubmission(payload);
     payload.answers.q1 = 0;
     expect(submission.payload.answers.q1).toBe(4);
+  });
+
+  test("a response missing its fields is empty results", async () => {
+    const { api } = apiWith(jsonResponse(200, {}));
+    expect(await runMatch(api, newMatchSubmission(PAYLOAD))).toEqual({
+      step: "results", results: [], questionCount: 0, error: null,
+    });
   });
 
   test("a successful match with no candidates is results, not a failure", async () => {
@@ -250,7 +258,7 @@ describe("the voter view's failure step", () => {
           let body = source.slice(start);
           const patches = [
             ['const [step, setStep] = useState("loading");', 'const [step, setStep] = useState("match-failed");'],
-            ["const [error, setError] = useState(null);", 'const [error, setError] = useState("Palvelinvirhe");'],
+            ["const [error, setError] = useState(null);", 'const [error, setError] = useState("Liian monta pyyntöä. Yritä myöhemmin uudelleen.");'],
           ];
           for (const [from, to] of patches) {
             if (!body.includes(from)) throw new Error(`VoterView state initializer not found: ${from}`);
@@ -272,7 +280,7 @@ describe("the voter view's failure step", () => {
     }, h(ui.VoterView)));
     const buttons = [...html.matchAll(/<button\b[^>]*>([^<]*)<\/button>/g)].map(([, label]) => label);
 
-    expect(html).toContain("Palvelinvirhe");
+    expect(html).toContain("Liian monta pyyntöä. Yritä myöhemmin uudelleen.");
     expect(buttons).toContain(t.retry);
     expect(buttons).toContain(t.voterBackToWeighting);
     expect(buttons).not.toContain(t.voterStartOver);

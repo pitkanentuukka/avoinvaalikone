@@ -87,11 +87,12 @@ export function createApi({
     }
     if (!res.ok) {
       const data = await res.json().catch(() => null);
-      const err = new Error(data?.error || (data ? `HTTP ${res.status}` : "Server error"));
+      const isObject = data !== null && typeof data === "object";
+      const err = new Error(data?.error || (isObject ? `HTTP ${res.status}` : "Server error"));
       err.status = res.status;
       // The message is the app's own (a JSON `error`), not a placeholder for
       // a body that wasn't one (a proxy's HTML page, say).
-      err.serverMessage = typeof data?.error === "string";
+      err.serverMessage = typeof data?.error === "string" && data.error !== "";
       throw err;
     }
     if (res.status === 204) return null;
@@ -118,8 +119,9 @@ export function createApi({
     // (session_id, question_id), so a retry after a lost response stores
     // nothing new. crypto.randomUUID is missing outside secure contexts
     // (plain-HTTP non-localhost); the server then picks the id and the
-    // request isn't retried. The voter's own retry of a failed match passes
-    // the submission's sessionId (src/voterMatch.js), for the same reason.
+    // request isn't retried. The voter view always passes its submission's
+    // sessionId (src/voterMatch.js), so the voter's own retry of a failed
+    // match reuses it too; the default serves other callers.
     voterMatch: (data, { sessionId = globalThis.crypto?.randomUUID?.() } = {}) => {
       return apiFetch("/voter/match", {
         method: "POST",

@@ -18,6 +18,9 @@
 // session is the safe side.) After a success there is no previous: Start
 // over keeps the sets and the research choice, so the next voter on a shared
 // computer may send the same payload, and must be a session of their own.
+// A changed submission can't take back an earlier attempt the server did
+// store (say the voter opts out of research after a lost response): the
+// server never deletes research rows.
 export function newMatchSubmission(payload, previous = null) {
   // A copy, so a retry sends what the first attempt did. Plain JSON;
   // structuredClone would leave out Safari before 15.4.
