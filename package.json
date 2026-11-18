@@ -41,5 +41,9 @@
     "@playwright/test": "^1.58.2",
     "jest": "^30.2.0",
     "supertest": "^7.2.2"
+  },
+  "overrides": {
+    "glob": "^14.0.2",
+    "minimatch": "^11.0.1"
   }
 }
