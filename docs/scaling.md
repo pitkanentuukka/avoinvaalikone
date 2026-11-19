@@ -81,11 +81,20 @@ i.e. everything that arrives through Caddy/Cloudflare in production.
 
 `src/redis.js` + `src/middleware/rateLimitStore.js` + dep `redis`:
 
-- All six rate limiters (admin, submission, match, plus the party, registration
-  and candidate-token routes in `src/routes/candidates.js`) share a Redis
-  store when `REDIS_URL` is set, so limits are enforced across backend replicas.
-  The token-route limits are 60, 100 and 300 requests per 15 minutes per IP,
-  respectively; all six limiters apply only when `NODE_ENV=production`.
+- All eight rate limiters (admin, submission, match, the party, registration
+  and candidate-token routes in `src/routes/candidates.js`, and the two for
+  public reads) share a Redis store when `REDIS_URL` is set, so limits are
+  enforced across backend replicas. The token-route limits are 60, 100 and
+  300 requests per 15 minutes per IP, respectively. The public-read limiters
+  (`src/middleware/publicReadLimiter.js`) are mounted after the micro-cache,
+  so they count only reads that reach the database: every candidate-page
+  miss (1200 per minute per IP by default; there are more ids than the
+  micro-cache can be relied on to hold), and only failed reads (status
+  ≥ 400, 300 per minute) of the candidate list and the question sets, whose
+  successful reads the micro-cache bounds. Without them, a client walking
+  candidate ids (random ones are 404s the micro-cache doesn't keep, and each
+  id is a new URL to Cloudflare) cost a database read per request (#158).
+  All eight limiters apply only when `NODE_ENV=production`.
 - Falls back to per-process in-memory store when `REDIS_URL` is unset (local
   dev without compose).
 - **Match limit raised 60 → 300 req/min/IP**. Finnish carriers (DNA/Elisa/Telia)
@@ -148,6 +157,8 @@ hostname every 10 seconds. Without this, nginx pins the IPs at startup and
 |----------|---------|---------|
 | `REDIS_URL` | _(unset)_ | Redis connection string. Required for shared rate limiting across replicas. Set automatically in compose. |
 | `PG_POOL_MAX` | `10` | DB connections per backend process. `replicas × PG_POOL_MAX` must stay under Postgres `max_connections` (100). |
+| `RATE_LIMIT_CANDIDATE_READ_MAX` | `1200` | Candidate-page reads (`/api/candidates/<id>`) per IP per minute that miss the micro-cache, whatever their status. Same parsing as `RATE_LIMIT_MATCH_MAX`. |
+| `RATE_LIMIT_LIST_READ_MAX` | `300` | Failed (status ≥ 400) reads of the candidate list and the question sets per IP per minute that reach the database; successful reads aren't counted. Same parsing as `RATE_LIMIT_MATCH_MAX`. |
 | `RATE_LIMIT_MATCH_MAX` | `300` | Match requests per IP per minute. Positive safe integer only; invalid values warn at startup and fall back to 300. Unset or empty uses 300 without warning. Raise for load testing in prod mode; lower is more conservative against abuse. |
 
 ---
@@ -202,6 +213,18 @@ ssh user@80.69.172.220 "docker compose logs backend 2>&1 | grep -E '010|already 
    - **Cache eligibility:** Eligible for cache
    - **Edge TTL:** Respect origin headers
 4. Save and deploy the rule.
+
+**Optional: a Cloudflare rate-limiting rule on `/api/*`.** It counts per IP,
+like the origin limiters, so it doesn't add a bound; it moves a single-address
+flood's cost (proxying through Caddy, nginx and Node to the 429) to the edge.
+Security → WAF → Rate limiting rules, on
+`starts_with(http.request.uri.path, "/api/")`. It counts every `/api/`
+request (matches, token routes and reads alike), so size its threshold
+against a carrier CGNAT address's whole legitimate `/api/` rate, which can be
+hundreds of voters', not against the origin limits. A flood spread over many
+addresses is bounded by neither; for that, rely on Cloudflare's DDoS and bot
+protection. Each candidate-page request that gets past both caches costs the
+database one or two primary-key lookups.
 
 **Safety:** The rule only caches responses where the origin sends
 `Cache-Control: public, s-maxage=...`. Party-token and admin routes send
@@ -269,7 +292,9 @@ Quick reference:
 ```bash
 # On the server: keep the production hostname for TLS and Caddy routing;
 # origin-local.json connects it to 127.0.0.1 and disables redirects.
-RATE_LIMIT_MATCH_MAX=100000 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d backend  # raise rate limit for test
+# The voter flow also opens candidate pages, whose misses count against
+# RATE_LIMIT_CANDIDATE_READ_MAX, all from this one host.
+RATE_LIMIT_MATCH_MAX=100000 RATE_LIMIT_CANDIDATE_READ_MAX=100000 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d backend  # raise rate limits for test
 NO_PROXY=avoinvaalikone.fi no_proxy=avoinvaalikone.fi k6 run \
   --config scripts/loadtest/origin-local.json \
   -e BASE_URL=https://avoinvaalikone.fi scripts/loadtest/voter-flow.js
@@ -298,7 +323,7 @@ for the test.
 - [ ] Cache Rule active in Cloudflare (verify `cf-cache-status: HIT`)
 - [ ] 3 backend replicas healthy (`docker compose ps`)
 - [ ] Redis healthy (`docker compose exec redis redis-cli ping`)
-- [ ] `RATE_LIMIT_MATCH_MAX` set appropriately (raise if CGNAT complaints)
+- [ ] `RATE_LIMIT_MATCH_MAX` set appropriately (raise if CGNAT complaints), and `RATE_LIMIT_CANDIDATE_READ_MAX` with it (about 4×: voters open several candidates per match)
 - [ ] Disk space adequate (`df -h /`) — log rotation limits logs to 3×10 MB per service
 - [ ] Health endpoint polled manually: `pool.waiting` should stay 0
 - [ ] Cloudflare analytics show cache hit ratio >90% for GET traffic
@@ -309,6 +334,7 @@ for the test.
 | Situation | Action |
 |-----------|--------|
 | Admin approves/hides a question set and it needs to be visible immediately | Cloudflare dashboard → Caching → Purge by URL → `https://avoinvaalikone.fi/api/question-sets` |
-| Voters behind one carrier IP getting 429 | Raise `RATE_LIMIT_MATCH_MAX` in `.env`, then `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d backend`. Keep both `-f` files (without the prod overlay this recreates a single backend with `TRUST_PROXY_HOPS=1`, which puts every voter in one rate-limit bucket, and publishes port 3000 past Caddy and Cloudflare), and don't use `restart`, which keeps the old environment. All replicas are recreated at once, so expect a few seconds of 502s (the match request retries once) |
+| Voters behind one carrier IP getting 429 | Raise `RATE_LIMIT_MATCH_MAX` in `.env` (and `RATE_LIMIT_CANDIDATE_READ_MAX` with it, about 4×: a 429 on opening a candidate fails silently in the UI), then `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d backend`. Keep both `-f` files (without the prod overlay this recreates a single backend with `TRUST_PROXY_HOPS=1`, which puts every voter in one rate-limit bucket, and publishes port 3000 past Caddy and Cloudflare), and don't use `restart`, which keeps the old environment. All replicas are recreated at once, so expect a few seconds of 502s (the match request retries once) |
+| Many 429s on public reads behind one IP | On candidate pages (`/api/candidates/<id>`): a client walking ids, or a crowd on a cold cache; for a crowd, raise `RATE_LIMIT_CANDIDATE_READ_MAX`. On the lists (`/api/candidates`, `/api/question-sets`), only failed reads count, so it's the database failing reads; check for 500s. Raise either the same way as `RATE_LIMIT_MATCH_MAX` above |
 | DB pool exhaustion (`waiting > 0`) | Raise `PG_POOL_MAX` in `.env` (keep `replicas × PG_POOL_MAX` under 100), then `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d backend` |
 | One backend replica unhealthy | Find the unhealthy container with `docker compose -f docker-compose.yml -f docker-compose.prod.yml ps backend`, then run `docker restart <container>` for that container only. This leaves healthy replicas running; `docker compose restart backend` restarts them all. Restart is appropriate here because no environment values changed (unlike the rows above); migrations run on startup and nginx re-resolves DNS within 10 s |

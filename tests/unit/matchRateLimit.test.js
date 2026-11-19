@@ -26,7 +26,7 @@ function loadMatchLimit(value) {
     rateLimit.mockClear();
     require("../../src/index");
     options = rateLimit.mock.calls.map(([config]) => config)
-      .find((config) => config.windowMs === 60000);
+      .find((config) => config.identifier === "match");
   });
   return options.max;
 }

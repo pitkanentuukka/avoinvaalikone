@@ -29,6 +29,27 @@ describe("docker-compose.yml backend environment", () => {
     expect(backendEnvironmentKeys()).toContain("RATE_LIMIT_MATCH_MAX");
   });
 
+  // Every limit the backend reads with limitFromEnv() is a dial the docs tell
+  // operators to set in .env (and to raise for load tests).
+  test("forwards every rate-limit variable the backend reads", () => {
+    const fs = require("fs");
+    const path = require("path");
+    const src = path.join(__dirname, "../../src");
+    const names = new Set();
+    const walk = (dir) => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const file = path.join(dir, entry.name);
+        if (entry.isDirectory()) walk(file);
+        else if (file.endsWith(".js")) {
+          for (const [, name] of fs.readFileSync(file, "utf8").matchAll(/limitFromEnv\("([A-Z_]+)"/g)) names.add(name);
+        }
+      }
+    };
+    walk(src);
+    expect([...names].sort()).toEqual(["RATE_LIMIT_CANDIDATE_READ_MAX", "RATE_LIMIT_LIST_READ_MAX", "RATE_LIMIT_MATCH_MAX"]);
+    expect(backendEnvironmentKeys()).toEqual(expect.arrayContaining([...names]));
+  });
+
   test("still forwards the variables listed before it (parser sanity check)", () => {
     expect(backendEnvironmentKeys()).toEqual(
       expect.arrayContaining(["NODE_ENV", "PG_POOL_MAX", "PG_QUERY_TIMEOUT_MS", "SMTP_PASS"])

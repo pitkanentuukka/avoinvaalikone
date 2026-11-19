@@ -129,6 +129,12 @@ introduces.
   `src/middleware/rateLimitStore.js` is a Redis-backed store so limits
   hold **across replicas** instead of multiplying by the replica count. Without
   `REDIS_URL` (local dev) limiters fall back to per-process memory.
+- The public reads have two limiters (`src/middleware/publicReadLimiter.js`,
+  issue #158), both after the micro-cache so only database reads count:
+  every candidate-page miss (`RATE_LIMIT_CANDIDATE_READ_MAX`, 1200/min/IP),
+  and failed reads of the candidate list and question sets
+  (`RATE_LIMIT_LIST_READ_MAX`, 300/min/IP). They send no rate-limit headers
+  and a `no-store` 429, since the responses are publicly cacheable.
 - All limiters are built with `failOpenLimiter` (`src/middleware/rateLimiter.js`)
   — they **fail open** if Redis is unreachable: no limit applies until it is back (there is no per-process
   fallback then). Losing rate limiting during a Redis outage is far better
@@ -232,6 +238,8 @@ All optional; defaults keep local dev working unchanged. See `.env.example`.
 | `PG_STATEMENT_TIMEOUT_MS` | 10000 | Server-side query kill switch (app pool only) |
 | `REDIS_URL` | unset | Shared rate-limit store; unset → per-process fallback |
 | `RATE_LIMIT_MATCH_MAX` | 300 | Voter-match requests per IP per minute |
+| `RATE_LIMIT_CANDIDATE_READ_MAX` | 1200 | Candidate-page reads per IP per minute that miss the micro-cache |
+| `RATE_LIMIT_LIST_READ_MAX` | 300 | Failed (status ≥ 400) reads of the candidate list and question sets per IP per minute |
 | `SENTRY_DSN` / `VITE_SENTRY_DSN` | unset | Error tracking (inert when unset) |
 | `BACKUP_BUCKET` | unset | S3 bucket for nightly dumps; unset → local-only |
 | `BACKUP_S3_ENDPOINT` / `BACKUP_S3_ACCESS_KEY` / `BACKUP_S3_SECRET_KEY` | unset | UpCloud Object Storage credentials |
