@@ -232,7 +232,8 @@ All optional; defaults keep local dev working unchanged. See `.env.example`.
 | `PG_STATEMENT_TIMEOUT_MS` | 10000 | Server-side query kill switch (app pool only) |
 | `REDIS_URL` | unset | Shared rate-limit store; unset → per-process fallback |
 | `RATE_LIMIT_MATCH_MAX` | 300 | Voter-match requests per IP per minute |
-| `RATE_LIMIT_PUBLIC_READ_MAX` | 300 | Failed public reads (404s, errors) per IP per minute that reach the database |
+| `RATE_LIMIT_CANDIDATE_READ_MAX` | 1200 | Candidate-page reads per IP per minute that miss the micro-cache |
+| `RATE_LIMIT_PUBLIC_READ_MAX` | 300 | Failed (status ≥ 400) reads of the candidate list and question sets per IP per minute |
 | `SENTRY_DSN` / `VITE_SENTRY_DSN` | unset | Error tracking (inert when unset) |
 | `BACKUP_BUCKET` | unset | S3 bucket for nightly dumps; unset → local-only |
 | `BACKUP_S3_ENDPOINT` / `BACKUP_S3_ACCESS_KEY` / `BACKUP_S3_SECRET_KEY` | unset | UpCloud Object Storage credentials |

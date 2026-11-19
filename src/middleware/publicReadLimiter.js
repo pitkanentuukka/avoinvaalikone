@@ -1,36 +1,33 @@
 const { failOpenLimiter, limitFromEnv } = require("./rateLimiter");
 const redisStore = require("./rateLimitStore");
 
-// Per-client limit on the failed public reads (GET /api/candidates,
-// /api/candidates/:id, /api/question-sets) that reach the database (issue
-// #158). What it bounds is a client walking URLs no cache holds, e.g. random
-// candidate UUIDs: each is a new URL to Cloudflare, and its 404 isn't kept by
-// the micro-cache (which keeps only 200s), so each was a database read.
+// Per-client limits on the public reads that reach the database (issue
+// #158). Both are mounted after microCache(), so micro-cache hits, nearly all
+// origin traffic for these routes, never reach them.
 //
-// - Mounted after microCache(), so micro-cache hits, nearly all origin
-//   traffic for these routes, never reach it.
-// - Successful reads aren't counted (skipSuccessfulRequests): the micro-cache
-//   already bounds them to about one database read per resource per replica
-//   per minute, and counting them could throttle a carrier CGNAT crowd on a
-//   cold edge cache. So legitimate voters practically never meet it; one
-//   client at the default cap is 5 sub-ms primary-key lookups a second.
-// - No rate-limit headers (legacyHeaders off): publicCache() has already
-//   marked these responses public, so Cloudflare would replay one client's
-//   counter to every visitor.
+// - Candidate pages (GET /api/candidates/:id): every miss counts, whatever
+//   its status. There are ~2,500 public ids, more than the micro-cache can be
+//   relied on to hold, and each id (or ?x=… spelling of it) is a new URL to
+//   Cloudflare, so a client walking ids, existing or random, would otherwise
+//   cost a database read (two for an existing one) per request. The cap is
+//   loose: a carrier CGNAT address with many voters opening candidates on a
+//   cold cache can cause hundreds of misses a minute legitimately.
+// - The lists (GET /api/candidates, /api/question-sets): only failed reads
+//   (status >= 400) count. Each is one resource, so the micro-cache bounds
+//   its successful reads to one per replica per minute, and a CGNAT crowd on
+//   a cold edge must never be throttled out of the quiz. (Successes count
+//   while in flight; concurrent misses aren't coalesced yet, #181.)
 //
-// It limits per address, as a Cloudflare per-IP rule would; a flood spread
-// over many addresses isn't bounded by either (docs/scaling.md).
-module.exports = failOpenLimiter({
-  // The policy name (only sent in draft-8 RateLimit-Policy headers, which
-  // are off); tests/unit/matchRateLimit.test.js finds the limiters by it.
-  identifier: "public-read",
+// Neither sends rate-limit headers: publicCache() has already marked these
+// responses public, so Cloudflare would replay one client's counter to every
+// visitor. They limit per address, as a Cloudflare per-IP rule would; a flood
+// spread over many addresses isn't bounded by either (docs/scaling.md).
+
+const common = {
   windowMs: 60 * 1000,
-  max: limitFromEnv("RATE_LIMIT_PUBLIC_READ_MAX", 300),
-  skipSuccessfulRequests: true,
   legacyHeaders: false,
   standardHeaders: false,
   skip: () => process.env.NODE_ENV !== "production",
-  store: redisStore("rl:public:"),
   message: { error: "Liian monta pyyntöä. Yritä myöhemmin uudelleen." },
   // no-store: publicCache() has already marked the response cacheable
   // (s-maxage=300), and Cloudflare could keep one client's 429 and serve it
@@ -43,4 +40,18 @@ module.exports = failOpenLimiter({
     res.set("Retry-After", String(Math.max(1, seconds)));
     res.status(options.statusCode).json(options.message);
   },
-});
+};
+
+module.exports = {
+  candidateReads: failOpenLimiter({
+    ...common,
+    max: limitFromEnv("RATE_LIMIT_CANDIDATE_READ_MAX", 1200),
+    store: redisStore("rl:candidate:"),
+  }),
+  listReads: failOpenLimiter({
+    ...common,
+    max: limitFromEnv("RATE_LIMIT_PUBLIC_READ_MAX", 300),
+    skipSuccessfulRequests: true,
+    store: redisStore("rl:public:"),
+  }),
+};

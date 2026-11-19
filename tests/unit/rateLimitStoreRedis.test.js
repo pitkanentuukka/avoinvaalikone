@@ -126,6 +126,19 @@ describeWithRedis("rate-limit store scripts on a real Redis (#149)", () => {
     expect(Number(await redis.sendCommand(["EXISTS", `${prefix}dec-missing`]))).toBe(0);
   });
 
+  // A hit counted in one window and uncounted after the next began (a slow
+  // successful read under skipSuccessfulRequests) must not take the new
+  // window's counter below 0.
+  test("decrement never takes a counter below 0", async () => {
+    const s = store();
+    await s.increment("floor");
+    await s.decrement("floor");
+    await s.decrement("floor");
+    await s.decrement("floor");
+    expect(Number(await redis.sendCommand(["GET", `${prefix}floor`]))).toBe(0);
+    expect((await s.increment("floor")).totalHits).toBe(1);
+  });
+
   test("resetKey starts the client's count again", async () => {
     const s = store();
     await s.increment("reset");

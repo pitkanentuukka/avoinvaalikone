@@ -5,7 +5,7 @@ const { requireAdmin } = require("../middleware/auth");
 const { isValidLength, isValidUrl, isValidEmail, isValidUUID, validateUUIDParam, quoteList } = require("../middleware/validation");
 const { publicCache } = require("../middleware/cacheControl");
 const microCache = require("../middleware/microCache");
-const publicReadLimiter = require("../middleware/publicReadLimiter");
+const { listReads } = require("../middleware/publicReadLimiter");
 const {
   sendNewQuestionSetNotification,
   sendQuestionSetReviewedNotification,
@@ -140,7 +140,7 @@ async function mergeQuestions(client, keepId, dropId) {
 const publicRouter = Router();
 
 // GET /api/question-sets — list approved, visible sets with their questions
-publicRouter.get("/", publicCache(300), microCache(), publicReadLimiter, async (req, res, next) => {
+publicRouter.get("/", publicCache(300), microCache(), listReads, async (req, res, next) => {
   try {
     const { rows: sets } = await db.query(
       `SELECT qs.id, qs.ngo_name, qs.logo_url, qs.title,
