@@ -50,8 +50,8 @@ module.exports = {
   }),
   listReads: failOpenLimiter({
     ...common,
-    max: limitFromEnv("RATE_LIMIT_PUBLIC_READ_MAX", 300),
+    max: limitFromEnv("RATE_LIMIT_LIST_READ_MAX", 300),
     skipSuccessfulRequests: true,
-    store: redisStore("rl:public:"),
+    store: redisStore("rl:list:"),
   }),
 };

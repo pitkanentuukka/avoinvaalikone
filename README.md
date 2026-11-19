@@ -177,7 +177,7 @@ A *question set* is one organization's themed bundle of statements — the core 
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | `/api/question-sets` | None | Approved sets + questions (the union voters choose from) |
+| GET | `/api/question-sets` | None | Approved sets + questions (the union voters choose from); see Rate Limiting |
 | POST | `/api/question-sets` | None | NGO submits a set (→ pending) |
 | GET | `/api/admin/question-sets` | Admin | All sets (any status) |
 | PATCH | `/api/admin/question-sets/:id/approve` | Admin | Approve; sends email notifications |
@@ -206,8 +206,8 @@ Each entry in `questions` is a string or `{ "statement": "..." }`, at most 50 en
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/candidates` | All candidates + party info |
-| GET | `/api/candidates/:id` | Single candidate + all answers |
+| GET | `/api/candidates` | All candidates + party info (rate-limited, see Rate Limiting) |
+| GET | `/api/candidates/:id` | Single candidate + all answers (rate-limited, see Rate Limiting) |
 
 **Party-token gated** (party secretary):
 
@@ -338,8 +338,10 @@ The concurrency tests (`questionMergeConcurrency`, `orphanQuestionConcurrency`, 
 | Admin endpoints (requests without a valid admin secret) | 30 req | 15 min |
 | NGO submissions | 20 req | 15 min |
 | Voter match | 300 req (`RATE_LIMIT_MATCH_MAX`) | 1 min |
+| Candidate pages (`GET /api/candidates/:id`), reads that miss the cache | 1200 req (`RATE_LIMIT_CANDIDATE_READ_MAX`) | 1 min |
+| Candidate list and question sets, failed reads (status ≥ 400) that miss the cache | 300 req (`RATE_LIMIT_LIST_READ_MAX`) | 1 min |
 
-These limits, and the per-token limits on the party, registration and candidate links (`src/routes/candidates.js`), apply only when `NODE_ENV=production`; they are skipped for every other value, including `development`, `test`, and an unset `NODE_ENV`. The voter match default leaves room for many voters behind one carrier CGNAT address; raise `RATE_LIMIT_MATCH_MAX` if they hit 429s, or for load tests (see `docs/scaling.md`). The admin limit only counts requests that lack a valid `ADMIN_SECRET`, so it slows down guessing the secret without throttling a logged-in admin.
+These limits, and the per-token limits on the party, registration and candidate links (`src/routes/candidates.js`), apply only when `NODE_ENV=production`; they are skipped for every other value, including `development`, `test`, and an unset `NODE_ENV`. The voter match default leaves room for many voters behind one carrier CGNAT address; raise `RATE_LIMIT_MATCH_MAX` (and `RATE_LIMIT_CANDIDATE_READ_MAX` with it) if they hit 429s, or for load tests (see `docs/scaling.md`). The public-read limits count only requests that reach the database, so ordinary traffic, served from Cloudflare and the per-replica micro-cache, never meets them. The admin limit only counts requests that lack a valid `ADMIN_SECRET`, so it slows down guessing the secret without throttling a logged-in admin.
 
 ---
 

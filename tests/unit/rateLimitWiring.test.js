@@ -6,7 +6,8 @@ const { unusedPort } = require("../helpers/fakeRedis");
 // src/routes/candidates.js) must fail open, and fast, with Redis down
 // (issue #149). The public-read limiters' routes need the database, which
 // this test leaves unreachable, so their fail-open is tested in
-// publicReadLimit.test.js instead. Each request below goes through one limiter and is answered
+// publicReadLimit.test.js instead.
+// Each request below goes through one limiter and is answered
 // without the database, so its status shows what the limiter did: the
 // route's own 4xx when it let the request through, a 500 when the store
 // error reached Express (a limiter that doesn't fail open).

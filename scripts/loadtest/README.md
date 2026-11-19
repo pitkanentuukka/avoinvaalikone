@@ -59,9 +59,10 @@ from one test host. `NO_PROXY` below ensures an HTTPS proxy from the shell's
 environment cannot bypass k6's direct connection override:
 
 ```bash
-# in /opt/vaalikone: raise the limit for the test (keep both -f files; not `restart`,
-# which keeps the old environment)
-RATE_LIMIT_MATCH_MAX=100000 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d backend
+# in /opt/vaalikone: raise the limits for the test (keep both -f files; not `restart`,
+# which keeps the old environment). The voter flow also opens candidate pages,
+# whose misses count against RATE_LIMIT_CANDIDATE_READ_MAX, all from this one host.
+RATE_LIMIT_MATCH_MAX=100000 RATE_LIMIT_CANDIDATE_READ_MAX=100000 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d backend
 NO_PROXY=avoinvaalikone.fi no_proxy=avoinvaalikone.fi k6 run \
   --config scripts/loadtest/origin-local.json \
   -e BASE_URL=https://avoinvaalikone.fi scripts/loadtest/voter-flow.js

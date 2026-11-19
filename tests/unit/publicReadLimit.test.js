@@ -30,11 +30,11 @@ let failLists;
 // redirect to https (and log that PUBLIC_HOST is unset).
 const get = (path, a = app) => request(a).get(path).set("X-Forwarded-Proto", "https");
 
-const ENV = ["NODE_ENV", "RATE_LIMIT_PUBLIC_READ_MAX", "RATE_LIMIT_CANDIDATE_READ_MAX"];
+const ENV = ["NODE_ENV", "RATE_LIMIT_LIST_READ_MAX", "RATE_LIMIT_CANDIDATE_READ_MAX"];
 beforeEach(() => {
   savedEnv = Object.fromEntries(ENV.map((k) => [k, process.env[k]]));
   process.env.NODE_ENV = "production";
-  process.env.RATE_LIMIT_PUBLIC_READ_MAX = String(LIST_LIMIT);
+  process.env.RATE_LIMIT_LIST_READ_MAX = String(LIST_LIMIT);
   process.env.RATE_LIMIT_CANDIDATE_READ_MAX = String(CANDIDATE_LIMIT);
   jest.isolateModules(() => {
     db = require("../../src/db/pool");
@@ -52,6 +52,10 @@ beforeEach(() => {
   });
   jest.spyOn(console, "log").mockImplementation(() => {});
   jest.spyOn(console, "error").mockImplementation(() => {});
+  // morgan writes its request lines to stdout directly.
+  const write = process.stdout.write.bind(process.stdout);
+  jest.spyOn(process.stdout, "write").mockImplementation((chunk, ...rest) =>
+    /^(GET|HEAD) \/api\//.test(String(chunk)) ? true : write(chunk, ...rest));
 });
 
 afterEach(() => {
@@ -80,11 +84,11 @@ describe("candidate pages", () => {
   });
 
   // Review round 2: with only failures counted, cycling through more
-  // existing ids than the micro-cache holds (or the same ids with a new
-  // query string, past Cloudflare) was 2 uncounted queries per request.
+  // existing ids than the micro-cache holds (each a new URL to Cloudflare)
+  // was 2 uncounted queries per request.
   test("existing ids that miss the cache count too", async () => {
     for (let i = 0; i < CANDIDATE_LIMIT; i++) {
-      expect((await get(`/api/candidates/${existingIds[i]}?x=${i}`)).status).toBe(200);
+      expect((await get(`/api/candidates/${existingIds[i]}`)).status).toBe(200);
     }
     expect((await get(`/api/candidates/${existingIds[CANDIDATE_LIMIT]}`)).status).toBe(429);
   });
@@ -209,4 +213,76 @@ test("with the rate-limit store failing, public reads still go through", async (
     expect((await get(randomCandidate(), failingApp)).status).toBe(404);
   }
   expect((await get("/api/question-sets", failingApp)).status).toBe(200);
+});
+
+// Loads the app with express-rate-limit and the store factory replaced, and
+// returns every limiter's options, each with the Redis prefix of its store.
+function limiterConfigs() {
+  const configs = [];
+  jest.isolateModules(() => {
+    jest.doMock("express-rate-limit", () => jest.fn((config) => {
+      configs.push(config);
+      return (req, res, next) => next();
+    }));
+    jest.doMock("../../src/middleware/rateLimitStore", () => {
+      const createStore = (prefix) => ({ prefix });
+      createStore.StoreError = class StoreError extends Error {};
+      return createStore;
+    });
+    require("../../src/index");
+  });
+  jest.dontMock("express-rate-limit");
+  jest.dontMock("../../src/middleware/rateLimitStore");
+  return configs;
+}
+
+describe("limiter configuration", () => {
+  // With Redis, limiters sharing a prefix would share one counter: 300
+  // candidate-page misses from a CGNAT address would lock its voters out of
+  // the lists, and list successes would uncount candidate misses.
+  test("every limiter has a Redis key prefix of its own", () => {
+    const prefixes = limiterConfigs().map((c) => c.store?.prefix);
+    expect(prefixes).toEqual(expect.arrayContaining(["rl:candidate:", "rl:list:"]));
+    expect(new Set(prefixes).size).toBe(prefixes.length);
+  });
+
+  test("the documented defaults", () => {
+    delete process.env.RATE_LIMIT_LIST_READ_MAX;
+    delete process.env.RATE_LIMIT_CANDIDATE_READ_MAX;
+    const byPrefix = Object.fromEntries(limiterConfigs().map((c) => [c.store?.prefix, c]));
+    expect(byPrefix["rl:candidate:"]).toMatchObject({ max: 1200, windowMs: 60000 });
+    expect(byPrefix["rl:candidate:"].skipSuccessfulRequests).toBeFalsy();
+    expect(byPrefix["rl:list:"]).toMatchObject({ max: 300, windowMs: 60000, skipSuccessfulRequests: true });
+  });
+});
+
+test("a list micro-cache hit never reaches the limiter", async () => {
+  const increments = [];
+  let countingApp;
+  jest.isolateModules(() => {
+    jest.doMock("../../src/middleware/rateLimitStore", () => {
+      const createStore = (prefix) => ({
+        prefix,
+        localKeys: false,
+        init() {},
+        increment: async () => {
+          increments.push(prefix);
+          return { totalHits: 1, resetTime: new Date(Date.now() + 60000) };
+        },
+        decrement: async () => {},
+        resetKey: async () => {},
+      });
+      createStore.StoreError = class StoreError extends Error {};
+      return createStore;
+    });
+    require("../../src/db/pool").query.mockImplementation(db.query.getMockImplementation());
+    countingApp = require("../../src/index");
+  });
+  jest.dontMock("../../src/middleware/rateLimitStore");
+
+  for (const path of ["/api/question-sets", "/api/candidates"]) {
+    expect((await get(path, countingApp)).headers["x-micro-cache"]).toBeUndefined();
+    expect((await get(path, countingApp)).headers["x-micro-cache"]).toBe("HIT");
+  }
+  expect(increments.filter((p) => p === "rl:list:")).toHaveLength(2);
 });
