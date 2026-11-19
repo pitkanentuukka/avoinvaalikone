@@ -185,7 +185,7 @@ ssh user@80.69.172.220 "docker compose logs backend 2>&1 | grep -E '010|already 
 # backend-3:   Migration 010_match_covering_index.sql already applied, skipping
 ```
 
-### 3. Create the Cloudflare Cache Rule (one-time manual step)
+### 3. Create the Cloudflare Cache Rule (and on Free, URL Rewrite Rules; one-time manual step)
 
 **This is required.** Cloudflare does not cache `application/json` by default.
 
@@ -204,7 +204,7 @@ ssh user@80.69.172.220 "docker compose logs backend 2>&1 | grep -E '010|already 
    - **Cache key → Query string:** Ignore query string, **if the zone's plan
      offers it** (Cloudflare documents it for Enterprise and Pay-as-you-go,
      not Free). On the Free plan, leave the cache key alone and create the
-     URL Rewrite Rules in 5 instead.
+     URL Rewrite Rules in sub-step 5 below instead.
 4. Save and deploy the rule.
 5. **Free plan only: drop the query string before the cache lookup.** These
    endpoints ignore the query string, and so does the micro-cache. With the
@@ -219,18 +219,22 @@ ssh user@80.69.172.220 "docker compose logs backend 2>&1 | grep -E '010|already 
      `https://avoinvaalikone.fi/api/candidates*` /
      `https://avoinvaalikone.fi/api/question-sets*`
    - **Then rewrite the path and/or query:** Path: *Preserve*. Query:
-     *Rewrite to*, with the field left **empty** ("Leave this field empty to
-     remove the query string", in Cloudflare's docs).
-   - Deploy both.
+     *Rewrite to*, **Target query** `*` (no leading `?`: the query field
+     never contains it), **Rewrite to** left **empty** ("Leave this field
+     empty to remove the query string", in Cloudflare's docs). The target
+     must match the whole query; left empty, it would match only an empty
+     query and change nothing.
+   - Deploy both; sub-step 6 checks that each works.
 
-   Nothing under these paths reads the query string (the token routes and
-   POSTs included), so the rewrite changes no response. Cloudflare's docs
-   don't state which plans have URL Rewrite Rules; if the dashboard doesn't
-   offer them, the edge can't be fixed on this plan, and the micro-cache
-   still answers such requests without a database read.
-6. Check: `scripts/verify-edge-cache.sh` (below) must pass, including its
-   probe with a never-seen query string. It checks the result, whichever of
-   3 or 5 the zone uses.
+   URL Rewrite Rules are Transform Rules, which every plan has (Free allows
+   10 active ones; these use 2). Nothing under these paths reads the query
+   string (the token routes and POSTs included), so the rewrite changes no
+   response.
+6. Check: `scripts/verify-edge-cache.sh` must pass (it runs after every
+   deploy; see "4. Verify edge caching" for the manual checks). It probes
+   both `/api/question-sets` and `/api/candidates` with a never-seen query
+   string, so it checks the result whichever of sub-step 3 or 5 the zone
+   uses, and each rewrite rule on its own.
 
 **Safety:** The rule only caches responses where the origin sends
 `Cache-Control: public, s-maxage=...`. Party-token and admin routes send
@@ -329,7 +333,7 @@ for the test.
 
 ## Election-night checklist
 
-- [ ] Cache Rule active in Cloudflare and ignoring the query string: `scripts/verify-edge-cache.sh` passes
+- [ ] Cache Rule active in Cloudflare, and the edge ignoring the query string (the rule's cache key, or the URL Rewrite Rules on Free): `scripts/verify-edge-cache.sh` passes
 - [ ] 3 backend replicas healthy (`docker compose ps`)
 - [ ] Redis healthy (`docker compose exec redis redis-cli ping`)
 - [ ] `RATE_LIMIT_MATCH_MAX` set appropriately (raise if CGNAT complaints)

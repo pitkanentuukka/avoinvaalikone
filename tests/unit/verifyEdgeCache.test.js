@@ -53,7 +53,9 @@ ${Object.entries(PROBE_SHAPES).map(([k, v]) => `    ${k}) printf '${v}'; exit 0 
     *) reply "$STUB_PROBE" ;;
   esac
 esac
-case "$STUB_CF_KEY" in
+mode=$STUB_CF_KEY
+case "$url" in */api/candidates*) mode=\${STUB_CF_KEY_CANDIDATES:-$mode} ;; esac
+case "$mode" in
   path) key=\${url%%\\?*} ;;
   dynamic) reply DYNAMIC ;;
   error503) printf 'HTTP/2 503\\r\\ncf-cache-status: DYNAMIC\\r\\n\\r\\n'; exit 0 ;;
@@ -65,8 +67,11 @@ reply MISS
 `;
 
 const URL = "https://example.test/api/question-sets";
+const CANDIDATES = "https://example.test/api/candidates";
 
-function run(cfKey, probe = "", style = "") {
+// candidatesKey: the cache key for /api/candidates* only (on the Free plan
+// each path has its own rewrite rule, which can be missing on its own).
+function run(cfKey, probe = "", style = "", candidatesKey = "") {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "verify-edge-"));
   try {
     const bin = path.join(dir, "bin");
@@ -75,7 +80,7 @@ function run(cfKey, probe = "", style = "") {
     fs.writeFileSync(path.join(bin, "sleep"), "#!/bin/sh\n", { mode: 0o755 });
     fs.writeFileSync(path.join(dir, "requests"), "");
     const res = spawnSync("bash", [SCRIPT, "example.test"], {
-      env: { PATH: `${bin}:/usr/bin:/bin`, STUB_DIR: dir, STUB_CF_KEY: cfKey, STUB_PROBE: probe, STUB_STYLE: style },
+      env: { PATH: `${bin}:/usr/bin:/bin`, STUB_DIR: dir, STUB_CF_KEY: cfKey, STUB_PROBE: probe, STUB_STYLE: style, STUB_CF_KEY_CANDIDATES: candidatesKey },
       encoding: "utf8",
     });
     const requests = fs.readFileSync(path.join(dir, "requests"), "utf8").split("\n").filter(Boolean);
@@ -85,13 +90,24 @@ function run(cfKey, probe = "", style = "") {
   }
 }
 
-test("passes when the cache rule ignores the query string", () => {
+test("passes when the edge ignores the query string on both paths", () => {
   const res = run("path");
   expect(res.stderr).toBe("");
   expect(res.status).toBe(0);
-  expect(res.requests).toHaveLength(3);
+  expect(res.requests).toHaveLength(5);
   expect(res.requests.slice(0, 2)).toEqual([URL, URL]);
   expect(res.requests[2].startsWith(`${URL}?`)).toBe(true);
+  expect(res.requests[3]).toBe(CANDIDATES);
+  expect(res.requests[4].startsWith(`${CANDIDATES}?`)).toBe(true);
+});
+
+// Review round 4: with one rewrite rule per path on the Free plan, the
+// candidates rule can be missing while the question-sets one works.
+test("fails when only the candidate list's query string reaches the cache key", () => {
+  const res = run("path", "", "", "url");
+  expect(res.status).toBe(1);
+  expect(res.stdout).toContain(`CF-Cache-Status for ${CANDIDATES} with a new query string: MISS\n`);
+  expect(res.stderr).toMatch(new RegExp(`query string on ${CANDIDATES} missed`));
 });
 
 // The entry can expire between the second request and the probe; a stale
@@ -143,9 +159,9 @@ test("fails when the cache key still includes the query string", () => {
 test("the query-string probe uses a fresh query each run", () => {
   const a = run("path").requests.filter((u) => u.includes("?"));
   const b = run("path").requests.filter((u) => u.includes("?"));
-  expect(a).toHaveLength(1);
-  expect(b).toHaveLength(1);
-  expect(a[0]).not.toBe(b[0]);
+  expect(a).toHaveLength(2);
+  expect(b).toHaveLength(2);
+  expect(new Set([...a, ...b]).size).toBe(4);
 });
 
 test("still reports a missing cache rule, without probing the cache key", () => {
@@ -160,4 +176,6 @@ test("an erroring site is reported as such, not as a cache rule problem", () => 
   expect(res.status).toBe(1);
   expect(res.stderr).toMatch(/answered 503: the origin or the edge is erroring/);
   expect(res.stderr).not.toMatch(/Cache Rule/);
+  expect(res.stdout).toContain("second=HTTP_503");
+  expect(res.requests).toHaveLength(2);
 });

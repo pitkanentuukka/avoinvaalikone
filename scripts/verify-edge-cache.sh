@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
 # Verify the Cloudflare Cache Rule for /api/* JSON is actually active, and that
-# its cache key ignores the query string.
-# The rule is manual dashboard state (see docs/scaling.md) — if it's deleted
-# or the zone is recreated, edge caching silently stops and origin load
-# multiplies. Run after every deploy and in the election-night checklist.
+# the edge ignores the query string on both cached paths (the Cache Rule's
+# cache key, or on the Free plan the URL Rewrite Rules; docs/scaling.md).
+# This is manual dashboard state — if it's deleted or the zone is recreated,
+# edge caching silently stops and origin load multiplies. Run after every
+# deploy and in the election-night checklist.
 #
 # Usage: scripts/verify-edge-cache.sh [host]   (default: avoinvaalikone.fi)
 set -euo pipefail
 
 HOST="${1:-avoinvaalikone.fi}"
 URL="https://$HOST/api/question-sets"
+CANDIDATES_URL="https://$HOST/api/candidates"
 
 # Prints the response's CF-Cache-Status, HTTP_<code> for an HTTP error, or
 # MISSING when there is no header (or no response at all); always one word.
@@ -24,6 +26,26 @@ status_of() {
          END { if (code + 0 >= 400) s = "HTTP_" code; print s }'
 }
 
+# The endpoints ignore the query string, so the edge must too: with
+# Cloudflare's default cache key, every new query string is a MISS that goes
+# to the origin (#159). A never-seen query string on $1 must hit the entry a
+# request just cached. If that entry expired in between, the probe finds it
+# stale (UPDATING, EXPIRED, …), which proves the same thing.
+probe_query_string() {
+  local url=$1 probe
+  probe=$(status_of "$url?cache-key-check=$(date +%s)-$$-$RANDOM")
+  echo "CF-Cache-Status for $url with a new query string: $probe"
+  case "$probe" in
+    HIT|UPDATING|STALE|REVALIDATED|EXPIRED)
+      return 0 ;;
+    MISS)
+      echo "FAIL: a new query string on $url missed the edge cache — the query string still reaches the cache key. Set the Cache Rule's Cache key → Query string → Ignore query string, or on the Free plan add the URL Rewrite Rule for this path that drops it (docs/scaling.md, \"3. Create the Cloudflare Cache Rule\")." >&2 ;;
+    *)
+      echo "FAIL: the query-string check on $url got $probe, so the cache key couldn't be checked; run the script again." >&2 ;;
+  esac
+  return 1
+}
+
 first=$(status_of)
 sleep 2
 second=$(status_of)
@@ -31,23 +53,15 @@ second=$(status_of)
 echo "CF-Cache-Status: first=$first second=$second"
 
 if [ "$second" = "HIT" ]; then
-  # The endpoints ignore the query string, so the rule's cache key must too:
-  # with Cloudflare's default key, every new query string is a MISS that goes
-  # to the origin (#159). A never-seen query string must hit the entry the
-  # requests above just cached. If that entry expired in between, the probe
-  # finds it stale (UPDATING, EXPIRED, …), which proves the same thing.
-  probe=$(status_of "$URL?cache-key-check=$(date +%s)-$$-$RANDOM")
-  echo "CF-Cache-Status with a new query string: $probe"
-  case "$probe" in
-    HIT|UPDATING|STALE|REVALIDATED|EXPIRED)
-      echo "OK: edge cache is serving $URL, whatever the query string"
-      exit 0 ;;
-    MISS)
-      echo "FAIL: a new query string missed the edge cache — the query string still reaches the cache key. Set the Cache Rule's Cache key → Query string → Ignore query string, or on the Free plan add the URL Rewrite Rules that drop it (docs/scaling.md, step 3)." >&2 ;;
-    *)
-      echo "FAIL: the query-string check got $probe, so the cache key couldn't be checked; run the script again." >&2 ;;
-  esac
-  exit 1
+  probe_query_string "$URL" || exit 1
+  # On the Free plan each path has its own rewrite rule, so check the
+  # candidate list's too. The Cache Rule is shown to work above, so one
+  # request to cache it is enough.
+  warm=$(status_of "$CANDIDATES_URL")
+  echo "CF-Cache-Status for $CANDIDATES_URL: $warm"
+  probe_query_string "$CANDIDATES_URL" || exit 1
+  echo "OK: edge cache is serving $URL and $CANDIDATES_URL, whatever the query string"
+  exit 0
 fi
 
 # First request may legitimately be MISS/EXPIRED right after a deploy or TTL
@@ -56,9 +70,9 @@ case "$second" in
   MISSING)
     echo "FAIL: no CF-Cache-Status header — is the site behind Cloudflare (orange cloud)?" >&2 ;;
   DYNAMIC)
-    echo "FAIL: Cloudflare is treating $URL as uncacheable — the Cache Rule is missing. Recreate it per docs/scaling.md." >&2 ;;
+    echo "FAIL: Cloudflare is treating $URL as uncacheable — the Cache Rule is missing. Recreate it (and on the Free plan the URL Rewrite Rules) per docs/scaling.md." >&2 ;;
   HTTP_*)
-    echo "FAIL: $URL answered ${second#HTTP_}: the origin or the edge is erroring, so the cache couldn't be checked." >&2 ;;
+    echo "FAIL: $URL answered ${second#HTTP_}: the origin or the edge is erroring (or blocking this client), so the cache couldn't be checked." >&2 ;;
   *)
     echo "FAIL: expected HIT on second request, got $second — check the Cache Rule and origin Cache-Control headers." >&2 ;;
 esac
