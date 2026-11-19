@@ -166,5 +166,5 @@ jobs:
       - name: Verify edge cache
         run: |
           if ! bash scripts/verify-edge-cache.sh avoinvaalikone.fi; then
-            echo "::warning::Cloudflare edge cache is NOT serving /api/question-sets — recreate the Cache Rule (docs/scaling.md)"
+            echo "::warning::Cloudflare edge cache check failed — see this step's log and the Cache Rule in docs/scaling.md"
           fi

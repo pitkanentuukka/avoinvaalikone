@@ -72,10 +72,13 @@ introduces.
   `no-store` so they can never be edge-cached even if a broad rule matches the
   path.
 - `scripts/verify-edge-cache.sh [host]` checks that the edge rule is actually
-  active (two requests; the second must be `cf-cache-status: HIT`). It runs in
-  CI after deploy as a **warning** (never fails the deploy) and belongs in the
-  election-night checklist, because the Cache Rule is manual dashboard state that
-  disappears silently if the zone is recreated.
+  active (two requests each to `/api/question-sets` and `/api/candidates`;
+  the second must be `cf-cache-status: HIT`, and a request with a never-seen
+  query string must find the cached entry, since the edge must ignore the
+  query string: the rule's cache key, or on the Free plan URL Rewrite Rules).
+  It runs in CI after deploy as a **warning** (never fails the deploy) and
+  belongs in the election-night checklist, because the Cache Rule is manual
+  dashboard state that disappears silently if the zone is recreated.
 
 ### Per-replica micro-cache
 - `src/middleware/microCache.js` caches successful GET bodies in-process for 60s
