@@ -58,6 +58,8 @@ case "$url" in */api/candidates*) mode=\${STUB_CF_KEY_CANDIDATES:-$mode} ;; esac
 case "$mode" in
   path) key=\${url%%\\?*} ;;
   dynamic) reply DYNAMIC ;;
+  miss) reply MISS ;;
+  noheader) printf 'HTTP/2 200\\r\\n\\r\\n'; exit 0 ;;
   error503) printf 'HTTP/2 503\\r\\ncf-cache-status: DYNAMIC\\r\\n\\r\\n'; exit 0 ;;
   *) key=$url ;;
 esac
@@ -77,14 +79,16 @@ function run(cfKey, probe = "", style = "", candidatesKey = "") {
     const bin = path.join(dir, "bin");
     fs.mkdirSync(bin);
     fs.writeFileSync(path.join(bin, "curl"), CURL_STUB, { mode: 0o755 });
-    fs.writeFileSync(path.join(bin, "sleep"), "#!/bin/sh\n", { mode: 0o755 });
+    fs.writeFileSync(path.join(bin, "sleep"), '#!/bin/sh\necho "sleep $*" >> "$STUB_DIR/requests"\n', { mode: 0o755 });
     fs.writeFileSync(path.join(dir, "requests"), "");
     const res = spawnSync("bash", [SCRIPT, "example.test"], {
       env: { PATH: `${bin}:/usr/bin:/bin`, STUB_DIR: dir, STUB_CF_KEY: cfKey, STUB_PROBE: probe, STUB_STYLE: style, STUB_CF_KEY_CANDIDATES: candidatesKey },
       encoding: "utf8",
     });
-    const requests = fs.readFileSync(path.join(dir, "requests"), "utf8").split("\n").filter(Boolean);
-    return { ...res, requests };
+    // Requests and sleeps, in order; `requests` is the requests alone.
+    const events = fs.readFileSync(path.join(dir, "requests"), "utf8").split("\n").filter(Boolean);
+    const requests = events.filter((e) => !e.startsWith("sleep "));
+    return { ...res, events, requests };
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -100,14 +104,26 @@ test("passes when the edge ignores the query string on both paths", () => {
   expect(res.requests.slice(3, 5)).toEqual([CANDIDATES, CANDIDATES]);
   expect(res.requests[5].startsWith(`${CANDIDATES}?`)).toBe(true);
   expect(res.stdout).toContain(`OK: edge cache is serving ${URL} and ${CANDIDATES}, whatever the query string`);
+  // The pause lets the edge store the entry before the second request.
+  expect(res.events.map((e) => e.replace(/\?.*/, "?…"))).toEqual([
+    URL, "sleep 2", URL, `${URL}?…`, CANDIDATES, "sleep 2", CANDIDATES, `${CANDIDATES}?…`,
+  ]);
 });
 
-test("a question-sets failure ends the check before the candidate list", () => {
+test("a question-sets failure doesn't stop the candidate list's check", () => {
   const res = run("url", "", "", "path");
   expect(res.status).toBe(1);
   expect(res.stderr).toMatch(new RegExp(`query string on ${URL} missed`));
-  expect(res.requests).toHaveLength(3);
+  expect(res.stderr).not.toMatch(new RegExp(`${CANDIDATES}\\b`));
+  expect(res.requests).toHaveLength(6);
   expect(res.stdout).not.toContain("OK:");
+});
+
+test("both missing rewrite rules are reported in one run", () => {
+  const res = run("url");
+  expect(res.status).toBe(1);
+  expect(res.stderr).toMatch(new RegExp(`query string on ${URL} missed`));
+  expect(res.stderr).toMatch(new RegExp(`query string on ${CANDIDATES} missed`));
 });
 
 // Review round 5: the candidate list gets the same two-request check, so a
@@ -116,6 +132,8 @@ test("a question-sets failure ends the check before the candidate list", () => {
 test.each([
   ["dynamic", /Cloudflare is treating .*\/api\/candidates as uncacheable — the Cache Rule is missing or doesn't cover this path/],
   ["error503", /\/api\/candidates answered 503: the origin or the edge is erroring/],
+  ["miss", /expected HIT on the second request to .*\/api\/candidates, got MISS/],
+  ["noheader", /no CF-Cache-Status header on .*\/api\/candidates/],
 ])("a candidate list answering %s is diagnosed, without a probe", (key, message) => {
   const res = run("path", "", "", key);
   expect(res.status).toBe(1);
@@ -191,7 +209,8 @@ test("still reports a missing cache rule, without probing the cache key", () => 
   const res = run("dynamic");
   expect(res.status).toBe(1);
   expect(res.stderr).toMatch(/Cache Rule is missing/);
-  expect(res.requests).toHaveLength(2);
+  // Both paths are checked, neither probed.
+  expect(res.requests).toEqual([URL, URL, CANDIDATES, CANDIDATES]);
 });
 
 test("an erroring site is reported as such, not as a cache rule problem", () => {
@@ -200,5 +219,6 @@ test("an erroring site is reported as such, not as a cache rule problem", () => 
   expect(res.stderr).toMatch(/answered 503: the origin or the edge is erroring/);
   expect(res.stderr).not.toMatch(/Cache Rule/);
   expect(res.stdout).toContain("second=HTTP_503");
-  expect(res.requests).toHaveLength(2);
+  // Both paths are checked, neither probed.
+  expect(res.requests).toEqual([URL, URL, CANDIDATES, CANDIDATES]);
 });

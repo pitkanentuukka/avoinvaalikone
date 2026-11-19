@@ -71,9 +71,15 @@ check_cached() {
 }
 
 # Both paths: on the Free plan each has its own URL Rewrite Rule, and the
-# Cache Rule's expression names each path.
+# Cache Rule's expression names each path. Each is checked even if the other
+# failed, so one run reports every rule that needs fixing.
+rc=0
 for url in "$URL" "$CANDIDATES_URL"; do
-  check_cached "$url" || exit 1
-  probe_query_string "$url" || exit 1
+  if check_cached "$url"; then
+    probe_query_string "$url" || rc=1
+  else
+    rc=1
+  fi
 done
+[ "$rc" -eq 0 ] || exit 1
 echo "OK: edge cache is serving $URL and $CANDIDATES_URL, whatever the query string"
