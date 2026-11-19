@@ -201,13 +201,36 @@ ssh user@80.69.172.220 "docker compose logs backend 2>&1 | grep -E '010|already 
      ```
    - **Cache eligibility:** Eligible for cache
    - **Edge TTL:** Respect origin headers
-   - **Cache key → Query string:** Ignore query string. Unlike most cache key
-     options, Cloudflare offers this one outside Enterprise too. These
-     endpoints ignore the query string, and so does the micro-cache. With the
-     default cache key, each new query string (`?x=<random>`) would be a
-     separate edge entry, so every such request would miss and reach the
-     origin (#159).
+   - **Cache key → Query string:** Ignore query string, **if the zone's plan
+     offers it** (Cloudflare documents it for Enterprise and Pay-as-you-go,
+     not Free). On the Free plan, leave the cache key alone and create the
+     URL Rewrite Rules in 5 instead.
 4. Save and deploy the rule.
+5. **Free plan only: drop the query string before the cache lookup.** These
+   endpoints ignore the query string, and so does the micro-cache. With the
+   default cache key, each new query string (`?x=<random>`) is a separate
+   edge entry, so every such request misses and reaches the origin (#159).
+   URL Rewrite Rules run before Cache Rules, so a rewrite that empties the
+   query string makes them all one entry. Create two rules, one per path,
+   under **Rules → Overview → Create rule → URL Rewrite Rule**:
+   - **Rule name:** `Drop query string: candidates` /
+     `Drop query string: question sets`
+   - **If incoming requests match:** Wildcard pattern, **Request URL**
+     `https://avoinvaalikone.fi/api/candidates*` /
+     `https://avoinvaalikone.fi/api/question-sets*`
+   - **Then rewrite the path and/or query:** Path: *Preserve*. Query:
+     *Rewrite to*, with the field left **empty** ("Leave this field empty to
+     remove the query string", in Cloudflare's docs).
+   - Deploy both.
+
+   Nothing under these paths reads the query string (the token routes and
+   POSTs included), so the rewrite changes no response. Cloudflare's docs
+   don't state which plans have URL Rewrite Rules; if the dashboard doesn't
+   offer them, the edge can't be fixed on this plan, and the micro-cache
+   still answers such requests without a database read.
+6. Check: `scripts/verify-edge-cache.sh` (below) must pass, including its
+   probe with a never-seen query string. It checks the result, whichever of
+   3 or 5 the zone uses.
 
 **Safety:** The rule only caches responses where the origin sends
 `Cache-Control: public, s-maxage=...`. Party-token and admin routes send
@@ -226,8 +249,8 @@ curl -sI https://avoinvaalikone.fi/api/question-sets | grep cf-cache-status
 
 # A new query string is served from the same edge entry
 curl -sI "https://avoinvaalikone.fi/api/question-sets?x=$(date +%s)$$" | grep cf-cache-status
-# cf-cache-status: HIT  (UPDATING/EXPIRED/REVALIDATED if the entry just
-# expired are fine too; MISS means the cache key still includes the query string)
+# cf-cache-status: HIT  (UPDATING/EXPIRED/REVALIDATED/STALE if the entry just
+# expired are fine too; MISS means the query string still reaches the cache key)
 
 # Party-token route must NOT be cached
 curl -sI https://avoinvaalikone.fi/api/candidates/party/some-token | grep cf-cache-status

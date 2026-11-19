@@ -43,7 +43,7 @@ if [ "$second" = "HIT" ]; then
       echo "OK: edge cache is serving $URL, whatever the query string"
       exit 0 ;;
     MISS)
-      echo "FAIL: a new query string missed the edge cache — the Cache Rule's cache key includes the query string. Set Cache key → Query string → Ignore query string (docs/scaling.md)." >&2 ;;
+      echo "FAIL: a new query string missed the edge cache — the query string still reaches the cache key. Set the Cache Rule's Cache key → Query string → Ignore query string, or on the Free plan add the URL Rewrite Rules that drop it (docs/scaling.md, step 3)." >&2 ;;
     *)
       echo "FAIL: the query-string check got $probe, so the cache key couldn't be checked; run the script again." >&2 ;;
   esac
@@ -57,6 +57,8 @@ case "$second" in
     echo "FAIL: no CF-Cache-Status header — is the site behind Cloudflare (orange cloud)?" >&2 ;;
   DYNAMIC)
     echo "FAIL: Cloudflare is treating $URL as uncacheable — the Cache Rule is missing. Recreate it per docs/scaling.md." >&2 ;;
+  HTTP_*)
+    echo "FAIL: $URL answered ${second#HTTP_}: the origin or the edge is erroring, so the cache couldn't be checked." >&2 ;;
   *)
     echo "FAIL: expected HIT on second request, got $second — check the Cache Rule and origin Cache-Control headers." >&2 ;;
 esac

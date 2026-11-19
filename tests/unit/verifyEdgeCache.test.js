@@ -28,6 +28,10 @@ const PROBE_SHAPES = {
     "HTTP/1.1 200 Connection established\\r\\n\\r\\nHTTP/2 503\\r\\ncf-cache-status: MISS\\r\\n\\r\\n",
   // 103 Early Hints before the real (cached) response.
   hints: "HTTP/2 103\\r\\nlink: </app.js>\\r\\n\\r\\nHTTP/2 200\\r\\ncf-cache-status: HIT\\r\\n\\r\\n",
+  // A cached 4xx: an error, whatever the status.
+  http404: "HTTP/2 404\\r\\ncf-cache-status: HIT\\r\\n\\r\\n",
+  // A status only in an earlier block: the final response has none.
+  earlyStatus: "HTTP/2 103\\r\\ncf-cache-status: HIT\\r\\n\\r\\nHTTP/2 200\\r\\n\\r\\n",
 };
 
 const CURL_STUB = `#!/bin/sh
@@ -52,6 +56,7 @@ esac
 case "$STUB_CF_KEY" in
   path) key=\${url%%\\?*} ;;
   dynamic) reply DYNAMIC ;;
+  error503) printf 'HTTP/2 503\\r\\ncf-cache-status: DYNAMIC\\r\\n\\r\\n'; exit 0 ;;
   *) key=$url ;;
 esac
 if grep -qxF "$key" "$STUB_DIR/cache" 2>/dev/null; then reply HIT; fi
@@ -114,6 +119,8 @@ test("a 103 Early Hints block before the response is skipped", () => {
 
 test.each([
   ["http503", "HTTP_503"],
+  ["http404", "HTTP_404"],
+  ["earlyStatus", "MISSING"],
   ["connect503", "HTTP_503"],
   ["network", "MISSING"],
   ["DYNAMIC", "DYNAMIC"],
@@ -122,7 +129,7 @@ test.each([
   const res = run("path", probe);
   expect(res.status).toBe(1);
   expect(res.stdout).toContain(`new query string: ${status}\n`);
-  expect(res.stderr).not.toMatch(/cache key includes/);
+  expect(res.stderr).not.toMatch(/reaches the cache key/);
   expect(res.stderr).toMatch(/couldn't be checked/);
 });
 
@@ -130,7 +137,7 @@ test("fails when the cache key still includes the query string", () => {
   const res = run("url");
   expect(res.status).toBe(1);
   expect(res.stdout).toContain("new query string: MISS\n");
-  expect(res.stderr).toMatch(/cache key includes the query string/);
+  expect(res.stderr).toMatch(/query string still reaches the cache key/);
 });
 
 test("the query-string probe uses a fresh query each run", () => {
@@ -141,8 +148,16 @@ test("the query-string probe uses a fresh query each run", () => {
   expect(a[0]).not.toBe(b[0]);
 });
 
-test("still reports a missing cache rule", () => {
+test("still reports a missing cache rule, without probing the cache key", () => {
   const res = run("dynamic");
   expect(res.status).toBe(1);
   expect(res.stderr).toMatch(/Cache Rule is missing/);
+  expect(res.requests).toHaveLength(2);
+});
+
+test("an erroring site is reported as such, not as a cache rule problem", () => {
+  const res = run("error503");
+  expect(res.status).toBe(1);
+  expect(res.stderr).toMatch(/answered 503: the origin or the edge is erroring/);
+  expect(res.stderr).not.toMatch(/Cache Rule/);
 });
