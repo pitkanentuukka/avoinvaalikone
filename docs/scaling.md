@@ -256,6 +256,12 @@ curl -sI "https://avoinvaalikone.fi/api/question-sets?x=$(date +%s)$$" | grep cf
 # cf-cache-status: HIT  (UPDATING/EXPIRED/REVALIDATED/STALE if the entry just
 # expired are fine too; MISS means the query string still reaches the cache key)
 
+# The same for the candidate list (on the Free plan it has its own rewrite
+# rule); request it once first so the edge has it
+curl -sI https://avoinvaalikone.fi/api/candidates > /dev/null; sleep 2
+curl -sI "https://avoinvaalikone.fi/api/candidates?x=$(date +%s)$$" | grep cf-cache-status
+# cf-cache-status: HIT
+
 # Party-token route must NOT be cached
 curl -sI https://avoinvaalikone.fi/api/candidates/party/some-token | grep cf-cache-status
 # cf-cache-status: DYNAMIC  (or BYPASS)

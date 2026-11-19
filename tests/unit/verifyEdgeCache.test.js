@@ -94,11 +94,34 @@ test("passes when the edge ignores the query string on both paths", () => {
   const res = run("path");
   expect(res.stderr).toBe("");
   expect(res.status).toBe(0);
-  expect(res.requests).toHaveLength(5);
+  expect(res.requests).toHaveLength(6);
   expect(res.requests.slice(0, 2)).toEqual([URL, URL]);
   expect(res.requests[2].startsWith(`${URL}?`)).toBe(true);
-  expect(res.requests[3]).toBe(CANDIDATES);
-  expect(res.requests[4].startsWith(`${CANDIDATES}?`)).toBe(true);
+  expect(res.requests.slice(3, 5)).toEqual([CANDIDATES, CANDIDATES]);
+  expect(res.requests[5].startsWith(`${CANDIDATES}?`)).toBe(true);
+  expect(res.stdout).toContain(`OK: edge cache is serving ${URL} and ${CANDIDATES}, whatever the query string`);
+});
+
+test("a question-sets failure ends the check before the candidate list", () => {
+  const res = run("url", "", "", "path");
+  expect(res.status).toBe(1);
+  expect(res.stderr).toMatch(new RegExp(`query string on ${URL} missed`));
+  expect(res.requests).toHaveLength(3);
+  expect(res.stdout).not.toContain("OK:");
+});
+
+// Review round 5: the candidate list gets the same two-request check, so a
+// Cache Rule that doesn't cover it, or an erroring origin, is reported as
+// such rather than as an inconclusive probe.
+test.each([
+  ["dynamic", /Cloudflare is treating .*\/api\/candidates as uncacheable — the Cache Rule is missing or doesn't cover this path/],
+  ["error503", /\/api\/candidates answered 503: the origin or the edge is erroring/],
+])("a candidate list answering %s is diagnosed, without a probe", (key, message) => {
+  const res = run("path", "", "", key);
+  expect(res.status).toBe(1);
+  expect(res.stderr).toMatch(message);
+  expect(res.requests).toHaveLength(5);
+  expect(res.requests.at(-1)).toBe(CANDIDATES);
 });
 
 // Review round 4: with one rewrite rule per path on the Free plan, the

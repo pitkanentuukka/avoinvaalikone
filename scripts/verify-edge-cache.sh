@@ -46,34 +46,34 @@ probe_query_string() {
   return 1
 }
 
-first=$(status_of)
-sleep 2
-second=$(status_of)
+# Two requests to $1, 2 s apart: the first may legitimately be MISS/EXPIRED
+# right after a deploy or TTL expiry, the second must be a HIT if the Cache
+# Rule covers $1.
+check_cached() {
+  local url=$1 first second
+  first=$(status_of "$url")
+  sleep 2
+  second=$(status_of "$url")
+  echo "CF-Cache-Status for $url: first=$first second=$second"
+  case "$second" in
+    HIT)
+      return 0 ;;
+    MISSING)
+      echo "FAIL: no CF-Cache-Status header on $url — is the site behind Cloudflare (orange cloud)?" >&2 ;;
+    DYNAMIC)
+      echo "FAIL: Cloudflare is treating $url as uncacheable — the Cache Rule is missing or doesn't cover this path. Recreate it (and on the Free plan the URL Rewrite Rules) per docs/scaling.md." >&2 ;;
+    HTTP_*)
+      echo "FAIL: $url answered ${second#HTTP_}: the origin or the edge is erroring (or blocking this client), so the cache couldn't be checked." >&2 ;;
+    *)
+      echo "FAIL: expected HIT on the second request to $url, got $second — check the Cache Rule and origin Cache-Control headers." >&2 ;;
+  esac
+  return 1
+}
 
-echo "CF-Cache-Status: first=$first second=$second"
-
-if [ "$second" = "HIT" ]; then
-  probe_query_string "$URL" || exit 1
-  # On the Free plan each path has its own rewrite rule, so check the
-  # candidate list's too. The Cache Rule is shown to work above, so one
-  # request to cache it is enough.
-  warm=$(status_of "$CANDIDATES_URL")
-  echo "CF-Cache-Status for $CANDIDATES_URL: $warm"
-  probe_query_string "$CANDIDATES_URL" || exit 1
-  echo "OK: edge cache is serving $URL and $CANDIDATES_URL, whatever the query string"
-  exit 0
-fi
-
-# First request may legitimately be MISS/EXPIRED right after a deploy or TTL
-# expiry; the second must be a HIT if the Cache Rule exists.
-case "$second" in
-  MISSING)
-    echo "FAIL: no CF-Cache-Status header — is the site behind Cloudflare (orange cloud)?" >&2 ;;
-  DYNAMIC)
-    echo "FAIL: Cloudflare is treating $URL as uncacheable — the Cache Rule is missing. Recreate it (and on the Free plan the URL Rewrite Rules) per docs/scaling.md." >&2 ;;
-  HTTP_*)
-    echo "FAIL: $URL answered ${second#HTTP_}: the origin or the edge is erroring (or blocking this client), so the cache couldn't be checked." >&2 ;;
-  *)
-    echo "FAIL: expected HIT on second request, got $second — check the Cache Rule and origin Cache-Control headers." >&2 ;;
-esac
-exit 1
+# Both paths: on the Free plan each has its own URL Rewrite Rule, and the
+# Cache Rule's expression names each path.
+for url in "$URL" "$CANDIDATES_URL"; do
+  check_cached "$url" || exit 1
+  probe_query_string "$url" || exit 1
+done
+echo "OK: edge cache is serving $URL and $CANDIDATES_URL, whatever the query string"

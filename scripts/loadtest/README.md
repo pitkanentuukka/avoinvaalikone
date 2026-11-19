@@ -92,9 +92,10 @@ one Cache Rule for the zone:
 - **Cache eligibility:** Eligible for cache
 - **Edge TTL:** Respect origin headers
 - **Cache key → Query string:** Ignore query string where the plan offers
-  it; on the Free plan, URL Rewrite Rules that empty the query string
-  instead (the endpoints ignore it; with the default key every new query
-  string reaches the origin, #159)
+  it; on the Free plan, a URL Rewrite Rule per path instead (Query: Target
+  query `*`, Rewrite to empty; see docs/scaling.md). The endpoints ignore
+  the query string; with the default key every new one reaches the origin
+  (#159)
 
 [docs/scaling.md](../../docs/scaling.md), "Deployment steps → 3. Create the
 Cloudflare Cache Rule", is the full setup;
