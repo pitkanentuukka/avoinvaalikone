@@ -37,7 +37,7 @@ deployment hostname, update both the config key and `BASE_URL`. From a second
 test host, use a separate config mapping the same hostname to the origin's
 reachable IP, rather than `127.0.0.1`.
 
-Before raising the limit or starting a load test, verify the local HTTPS route
+Before raising the limits or starting a load test, verify the local HTTPS route
 (no redirects followed; an invalid empty match request should return the
 backend's Finnish validation JSON with HTTP 400):
 
@@ -54,8 +54,8 @@ These direct-to-origin tests omit Cloudflare. With production
 it from client-supplied `X-Forwarded-For`. The test measures origin capacity;
 it does not validate per-client rate limiting through the full proxy chain.
 
-Raise the match rate limit for the duration of the test, since the load comes
-from one test host. `NO_PROXY` below ensures an HTTPS proxy from the shell's
+Raise the match and candidate-page rate limits for the duration of the test,
+since the load comes from one test host. `NO_PROXY` below ensures an HTTPS proxy from the shell's
 environment cannot bypass k6's direct connection override:
 
 ```bash

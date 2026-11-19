@@ -52,10 +52,11 @@ beforeEach(() => {
   });
   jest.spyOn(console, "log").mockImplementation(() => {});
   jest.spyOn(console, "error").mockImplementation(() => {});
-  // morgan writes its request lines to stdout directly.
+  // morgan writes its request lines (":date[iso] :method :url …") to stdout
+  // directly.
   const write = process.stdout.write.bind(process.stdout);
   jest.spyOn(process.stdout, "write").mockImplementation((chunk, ...rest) =>
-    /^(GET|HEAD) \/api\//.test(String(chunk)) ? true : write(chunk, ...rest));
+    /^\S+ (GET|HEAD) \/api\//.test(String(chunk)) ? true : write(chunk, ...rest));
 });
 
 afterEach(() => {
