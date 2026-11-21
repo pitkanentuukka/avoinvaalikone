@@ -1,4 +1,4 @@
-# Vaalikone 2026
+# Vaalikone 2027
 
 A Finnish *voter advisory machine* (vaalikone / election compass): voters answer a set of policy statements, candidates answer the same statements, and the app ranks candidates by how closely their answers match the voter's.
 
