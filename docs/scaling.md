@@ -155,7 +155,8 @@ hostname every 10 seconds. Without this, nginx pins the IPs at startup and
 ## Deployment steps
 
 These steps apply on first deploy after the scaling work. Subsequent deploys
-via CI/CD (rsync + `docker compose up --build`) are automatic.
+via CI/CD (rsync + `scripts/deploy.sh`, the same script as a manual deploy
+below) are automatic.
 
 ### 1. Deploy the code
 
