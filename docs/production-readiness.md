@@ -213,6 +213,20 @@ introduces.
 - Enabled in `docker-compose.prod.yml`. If the `BACKUP_S3_*` vars are unset the
   sidecar still runs and keeps a local dump, logging a warning instead of
   uploading. Restore steps: `scripts/backup/restore.md`.
+- Object storage setup: create the bucket by hand, in another region than the
+  server, and a dedicated IAM user whose only policy allows `s3:ListBucket` and
+  `s3:GetBucketLocation` on `arn:aws:s3:::<bucket>` and `s3:GetObject`,
+  `s3:PutObject`, `s3:DeleteObject` (the 30-day pruning) and
+  `s3:AbortMultipartUpload` (cleans up a failed upload once dumps pass rclone's
+  200 MiB multipart cutoff) on `arn:aws:s3:::<bucket>/*`. Its access key goes in
+  `BACKUP_S3_ACCESS_KEY` / `BACKUP_S3_SECRET_KEY`. rclone is told not to create
+  the bucket (`no_check_bucket`), since that key may not (#194). Check with a
+  manual run: `docker compose -f docker-compose.yml -f docker-compose.prod.yml
+  exec backup backup.sh` must print `Upload OK` and no `ERROR:` line. Pruning
+  only deletes once dumps are 30 days old, so check the delete permission now:
+  `docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backup
+  sh -c 'echo x | rclone rcat "upcloud:$BACKUP_BUCKET/postgres/permcheck" &&
+  rclone deletefile "upcloud:$BACKUP_BUCKET/postgres/permcheck" && echo OK'`.
 
 ## Email
 

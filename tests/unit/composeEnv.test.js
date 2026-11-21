@@ -5,24 +5,28 @@
 const fs = require("fs");
 const path = require("path");
 
-function backendEnvironmentKeys() {
-  const text = fs.readFileSync(path.join(__dirname, "../../docker-compose.yml"), "utf8");
+// The `environment:` mapping of one service in a compose file, as written
+// (values unparsed, e.g. '"true"' or '${VAR:-}').
+function environmentOf(file, service) {
+  const text = fs.readFileSync(path.join(__dirname, "../..", file), "utf8");
   const lines = text.split("\n");
-  const start = lines.findIndex((l) => /^ {2}backend:\s*$/.test(l));
+  const start = lines.findIndex((l) => new RegExp(`^ {2}${service}:\\s*$`).test(l));
   expect(start).toBeGreaterThan(-1);
-  const keys = [];
+  const env = {};
   let inEnv = false;
   for (const line of lines.slice(start + 1)) {
     if (/^ {2}\S/.test(line)) break; // next service
     if (/^ {4}environment:\s*$/.test(line)) { inEnv = true; continue; }
     if (inEnv) {
-      const m = line.match(/^ {6}([A-Z0-9_]+):/);
-      if (m) keys.push(m[1]);
-      else if (/^ {4}\S/.test(line)) break; // next backend key
+      const m = line.match(/^ {6}([A-Z0-9_]+):\s*(.*?)\s*$/);
+      if (m) env[m[1]] = m[2];
+      else if (/^ {4}\S/.test(line)) break; // next key of the service
     }
   }
-  return keys;
+  return env;
 }
+
+const backendEnvironmentKeys = () => Object.keys(environmentOf("docker-compose.yml", "backend"));
 
 describe("docker-compose.yml backend environment", () => {
   test("forwards RATE_LIMIT_MATCH_MAX, the election-night rate-limit dial", () => {
@@ -117,4 +121,27 @@ test("src/index.js verifies SMTP once the server is listening", () => {
   const src = fs.readFileSync(path.join(__dirname, "../../src/index.js"), "utf8");
   const listen = src.slice(src.indexOf("app.listen("));
   expect(listen.slice(0, listen.indexOf("});"))).toMatch(/^\s+verifySmtp\(\);$/m);
+});
+
+// rclone's S3 backend calls CreateBucket before an upload unless
+// no_check_bucket is set. The backup key is scoped to the one bucket, which is
+// created by hand, so every nightly upload failed with 403 and the dump stayed
+// on the host only (issue #194).
+describe("docker-compose.prod.yml backup", () => {
+  // Every rclone remote backup.sh uploads to or prunes ("<remote>:$BACKUP_BUCKET").
+  function backupRemotes() {
+    const script = fs.readFileSync(path.join(__dirname, "../../scripts/backup/backup.sh"), "utf8");
+    return [...new Set([...script.matchAll(/([a-z0-9_]+):\$BACKUP_BUCKET/g)].map((m) => m[1]))];
+  }
+
+  test("backup.sh uses a remote (parser sanity check)", () => {
+    expect(backupRemotes()).toEqual(["upcloud"]);
+  });
+
+  test("tells rclone not to create the bucket, for the remote backup.sh uses", () => {
+    const env = environmentOf("docker-compose.prod.yml", "backup");
+    for (const remote of backupRemotes()) {
+      expect(env[`RCLONE_CONFIG_${remote.toUpperCase()}_NO_CHECK_BUCKET`]).toBe('"true"');
+    }
+  });
 });
