@@ -12,14 +12,28 @@ function sanitizeHeader(value) {
 // opening one SMTP connection per message, which providers throttle or reject.
 let transport = null;
 
+// Local mail catchers (the Compose mailpit service, or one on the host for a
+// plain-Node run). They have no TLS.
+const DEV_SMTP_HOSTS = ["localhost", "127.0.0.1", "::1", "mailpit"];
+const isDevSmtpHost = (host) => DEV_SMTP_HOSTS.includes(String(host).toLowerCase());
+
 function getTransport() {
   if (!transport) {
+    const secure = process.env.SMTP_SECURE === "true";
     transport = nodemailer.createTransport({
       pool: true,
       maxConnections: parseInt(process.env.SMTP_MAX_CONNECTIONS || "3"),
       host: process.env.SMTP_HOST,
       port: parseInt(process.env.SMTP_PORT || "587"),
-      secure: process.env.SMTP_SECURE === "true",
+      secure,
+      // Without implicit TLS, nodemailer uses STARTTLS only if the server
+      // offers it, so a server that doesn't (or an attacker stripping it)
+      // would get the credentials and the magic links in plaintext (#192).
+      // Decided by host, not NODE_ENV: Compose defaults NODE_ENV to
+      // production for local dev with mailpit too, and a plain-Node
+      // production may leave it unset. With NODE_ENV=production, verifySmtp()
+      // also warns about a dev host.
+      requireTLS: !secure && !isDevSmtpHost(process.env.SMTP_HOST),
       auth: process.env.SMTP_USER
         ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
         : undefined,
@@ -28,7 +42,6 @@ function getTransport() {
   return transport;
 }
 
-const DEV_SMTP_HOSTS = ["localhost", "127.0.0.1", "::1", "mailpit"];
 const PLACEHOLDER_ADDRESS = /@example\.(com|org|net)>?\s*$/i;
 
 /**
@@ -41,7 +54,7 @@ const PLACEHOLDER_ADDRESS = /@example\.(com|org|net)>?\s*$/i;
 function productionSmtpProblems() {
   const { SMTP_HOST, SMTP_PORT, SMTP_FROM, SMTP_USER } = process.env;
   const problems = [];
-  if (DEV_SMTP_HOSTS.includes(String(SMTP_HOST).toLowerCase())) {
+  if (isDevSmtpHost(SMTP_HOST)) {
     problems.push(`SMTP_HOST=${SMTP_HOST} on kehitysympäristön arvo: sähköpostit eivät lähde.`);
   }
   if (SMTP_PORT === "1025") {
