@@ -6,7 +6,8 @@ const db = require("../../src/db/pool");
 const { sendCandidateLinkEmail, sendApprovedQuestionSetNotificationToParty } = require("../../src/email");
 
 const sendMail = jest.fn();
-nodemailer.createTransport.mockReturnValue({ sendMail });
+const transportMock = { sendMail, verify: jest.fn() };
+nodemailer.createTransport.mockReturnValue(transportMock);
 
 const candidate = { id: "c1", name: "Maija", email: "maija@example.fi", token: "t1" };
 const logInsert = () => db.query.mock.calls.find(([sql]) => sql.includes("INSERT INTO email_log"));
@@ -67,5 +68,49 @@ describe("email_log", () => {
     await expect(sendCandidateLinkEmail(candidate, "Vihreät", "https://vaalikone.fi")).resolves.toBeUndefined();
     expect(spy).toHaveBeenCalled();
     spy.mockRestore();
+  });
+});
+
+// A wrong SMTP_HOST (the dev default "mailpit" in production) or bad
+// credentials otherwise surface only as failed rows in email_log (issue #190).
+describe("verifySmtp", () => {
+  const { verifySmtp } = require("../../src/email");
+  let log, warn, error;
+
+  beforeEach(() => {
+    transportMock.verify.mockReset();
+    log = jest.spyOn(console, "log").mockImplementation(() => {});
+    warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+    error = jest.spyOn(console, "error").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    log.mockRestore();
+    warn.mockRestore();
+    error.mockRestore();
+  });
+
+  test("logs a reachable server", async () => {
+    transportMock.verify.mockResolvedValue(true);
+    await verifySmtp();
+    expect(log.mock.calls.join(" ")).toContain("smtp.example.fi");
+    expect(error).not.toHaveBeenCalled();
+  });
+
+  test("logs an unreachable server without throwing", async () => {
+    transportMock.verify.mockRejectedValue(new Error("getaddrinfo ENOTFOUND mailpit"));
+    await expect(verifySmtp()).resolves.toBeUndefined();
+    expect(error.mock.calls.join(" ")).toContain("ENOTFOUND mailpit");
+  });
+
+  test("warns that email is disabled without SMTP_HOST", async () => {
+    const host = process.env.SMTP_HOST;
+    delete process.env.SMTP_HOST;
+    try {
+      await verifySmtp();
+    } finally {
+      process.env.SMTP_HOST = host;
+    }
+    expect(warn.mock.calls.join(" ")).toMatch(/SMTP_HOST/);
+    expect(transportMock.verify).not.toHaveBeenCalled();
   });
 });

@@ -70,3 +70,35 @@ describe("docker-compose.yml db command", () => {
     expect(db.slice(0, end === -1 ? undefined : end + 1)).not.toMatch(/^ {4}command:/m);
   });
 });
+
+// docker-compose.yml defaults SMTP_HOST to the dev-only mailpit service, which
+// production never starts. Without its own SMTP settings, a production deploy
+// sent every email to a leftover mailpit container (recorded as "sent", readable
+// on its published web UI) or to a host that doesn't resolve (issue #190).
+describe("docker-compose.prod.yml email", () => {
+  const prod = () => fs.readFileSync(path.join(__dirname, "../../docker-compose.prod.yml"), "utf8");
+
+  function serviceBlock(text, name) {
+    const start = text.search(new RegExp(`^ {2}${name}:\\s*$`, "m"));
+    if (start === -1) return "";
+    const rest = text.slice(start + 1);
+    const end = rest.search(/^ {2}\S/m);
+    return text.slice(start, end === -1 ? undefined : start + 1 + end);
+  }
+
+  test.each(["SMTP_HOST", "SMTP_FROM"])("requires %s instead of inheriting the dev default", (key) => {
+    expect(serviceBlock(prod(), "backend")).toMatch(new RegExp(`^ {6}${key}: \\$\\{${key}:\\?[^}]+\\}\\s*$`, "m"));
+  });
+
+  test("never publishes mailpit's ports, even if someone starts it there", () => {
+    expect(serviceBlock(prod(), "mailpit")).toMatch(/^ {4}ports: !reset \[\]\s*$/m);
+  });
+});
+
+describe("scripts/deploy.sh", () => {
+  // `up` without the dev profile leaves an existing mailpit container running.
+  test("removes any mailpit container", () => {
+    const script = fs.readFileSync(path.join(__dirname, "../../scripts/deploy.sh"), "utf8");
+    expect(script).toMatch(/^\$dc --profile dev rm --stop --force mailpit\b/m);
+  });
+});
