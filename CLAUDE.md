@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Vaalikone 2026 is a Finnish voter advisory machine (election compass). Voters answer policy questions and are matched with candidates based on answer similarity. It consists of a Node/Express backend (repo root) and a React frontend (`vaalikone-frontend/`).
+Vaalikone 2027 is a Finnish voter advisory machine (election compass). Voters answer policy questions and are matched with candidates based on answer similarity. It consists of a Node/Express backend (repo root) and a React frontend (`vaalikone-frontend/`).
 
 ## Commands
 

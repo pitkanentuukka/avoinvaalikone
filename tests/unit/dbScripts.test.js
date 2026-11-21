@@ -89,7 +89,7 @@ describe("migrations/seed.js", () => {
       }
       if (sql.includes("INSERT INTO parties")) {
         if (tables.parties.length) return { rows: [] };
-        tables.parties = ["sd-2026-x7k9", "nc-2026-m3p1", "gl-2026-q8w2"]
+        tables.parties = ["sd-2027-x7k9", "nc-2027-m3p1", "gl-2027-q8w2"]
           .map((token, id) => ({ id, token }));
         return { rows: tables.parties };
       }
