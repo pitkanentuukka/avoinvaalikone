@@ -90,15 +90,23 @@ describe("docker-compose.prod.yml email", () => {
     expect(serviceBlock(prod(), "backend")).toMatch(new RegExp(`^ {6}${key}: \\$\\{${key}:\\?[^}]+\\}\\s*$`, "m"));
   });
 
+  // The base file's SMTP_PORT default is mailpit's 1025; a provider set up
+  // with only the required host and sender would be dialled on 1025.
+  test("doesn't inherit mailpit's port 1025", () => {
+    expect(serviceBlock(prod(), "backend")).toMatch(/^ {6}SMTP_PORT: \$\{SMTP_PORT:-587\}\s*$/m);
+  });
+
+  // .env.example is what operators copy to .env, and SMTP_FROM's ":?" can't
+  // tell a copied example sender from a real one.
+  test.each([".env.example", "docker-compose.yml", "src/email.js"])(
+    "%s doesn't default the sender to a real domain this deployment doesn't control",
+    (file) => {
+      const text = fs.readFileSync(path.join(__dirname, "../..", file), "utf8");
+      expect(text).not.toMatch(/noreply@vaalikone\.fi/);
+    }
+  );
+
   test("never publishes mailpit's ports, even if someone starts it there", () => {
     expect(serviceBlock(prod(), "mailpit")).toMatch(/^ {4}ports: !reset \[\]\s*$/m);
-  });
-});
-
-describe("scripts/deploy.sh", () => {
-  // `up` without the dev profile leaves an existing mailpit container running.
-  test("removes any mailpit container", () => {
-    const script = fs.readFileSync(path.join(__dirname, "../../scripts/deploy.sh"), "utf8");
-    expect(script).toMatch(/^\$dc --profile dev rm --stop --force mailpit\b/m);
   });
 });

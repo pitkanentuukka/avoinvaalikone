@@ -1,7 +1,9 @@
 jest.mock("../../src/db/pool");
 jest.mock("nodemailer");
+jest.mock("@sentry/node", () => ({ captureMessage: jest.fn() }));
 
 const nodemailer = require("nodemailer");
+const Sentry = require("@sentry/node");
 const db = require("../../src/db/pool");
 const { sendCandidateLinkEmail, sendApprovedQuestionSetNotificationToParty } = require("../../src/email");
 
@@ -75,42 +77,78 @@ describe("email_log", () => {
 // credentials otherwise surface only as failed rows in email_log (issue #190).
 describe("verifySmtp", () => {
   const { verifySmtp } = require("../../src/email");
+  const saved = {};
   let log, warn, error;
+
+  // Set (or, with undefined, delete) env vars for one test; afterEach restores.
+  function setEnv(vars) {
+    for (const [key, value] of Object.entries(vars)) {
+      if (!(key in saved)) saved[key] = process.env[key];
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
 
   beforeEach(() => {
     transportMock.verify.mockReset();
+    Sentry.captureMessage.mockReset();
     log = jest.spyOn(console, "log").mockImplementation(() => {});
     warn = jest.spyOn(console, "warn").mockImplementation(() => {});
     error = jest.spyOn(console, "error").mockImplementation(() => {});
   });
   afterEach(() => {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+      delete saved[key];
+    }
     log.mockRestore();
     warn.mockRestore();
     error.mockRestore();
   });
 
-  test("logs a reachable server", async () => {
+  test("logs a reachable server with its port", async () => {
     transportMock.verify.mockResolvedValue(true);
     await verifySmtp();
-    expect(log.mock.calls.join(" ")).toContain("smtp.example.fi");
+    expect(log.mock.calls.join(" ")).toContain("smtp.example.fi:587");
     expect(error).not.toHaveBeenCalled();
   });
 
-  test("logs an unreachable server without throwing", async () => {
+  test("logs a failed check without throwing, and reports it to Sentry", async () => {
     transportMock.verify.mockRejectedValue(new Error("getaddrinfo ENOTFOUND mailpit"));
     await expect(verifySmtp()).resolves.toBeUndefined();
     expect(error.mock.calls.join(" ")).toContain("ENOTFOUND mailpit");
+    expect(Sentry.captureMessage).toHaveBeenCalledWith(expect.stringContaining("ENOTFOUND mailpit"), "error");
   });
 
   test("warns that email is disabled without SMTP_HOST", async () => {
-    const host = process.env.SMTP_HOST;
-    delete process.env.SMTP_HOST;
-    try {
-      await verifySmtp();
-    } finally {
-      process.env.SMTP_HOST = host;
-    }
+    setEnv({ SMTP_HOST: undefined });
+    await verifySmtp();
     expect(warn.mock.calls.join(" ")).toMatch(/SMTP_HOST/);
     expect(transportMock.verify).not.toHaveBeenCalled();
+  });
+
+  // verify() only logs in when auth is configured, so it passes against a
+  // provider that requires auth, and then every send fails.
+  test("warns in production when no SMTP credentials are set", async () => {
+    setEnv({ NODE_ENV: "production", SMTP_USER: undefined, SMTP_FROM: "noreply@example.org" });
+    transportMock.verify.mockResolvedValue(true);
+    await verifySmtp();
+    expect(warn.mock.calls.join(" ")).toMatch(/SMTP_USER/);
+  });
+
+  // Plain-Node production has no compose ":?" check for the sender.
+  test("warns in production when SMTP_FROM is unset", async () => {
+    setEnv({ NODE_ENV: "production", SMTP_USER: "u", SMTP_FROM: undefined });
+    transportMock.verify.mockResolvedValue(true);
+    await verifySmtp();
+    expect(warn.mock.calls.join(" ")).toMatch(/SMTP_FROM/);
+  });
+
+  test("doesn't warn about a complete production configuration", async () => {
+    setEnv({ NODE_ENV: "production", SMTP_USER: "u", SMTP_FROM: "noreply@example.org" });
+    transportMock.verify.mockResolvedValue(true);
+    await verifySmtp();
+    expect(warn).not.toHaveBeenCalled();
   });
 });

@@ -1,4 +1,5 @@
 const nodemailer = require("nodemailer");
+const Sentry = require("@sentry/node");
 const db = require("./db/pool");
 
 function sanitizeHeader(value) {
@@ -30,19 +31,32 @@ function getTransport() {
 /**
  * Check the SMTP connection once at startup and log the outcome. A wrong
  * SMTP_HOST or bad credentials otherwise surface only as failed rows in
- * email_log (#190). Never throws: the API keeps serving either way.
+ * email_log (#190). A failed check also goes to Sentry (a no-op without
+ * SENTRY_DSN). Never throws: the API keeps serving either way.
  */
 async function verifySmtp() {
   if (!process.env.SMTP_HOST) {
     console.warn("SMTP_HOST ei ole asetettu: sähköpostit (ehdokaslinkit, ilmoitukset) eivät lähde.");
     return;
   }
+  if (process.env.NODE_ENV === "production") {
+    // verify() logs in only when credentials are set, so without them it
+    // passes against a provider that requires auth, and every send fails.
+    if (!process.env.SMTP_USER) {
+      console.warn("SMTP_USER ei ole asetettu: jos palveluntarjoaja vaatii kirjautumisen, sähköpostit epäonnistuvat.");
+    }
+    if (!process.env.SMTP_FROM) {
+      console.warn("SMTP_FROM ei ole asetettu: lähettäjäksi tulee noreply@example.com, jonka vastaanottajat hylkäävät.");
+    }
+  }
   const server = `${process.env.SMTP_HOST}:${process.env.SMTP_PORT || "587"}`;
   try {
     await getTransport().verify();
     console.log(`SMTP-yhteys toimii: ${server}`);
   } catch (err) {
-    console.error(`SMTP-palvelimeen ${server} ei saada yhteyttä, sähköpostit epäonnistuvat:`, err.message || err);
+    const message = `SMTP-tarkistus epäonnistui (${server}), sähköpostit eivät lähde: ${err.message || err}`;
+    console.error(message);
+    Sentry.captureMessage(message, "error");
   }
 }
 
@@ -55,7 +69,7 @@ async function deliver(kind, message, { candidateId = null, partyId = null } = {
   let sendErr = null;
   try {
     await getTransport().sendMail({
-      from: process.env.SMTP_FROM || "noreply@vaalikone.fi",
+      from: process.env.SMTP_FROM || "noreply@example.com",
       ...message,
     });
   } catch (err) {
