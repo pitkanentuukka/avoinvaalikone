@@ -126,4 +126,3 @@ Bugs and tasks are tracked as GitHub issues (`pitkanentuukka/avoinvaalikone`). W
    List the collected pre-existing bugs and ask the user which ones to file as issues.
    When describing bugs, include 1. steps to reproduce 2. expected behaviour and 3. actual behaviour. Include these in the filed issue too.
    The user reviews and merges.
-
