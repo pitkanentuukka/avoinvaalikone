@@ -108,6 +108,7 @@ describe("verifySmtp", () => {
   });
 
   test("logs a reachable server with its port", async () => {
+    setEnv({ SMTP_PORT: undefined });
     transportMock.verify.mockResolvedValue(true);
     await verifySmtp();
     expect(log.mock.calls.join(" ")).toContain("smtp.example.fi:587");
@@ -131,7 +132,7 @@ describe("verifySmtp", () => {
   // verify() only logs in when auth is configured, so it passes against a
   // provider that requires auth, and then every send fails.
   test("warns in production when no SMTP credentials are set", async () => {
-    setEnv({ NODE_ENV: "production", SMTP_USER: undefined, SMTP_FROM: "noreply@example.org" });
+    setEnv({ NODE_ENV: "production", SMTP_USER: undefined, SMTP_FROM: "noreply@avoinvaalikone.fi" });
     transportMock.verify.mockResolvedValue(true);
     await verifySmtp();
     expect(warn.mock.calls.join(" ")).toMatch(/SMTP_USER/);
@@ -146,7 +147,34 @@ describe("verifySmtp", () => {
   });
 
   test("doesn't warn about a complete production configuration", async () => {
-    setEnv({ NODE_ENV: "production", SMTP_USER: "u", SMTP_FROM: "noreply@example.org" });
+    setEnv({ NODE_ENV: "production", SMTP_HOST: "smtp.example.fi", SMTP_PORT: "587",
+      SMTP_USER: "u", SMTP_FROM: "noreply@avoinvaalikone.fi" });
+    transportMock.verify.mockResolvedValue(true);
+    await verifySmtp();
+    expect(warn).not.toHaveBeenCalled();
+    expect(Sentry.captureMessage).not.toHaveBeenCalled();
+  });
+
+  // .env.example (which operators copy to .env) holds dev values that pass the
+  // prod compose file's ":?" checks: a provider host with them left in sends
+  // on mailpit's port, from a sender receivers reject.
+  test.each([
+    ["SMTP_HOST", { SMTP_HOST: "localhost" }],
+    ["SMTP_HOST", { SMTP_HOST: "mailpit" }],
+    ["SMTP_PORT", { SMTP_PORT: "1025" }],
+    ["SMTP_FROM", { SMTP_FROM: "noreply@example.com" }],
+    ["SMTP_FROM", { SMTP_FROM: "Vaalikone <noreply@EXAMPLE.org>" }],
+  ])("warns in production about a dev or placeholder %s (%o), also to Sentry", async (key, vars) => {
+    setEnv({ NODE_ENV: "production", SMTP_HOST: "smtp.example.fi", SMTP_PORT: "587",
+      SMTP_USER: "u", SMTP_FROM: "noreply@avoinvaalikone.fi", ...vars });
+    transportMock.verify.mockResolvedValue(true);
+    await verifySmtp();
+    expect(warn.mock.calls.join(" ")).toContain(key);
+    expect(Sentry.captureMessage).toHaveBeenCalledWith(expect.stringContaining(key), "warning");
+  });
+
+  test("doesn't warn about dev values outside production", async () => {
+    setEnv({ NODE_ENV: "development", SMTP_HOST: "localhost", SMTP_PORT: "1025", SMTP_FROM: "noreply@example.com" });
     transportMock.verify.mockResolvedValue(true);
     await verifySmtp();
     expect(warn).not.toHaveBeenCalled();

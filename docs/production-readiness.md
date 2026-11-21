@@ -233,9 +233,11 @@ email, so production can't run without a working SMTP provider.
   Otherwise receivers reject the mail or file it as spam.
 - At startup each backend replica logs `SMTP-yhteys toimii: <host>:<port>`,
   or `SMTP-tarkistus epäonnistui (<host>:<port>) …` with the error, which also
-  goes to Sentry. In production it also warns when `SMTP_USER` or `SMTP_FROM`
-  is unset; the check can't log in without credentials, so it would pass
-  against a provider that requires them. Every send is recorded in
+  goes to Sentry. In production it also warns, to the log and Sentry, about
+  settings that pass the compose checks but can't work: dev values copied from
+  `.env.example` (`SMTP_HOST` `localhost`/`mailpit`, `SMTP_PORT=1025`, an
+  `@example.com` sender) and a missing `SMTP_USER` (the check can't log in
+  without credentials, so it would pass against a provider that requires them). Every send is recorded in
   `email_log` (`sent` / `failed` with the error).
 - mailpit (the dev mail catcher, `--profile dev`) must never run in
   production: it keeps every message, magic links included. The prod file

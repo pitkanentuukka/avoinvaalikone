@@ -28,6 +28,36 @@ function getTransport() {
   return transport;
 }
 
+const DEV_SMTP_HOSTS = ["localhost", "127.0.0.1", "::1", "mailpit"];
+const PLACEHOLDER_SENDER = /@example\.(com|org|net)>?\s*$/i;
+
+/**
+ * Settings that can't work in production but pass the prod compose file's
+ * ":?" checks: the dev values in .env.example (which operators copy to .env)
+ * and missing credentials. verify() logs in only when credentials are set, so
+ * without them it passes against a provider that requires auth, and every
+ * send then fails.
+ */
+function productionSmtpProblems() {
+  const { SMTP_HOST, SMTP_PORT, SMTP_FROM, SMTP_USER } = process.env;
+  const problems = [];
+  if (DEV_SMTP_HOSTS.includes(String(SMTP_HOST).toLowerCase())) {
+    problems.push(`SMTP_HOST=${SMTP_HOST} on kehitysympäristön arvo: sähköpostit eivät lähde.`);
+  }
+  if (SMTP_PORT === "1025") {
+    problems.push("SMTP_PORT=1025 on kehitysympäristön (mailpit) portti: palveluntarjoajat käyttävät porttia 587 tai 465.");
+  }
+  if (!SMTP_FROM) {
+    problems.push("SMTP_FROM ei ole asetettu: lähettäjäksi tulee noreply@example.com, jonka vastaanottajat hylkäävät.");
+  } else if (PLACEHOLDER_SENDER.test(SMTP_FROM)) {
+    problems.push(`SMTP_FROM=${SMTP_FROM} on esimerkkiosoite, jonka vastaanottajat hylkäävät.`);
+  }
+  if (!SMTP_USER) {
+    problems.push("SMTP_USER ei ole asetettu: jos palveluntarjoaja vaatii kirjautumisen, sähköpostit epäonnistuvat.");
+  }
+  return problems;
+}
+
 /**
  * Check the SMTP connection once at startup and log the outcome. A wrong
  * SMTP_HOST or bad credentials otherwise surface only as failed rows in
@@ -40,13 +70,9 @@ async function verifySmtp() {
     return;
   }
   if (process.env.NODE_ENV === "production") {
-    // verify() logs in only when credentials are set, so without them it
-    // passes against a provider that requires auth, and every send fails.
-    if (!process.env.SMTP_USER) {
-      console.warn("SMTP_USER ei ole asetettu: jos palveluntarjoaja vaatii kirjautumisen, sähköpostit epäonnistuvat.");
-    }
-    if (!process.env.SMTP_FROM) {
-      console.warn("SMTP_FROM ei ole asetettu: lähettäjäksi tulee noreply@example.com, jonka vastaanottajat hylkäävät.");
+    for (const problem of productionSmtpProblems()) {
+      console.warn(problem);
+      Sentry.captureMessage(problem, "warning");
     }
   }
   const server = `${process.env.SMTP_HOST}:${process.env.SMTP_PORT || "587"}`;

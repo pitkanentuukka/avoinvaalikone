@@ -10,13 +10,13 @@ const path = require("path");
 
 const SCRIPT = path.join(__dirname, "../../scripts/deploy.sh");
 
-// `docker ps` lists one mailpit container; `docker compose …` exits with
-// STUB_COMPOSE_EXIT, as it does when the prod file's required variables
-// (SMTP_HOST, SMTP_FROM) are missing from .env.
+// `docker ps` lists one mailpit container, or fails with STUB_PS=fail;
+// `docker compose …` exits with STUB_COMPOSE_EXIT, as it does when the prod
+// file's required variables (SMTP_HOST, SMTP_FROM) are missing from .env.
 const DOCKER_STUB = `#!/bin/sh
 echo "$*" >> "$STUB_LOG"
 case "$1" in
-  ps) echo mailpit123 ;;
+  ps) [ "\${STUB_PS:-}" = fail ] && { echo "permission denied" >&2; exit 1; }; echo mailpit123 ;;
   compose) exit "\${STUB_COMPOSE_EXIT:-0}" ;;
 esac
 `;
@@ -37,9 +37,20 @@ function runDeploy(env = {}) {
 const isMailpitRemoval = (call) => call === "rm -f mailpit123";
 
 describe("scripts/deploy.sh mailpit removal", () => {
-  test("finds mailpit by its Compose service label", () => {
-    const { calls } = runDeploy();
-    expect(calls).toContain("ps -aq --filter label=com.docker.compose.service=mailpit");
+  // The project is named after the directory (no top-level `name:`), so
+  // another project's mailpit on the same host is left alone.
+  test("finds this project's mailpit by its Compose labels", () => {
+    const project = path.basename(path.join(__dirname, "../.."));
+    const { calls } = runDeploy({ COMPOSE_PROJECT_NAME: "" });
+    expect(calls).toContain(
+      `ps -aq --filter label=com.docker.compose.project=${project} --filter label=com.docker.compose.service=mailpit`
+    );
+  });
+
+  test("fails instead of skipping the removal when docker ps fails", () => {
+    const { status, calls } = runDeploy({ STUB_PS: "fail" });
+    expect(status).not.toBe(0);
+    expect(calls.some((c) => c.startsWith("compose"))).toBe(false);
   });
 
   test("removes it before anything else, even when Compose refuses the config", () => {

@@ -110,3 +110,11 @@ describe("docker-compose.prod.yml email", () => {
     expect(serviceBlock(prod(), "mailpit")).toMatch(/^ {4}ports: !reset \[\]\s*$/m);
   });
 });
+
+// Without this call nothing reports an unreachable SMTP server until a send
+// fails (#190); the call itself only runs when the server starts.
+test("src/index.js verifies SMTP once the server is listening", () => {
+  const src = fs.readFileSync(path.join(__dirname, "../../src/index.js"), "utf8");
+  const listen = src.slice(src.indexOf("app.listen("));
+  expect(listen.slice(0, listen.indexOf("});"))).toMatch(/^\s+verifySmtp\(\);$/m);
+});
