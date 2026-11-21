@@ -223,7 +223,7 @@ email, so production can't run without a working SMTP provider.
   `.env` sets them, every `docker compose -f docker-compose.yml -f
   docker-compose.prod.yml …` command fails, including `logs`, `ps` and
   `exec`, and so does `scripts/deploy.sh`; the running containers are left as
-  they are. The base file's `SMTP_HOST=mailpit` and `SMTP_PORT=1025` defaults
+  they are, apart from mailpit, which deploy.sh removes first. The base file's `SMTP_HOST=mailpit` and `SMTP_PORT=1025` defaults
   are for local dev only; the prod file defaults the port to 587.
 - Use a transactional email provider on port 587 (STARTTLS, `SMTP_SECURE=false`)
   or 465 (`SMTP_PORT=465`, `SMTP_SECURE=true`), not 25. Set `SMTP_USER` /
@@ -236,7 +236,7 @@ email, so production can't run without a working SMTP provider.
   goes to Sentry. In production it also warns, to the log and Sentry, about
   settings that pass the compose checks but can't work: dev values copied from
   `.env.example` (`SMTP_HOST` `localhost`/`mailpit`, `SMTP_PORT=1025`, an
-  `@example.com` sender) and a missing `SMTP_USER` (the check can't log in
+  `@example.com` sender or `ADMIN_EMAIL`) and a missing `SMTP_USER` (the check can't log in
   without credentials, so it would pass against a provider that requires them). Every send is recorded in
   `email_log` (`sent` / `failed` with the error).
 - mailpit (the dev mail catcher, `--profile dev`) must never run in

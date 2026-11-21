@@ -164,6 +164,7 @@ describe("verifySmtp", () => {
     ["SMTP_PORT", { SMTP_PORT: "1025" }],
     ["SMTP_FROM", { SMTP_FROM: "noreply@example.com" }],
     ["SMTP_FROM", { SMTP_FROM: "Vaalikone <noreply@EXAMPLE.org>" }],
+    ["ADMIN_EMAIL", { ADMIN_EMAIL: "admin@example.com" }],
   ])("warns in production about a dev or placeholder %s (%o), also to Sentry", async (key, vars) => {
     setEnv({ NODE_ENV: "production", SMTP_HOST: "smtp.example.fi", SMTP_PORT: "587",
       SMTP_USER: "u", SMTP_FROM: "noreply@avoinvaalikone.fi", ...vars });

@@ -29,7 +29,7 @@ function getTransport() {
 }
 
 const DEV_SMTP_HOSTS = ["localhost", "127.0.0.1", "::1", "mailpit"];
-const PLACEHOLDER_SENDER = /@example\.(com|org|net)>?\s*$/i;
+const PLACEHOLDER_ADDRESS = /@example\.(com|org|net)>?\s*$/i;
 
 /**
  * Settings that can't work in production but pass the prod compose file's
@@ -49,8 +49,11 @@ function productionSmtpProblems() {
   }
   if (!SMTP_FROM) {
     problems.push("SMTP_FROM ei ole asetettu: lähettäjäksi tulee noreply@example.com, jonka vastaanottajat hylkäävät.");
-  } else if (PLACEHOLDER_SENDER.test(SMTP_FROM)) {
+  } else if (PLACEHOLDER_ADDRESS.test(SMTP_FROM)) {
     problems.push(`SMTP_FROM=${SMTP_FROM} on esimerkkiosoite, jonka vastaanottajat hylkäävät.`);
+  }
+  if (process.env.ADMIN_EMAIL && PLACEHOLDER_ADDRESS.test(process.env.ADMIN_EMAIL)) {
+    problems.push(`ADMIN_EMAIL=${process.env.ADMIN_EMAIL} on esimerkkiosoite: ilmoitukset uusista kysymyssarjoista eivät tule perille.`);
   }
   if (!SMTP_USER) {
     problems.push("SMTP_USER ei ole asetettu: jos palveluntarjoaja vaatii kirjautumisen, sähköpostit epäonnistuvat.");

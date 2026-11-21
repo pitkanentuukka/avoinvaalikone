@@ -47,6 +47,15 @@ describe("scripts/deploy.sh mailpit removal", () => {
     );
   });
 
+  // A project named otherwise (COMPOSE_PROJECT_NAME in .env) still has the
+  // base file's fixed container_name; the stub finds the same container both
+  // ways, so the removal also shows it's removed once.
+  test("also finds it by its fixed container name", () => {
+    const { calls } = runDeploy();
+    expect(calls).toContain("ps -aq --filter name=^vaalikone-mailpit$");
+    expect(calls.filter((c) => c.startsWith("rm "))).toEqual(["rm -f mailpit123", "rm -f mailpit123"]);
+  });
+
   test("fails instead of skipping the removal when docker ps fails", () => {
     const { status, calls } = runDeploy({ STUB_PS: "fail" });
     expect(status).not.toBe(0);
