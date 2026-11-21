@@ -24,8 +24,20 @@ services:
       TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-3}
       # Public hostname used for the HTTP→HTTPS redirect.
       PUBLIC_HOST: ${PUBLIC_HOST:-}
+      # docker-compose.yml defaults these to the dev-only mailpit, which
+      # production never starts: a deploy without real SMTP settings sent
+      # every email nowhere, or into a leftover mailpit container (#190).
+      # The sender must be on a domain whose SPF/DKIM cover the SMTP provider.
+      SMTP_HOST: ${SMTP_HOST:?SMTP_HOST must be set in production (the mailpit default is dev-only)}
+      SMTP_FROM: ${SMTP_FROM:?SMTP_FROM must be set in production, on a domain with SPF and DKIM for the SMTP provider}
 
   frontend:
+    ports: !reset []
+
+  # Dev-only mail catcher (profile "dev"), never started here. Should it run
+  # anyway, keep it off the host's public interface: it holds every captured
+  # message, magic links included (#190). scripts/deploy.sh removes it.
+  mailpit:
     ports: !reset []
 
   # Nightly pg_dump → UpCloud Object Storage (S3-compatible) via rclone.

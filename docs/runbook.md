@@ -28,6 +28,8 @@ there. Not a bare `compose up`: it doesn't pick up a changed Caddyfile.
 | Lots of 429s on `/api/voter/match` | Rate limit too tight for CGNAT crowds | Raise `RATE_LIMIT_MATCH_MAX` in `/opt/vaalikone/.env`, `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d backend` (keep both files to preserve 3 replicas, proxy trust and unpublished backend ports; `restart` keeps the old environment) |
 | Slow `/api/*` GETs + high DB load | Edge cache not serving | `scripts/verify-edge-cache.sh` — if DYNAMIC, recreate the Cloudflare Cache Rule (docs/scaling.md) |
 | `statement timeout` errors | A query hit `PG_STATEMENT_TIMEOUT_MS` (10 s) | Find and fix the query; the timeout is protective, don't just raise it |
+| `SMTP-palvelimeen … ei saada yhteyttä` in backend logs, or `failed` rows in `email_log` | Email isn't going out (candidate links, notifications) | Check `SMTP_*` in `/opt/vaalikone/.env` and the provider's status; after fixing, `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d backend`. Re-send missed candidate links from the admin's per-party "send candidate links" |
+| Deploy fails with `required variable SMTP_HOST` (or `SMTP_FROM`) `is missing a value` | `.env` has no SMTP settings | Add them (docs/production-readiness.md, Email) and deploy again; the old containers keep running meanwhile |
 | Backend restart loops | Migration failure (runs on every start) | `docker compose -f docker-compose.yml -f docker-compose.prod.yml logs backend`, fix the migration, redeploy |
 | 502/504 from the site | A proxy can't reach the next hop | Caddy and nginx don't log upstream errors (they'd log tokens, #36). `docker compose -f docker-compose.yml -f docker-compose.prod.yml ps` for a down container; `docker compose -f docker-compose.yml -f docker-compose.prod.yml logs frontend`: `upstream=-` = the backend name didn't resolve (no replica running), `upstream_status=502` with `uct=-` = no connection (a backend refused or is gone), 504 / a high `urt` = hung. No line there = Caddy couldn't reach the frontend |
 
@@ -39,6 +41,7 @@ token, and a wrong token counts toward the admin rate limit). Errors: Sentry (ba
 
 - [ ] `scripts/verify-edge-cache.sh` passes (CF-Cache-Status: HIT)
 - [ ] Latest nightly dump exists in the backup bucket (`postgres/vaalikone-<yesterday>.dump`); take a fresh manual one: `docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backup backup.sh`
+- [ ] Email goes out: backend logs show `SMTP-yhteys toimii`, and a re-sent candidate link arrives (not in spam)
 - [ ] Sentry receiving events (send a test event, check the project dashboard)
 - [ ] `RATE_LIMIT_MATCH_MAX` set for the night (default 300/min/IP)
 - [ ] `docker compose -f docker-compose.yml -f docker-compose.prod.yml ps` — all services healthy, 3 backend replicas

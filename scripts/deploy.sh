@@ -7,6 +7,11 @@ cd "$(dirname "$0")/.."
 
 dc="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
 
+# mailpit is dev-only (profile "dev"), but `up` without the profile leaves a
+# container started before the profile existed running: it swallowed every
+# email and published its web UI, magic links included (#190).
+$dc --profile dev rm --stop --force mailpit
+
 $dc up --build -d
 
 # `up -d` leaves caddy running when only the Caddyfile changed, and

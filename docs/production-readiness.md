@@ -214,9 +214,31 @@ introduces.
   sidecar still runs and keeps a local dump, logging a warning instead of
   uploading. Restore steps: `scripts/backup/restore.md`.
 
+## Email
+
+Candidate links, party portal links and NGO notifications all go out by
+email, so production can't run without a working SMTP provider.
+
+- `docker-compose.prod.yml` requires `SMTP_HOST` and `SMTP_FROM`: a deploy
+  without them fails at `docker compose up` (#190). The base file's
+  `SMTP_HOST=mailpit` default is for local dev only.
+- Use a transactional email provider on port 587 (STARTTLS, `SMTP_SECURE=false`)
+  or 465 (`SMTP_SECURE=true`), not 25. Set `SMTP_USER` / `SMTP_PASS` from the
+  provider.
+- `SMTP_FROM` must be on a domain you control (`noreply@avoinvaalikone.fi`),
+  with the provider's SPF and DKIM records and a DMARC record in its DNS.
+  Otherwise receivers reject the mail or file it as spam.
+- At startup each backend replica logs `SMTP-yhteys toimii: <host>:<port>`,
+  or an error saying the server can't be reached. Every send is recorded in
+  `email_log` (`sent` / `failed` with the error).
+- mailpit (the dev mail catcher, `--profile dev`) must never run in
+  production: it keeps every message, magic links included. The prod file
+  doesn't publish its ports, and `scripts/deploy.sh` removes any mailpit
+  container, including one left over from before the profile existed.
+
 ## New environment variables
 
-All optional; defaults keep local dev working unchanged. See `.env.example`.
+Optional unless marked required; defaults keep local dev working unchanged. See `.env.example`.
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -227,6 +249,7 @@ All optional; defaults keep local dev working unchanged. See `.env.example`.
 | `SENTRY_DSN` / `VITE_SENTRY_DSN` | unset | Error tracking (inert when unset) |
 | `BACKUP_BUCKET` | unset | S3 bucket for nightly dumps; unset → local-only |
 | `BACKUP_S3_ENDPOINT` / `BACKUP_S3_ACCESS_KEY` / `BACKUP_S3_SECRET_KEY` | unset | UpCloud Object Storage credentials |
+| `SMTP_HOST` / `SMTP_FROM` | **required in production** | SMTP provider and sender address (see Email) |
 
 ## New dependencies
 

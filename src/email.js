@@ -28,6 +28,25 @@ function getTransport() {
 }
 
 /**
+ * Check the SMTP connection once at startup and log the outcome. A wrong
+ * SMTP_HOST or bad credentials otherwise surface only as failed rows in
+ * email_log (#190). Never throws: the API keeps serving either way.
+ */
+async function verifySmtp() {
+  if (!process.env.SMTP_HOST) {
+    console.warn("SMTP_HOST ei ole asetettu: sähköpostit (ehdokaslinkit, ilmoitukset) eivät lähde.");
+    return;
+  }
+  const server = `${process.env.SMTP_HOST}:${process.env.SMTP_PORT || "587"}`;
+  try {
+    await getTransport().verify();
+    console.log(`SMTP-yhteys toimii: ${server}`);
+  } catch (err) {
+    console.error(`SMTP-palvelimeen ${server} ei saada yhteyttä, sähköpostit epäonnistuvat:`, err.message || err);
+  }
+}
+
+/**
  * Send one message and record the outcome in email_log. Rethrows a send
  * failure so callers that report back (re-sending a candidate's link) still
  * see it; a failure to write the log row is only logged.
@@ -264,6 +283,7 @@ async function sendCandidateLinkEmail(candidate, partyName, frontendBaseUrl) {
 }
 
 module.exports = {
+  verifySmtp,
   sendCandidateLinkEmail,
   sendNewQuestionSetNotification,
   sendQuestionSetReviewedNotification,
