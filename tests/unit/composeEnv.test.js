@@ -118,3 +118,19 @@ test("src/index.js verifies SMTP once the server is listening", () => {
   const listen = src.slice(src.indexOf("app.listen("));
   expect(listen.slice(0, listen.indexOf("});"))).toMatch(/^\s+verifySmtp\(\);$/m);
 });
+
+// rclone's S3 backend calls CreateBucket before an upload unless
+// no_check_bucket is set. The backup key is scoped to objects in the one
+// bucket, which is created by hand, so every nightly upload failed with 403
+// and the dump stayed on the host only (issue #194).
+describe("docker-compose.prod.yml backup", () => {
+  test("tells rclone not to create the bucket", () => {
+    const prod = fs.readFileSync(path.join(__dirname, "../../docker-compose.prod.yml"), "utf8");
+    const start = prod.search(/^ {2}backup:\s*$/m);
+    expect(start).toBeGreaterThan(-1);
+    const rest = prod.slice(start + 1);
+    const end = rest.search(/^ {2}\S/m);
+    const backup = prod.slice(start, end === -1 ? undefined : start + 1 + end);
+    expect(backup).toMatch(/^ {6}RCLONE_CONFIG_UPCLOUD_NO_CHECK_BUCKET: "true"\s*$/m);
+  });
+});
