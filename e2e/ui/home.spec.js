@@ -6,7 +6,7 @@ test.describe("Home page", () => {
     await page.goto("/");
     await expect(page.locator("header")).toBeVisible();
     await expect(page.getByText("Vaalikone")).toBeVisible();
-    await expect(page.getByText("2027")).toBeVisible();
+    await expect(page.getByText("2027", { exact: true })).toBeVisible();
   });
 
   test("shows three main cards: voter, NGO, candidate", async ({ page }) => {

@@ -2,6 +2,8 @@
 
 Tämä ohje on tarkoitettu järjestön edustajalle, joka haluaa ehdottaa politiikkaväittämiä Vaalikone 2027 -järjestelmään.
 
+**Takaraja:** lähetä kysymyssarjasi **31.1.2027** mennessä, jotta ehdokkailla on aikaa vastata ennen eduskuntavaalien ennakkoäänestystä.
+
 ---
 
 ## Miten prosessi toimii?
@@ -91,7 +93,10 @@ Hyväksynnän jälkeen ylläpito voi vielä viimeistellä sanamuotoja ennen julk
 ## Usein kysyttyjä kysymyksiä
 
 **Kuinka nopeasti lähetys käsitellään?**
-Emme lupaa tiettyä aikataulua. Lähetä kysymyksesi hyvissä ajoin ennen vaaleja.
+Emme lupaa tiettyä aikataulua. Lähetä kysymyksesi hyvissä ajoin, viimeistään 31.1.2027.
+
+**Milloin kysymykset näkyvät äänestäjille?**
+Hyväksytyt kysymyssarjat julkaistaan yhdessä, kun ehdokkaiden vastausportaali avautuu helmikuussa 2027. Äänestäjille ehdokasvertailu avautuu maaliskuussa 2027.
 
 **Voiko samasta aiheesta lähettää useamman sarjan?**
 Kyllä, mutta suosittelemme kokoamaan yhteen sarjaan kaikki tiettyä aihetta koskevat väittämät. Tarkista ensin jo hyväksytyt sarjat.
