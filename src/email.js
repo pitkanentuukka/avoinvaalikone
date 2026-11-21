@@ -14,12 +14,18 @@ let transport = null;
 
 function getTransport() {
   if (!transport) {
+    const secure = process.env.SMTP_SECURE === "true";
     transport = nodemailer.createTransport({
       pool: true,
       maxConnections: parseInt(process.env.SMTP_MAX_CONNECTIONS || "3"),
       host: process.env.SMTP_HOST,
       port: parseInt(process.env.SMTP_PORT || "587"),
-      secure: process.env.SMTP_SECURE === "true",
+      secure,
+      // Without implicit TLS, nodemailer uses STARTTLS only if the server
+      // offers it, so a server that doesn't (or an attacker stripping it)
+      // would get the credentials and the magic links in plaintext (#192).
+      // Not in dev: the local mailpit has no TLS.
+      requireTLS: !secure && process.env.NODE_ENV === "production",
       auth: process.env.SMTP_USER
         ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
         : undefined,

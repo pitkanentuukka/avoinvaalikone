@@ -241,7 +241,9 @@ email, so production can't run without a working SMTP provider.
   are for local dev only; the prod file defaults the port to 587.
 - Use a transactional email provider on port 587 (STARTTLS, `SMTP_SECURE=false`)
   or 465 (`SMTP_PORT=465`, `SMTP_SECURE=true`), not 25. Set `SMTP_USER` /
-  `SMTP_PASS` from the provider.
+  `SMTP_PASS` from the provider. In production the connection must be
+  encrypted: on 587 the backend refuses to send (and the startup check fails)
+  unless the server offers STARTTLS (#192).
 - `SMTP_FROM` must be on a domain you control (`noreply@avoinvaalikone.fi`),
   with the provider's SPF and DKIM records and a DMARC record in its DNS.
   Otherwise receivers reject the mail or file it as spam.
