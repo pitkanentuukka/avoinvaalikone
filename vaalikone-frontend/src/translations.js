@@ -23,7 +23,7 @@ const translations = {
 
     // Header / Nav
     appName: "Vaalikone",
-    appYear: "2026",
+    appYear: "2027",
     navHome: "Etusivu",
     navVoter: "Äänestäjä",
     navNgo: "Järjestö",
@@ -287,7 +287,7 @@ const translations = {
 
     // Header / Nav
     appName: "Vaalikone",
-    appYear: "2026",
+    appYear: "2027",
     navHome: "Home",
     navVoter: "Voter",
     navNgo: "NGO",

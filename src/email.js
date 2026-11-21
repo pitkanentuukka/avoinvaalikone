@@ -170,7 +170,7 @@ async function sendQuestionSetReviewedNotification(questionSet, approved) {
       ? [
           `Hei ${questionSet.ngo_name},`,
           "",
-          `Kysymyssarjanne "${questionSet.title}" on hyväksytty ja se on nyt näkyvissä Vaalikone 2026 -järjestelmässä.`,
+          `Kysymyssarjanne "${questionSet.title}" on hyväksytty ja se on nyt näkyvissä Vaalikone 2027 -järjestelmässä.`,
           "",
           "Kiitos osallistumisestanne!",
         ].join("\n")
@@ -253,7 +253,7 @@ async function sendQuestionSetPublishedNotification(questionSet, questionCount) 
     text: [
       `Hei ${questionSet.ngo_name},`,
       "",
-      `Kysymyssarjanne "${questionSet.title}" on nyt julkaistu Vaalikone 2026 -järjestelmässä.`,
+      `Kysymyssarjanne "${questionSet.title}" on nyt julkaistu Vaalikone 2027 -järjestelmässä.`,
       "",
       `Julkaistuja kysymyksiä: ${questionCount}`,
       "",
@@ -273,7 +273,7 @@ async function sendApprovedQuestionSetNotificationToCandidate(questionSet, quest
     text: [
       `Hei ${candidate.name},`,
       "",
-      "Vaalikone 2026 -järjestelmään on hyväksytty uusi kysymyssarja, johon sinua pyydetään vastaamaan.",
+      "Vaalikone 2027 -järjestelmään on hyväksytty uusi kysymyssarja, johon sinua pyydetään vastaamaan.",
       "",
       `Järjestö: ${questionSet.ngo_name}`,
       `Kysymyssarja: ${questionSet.title}`,
@@ -296,7 +296,7 @@ async function sendApprovedQuestionSetNotificationToParty(questionSet, questionC
     text: [
       `Hei ${party.name},`,
       "",
-      "Vaalikone 2026 -järjestelmään on hyväksytty uusi kysymyssarja.",
+      "Vaalikone 2027 -järjestelmään on hyväksytty uusi kysymyssarja.",
       "Ehdokkaanne saavat ilmoituksen ja oman vastauslinkkinsä sähköpostitse. Muistuttakaa heitä vastaamaan uusiin kysymyksiin.",
       "",
       `Järjestö: ${questionSet.ngo_name}`,
@@ -323,7 +323,7 @@ async function sendCandidateLinkEmail(candidate, partyName, frontendBaseUrl) {
 
   await deliver("candidate_link", {
     to: candidate.email,
-    subject: "Henkilökohtainen vastauslinkkisi Vaalikone 2026 -järjestelmään",
+    subject: "Henkilökohtainen vastauslinkkisi Vaalikone 2027 -järjestelmään",
     text: [
       `Hei ${candidate.name},`,
       "",

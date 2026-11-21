@@ -1,6 +1,6 @@
 # Ohje järjestölle — näin lähetät kysymyksiä vaalikoneeseemme
 
-Tämä ohje on tarkoitettu järjestön edustajalle, joka haluaa ehdottaa politiikkaväittämiä Vaalikone 2026 -järjestelmään.
+Tämä ohje on tarkoitettu järjestön edustajalle, joka haluaa ehdottaa politiikkaväittämiä Vaalikone 2027 -järjestelmään.
 
 ---
 

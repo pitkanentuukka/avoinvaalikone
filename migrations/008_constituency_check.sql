@@ -1,4 +1,4 @@
--- Enforce valid constituency values for Finnish parliamentary elections (eduskuntavaalit 2026).
+-- Enforce valid constituency values for Finnish parliamentary elections (eduskuntavaalit 2027).
 --
 -- IMPORTANT: If this app is repurposed for other elections (municipal elections,
 -- other countries), remove or replace this constraint and update FI_CONSTITUENCIES
