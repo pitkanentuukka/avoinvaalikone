@@ -31,8 +31,8 @@ function getTransport() {
       // would get the credentials and the magic links in plaintext (#192).
       // Decided by host, not NODE_ENV: Compose defaults NODE_ENV to
       // production for local dev with mailpit too, and a plain-Node
-      // production may leave it unset. A dev host in production is warned
-      // about by verifySmtp().
+      // production may leave it unset. With NODE_ENV=production, verifySmtp()
+      // also warns about a dev host.
       requireTLS: !secure && !isDevSmtpHost(process.env.SMTP_HOST),
       auth: process.env.SMTP_USER
         ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }

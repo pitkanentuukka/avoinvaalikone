@@ -53,11 +53,20 @@ describe("SMTP transport encryption", () => {
   });
 
   // Compose dev: NODE_ENV defaults to production, SMTP_HOST to mailpit (no TLS).
-  test.each(["mailpit", "localhost", "127.0.0.1", "MailPit"])(
+  test.each(["mailpit", "localhost", "127.0.0.1", "::1", "MailPit"])(
     "the dev mail catcher %s doesn't require TLS, even with NODE_ENV=production",
     async (host) => {
       const options = await transportOptions({ NODE_ENV: "production", SMTP_HOST: host, SMTP_PORT: "1025" });
       expect(options.requireTLS).toBe(false);
+    }
+  );
+
+  // Only those exact names: anything else is treated as a real server.
+  test.each(["vaalikone-mailpit", "localhost.", "mailpit.example.fi"])(
+    "%s isn't exempt",
+    async (host) => {
+      const options = await transportOptions({ SMTP_HOST: host, SMTP_PORT: "1025" });
+      expect(options.requireTLS).toBe(true);
     }
   );
 });
