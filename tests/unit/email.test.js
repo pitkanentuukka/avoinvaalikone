@@ -1,12 +1,15 @@
 jest.mock("../../src/db/pool");
 jest.mock("nodemailer");
+jest.mock("@sentry/node", () => ({ captureMessage: jest.fn() }));
 
 const nodemailer = require("nodemailer");
+const Sentry = require("@sentry/node");
 const db = require("../../src/db/pool");
 const { sendCandidateLinkEmail, sendApprovedQuestionSetNotificationToParty } = require("../../src/email");
 
 const sendMail = jest.fn();
-nodemailer.createTransport.mockReturnValue({ sendMail });
+const transportMock = { sendMail, verify: jest.fn() };
+nodemailer.createTransport.mockReturnValue(transportMock);
 
 const candidate = { id: "c1", name: "Maija", email: "maija@example.fi", token: "t1" };
 const logInsert = () => db.query.mock.calls.find(([sql]) => sql.includes("INSERT INTO email_log"));
@@ -67,5 +70,114 @@ describe("email_log", () => {
     await expect(sendCandidateLinkEmail(candidate, "Vihreät", "https://vaalikone.fi")).resolves.toBeUndefined();
     expect(spy).toHaveBeenCalled();
     spy.mockRestore();
+  });
+});
+
+// A wrong SMTP_HOST (the dev default "mailpit" in production) or bad
+// credentials otherwise surface only as failed rows in email_log (issue #190).
+describe("verifySmtp", () => {
+  const { verifySmtp } = require("../../src/email");
+  const saved = {};
+  let log, warn, error;
+
+  // Set (or, with undefined, delete) env vars for one test; afterEach restores.
+  function setEnv(vars) {
+    for (const [key, value] of Object.entries(vars)) {
+      if (!(key in saved)) saved[key] = process.env[key];
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+
+  beforeEach(() => {
+    transportMock.verify.mockReset();
+    Sentry.captureMessage.mockReset();
+    log = jest.spyOn(console, "log").mockImplementation(() => {});
+    warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+    error = jest.spyOn(console, "error").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+      delete saved[key];
+    }
+    log.mockRestore();
+    warn.mockRestore();
+    error.mockRestore();
+  });
+
+  test("logs a reachable server with its port", async () => {
+    setEnv({ SMTP_PORT: undefined });
+    transportMock.verify.mockResolvedValue(true);
+    await verifySmtp();
+    expect(log.mock.calls.join(" ")).toContain("smtp.example.fi:587");
+    expect(error).not.toHaveBeenCalled();
+  });
+
+  test("logs a failed check without throwing, and reports it to Sentry", async () => {
+    transportMock.verify.mockRejectedValue(new Error("getaddrinfo ENOTFOUND mailpit"));
+    await expect(verifySmtp()).resolves.toBeUndefined();
+    expect(error.mock.calls.join(" ")).toContain("ENOTFOUND mailpit");
+    expect(Sentry.captureMessage).toHaveBeenCalledWith(expect.stringContaining("ENOTFOUND mailpit"), "error");
+  });
+
+  test("warns that email is disabled without SMTP_HOST", async () => {
+    setEnv({ SMTP_HOST: undefined });
+    await verifySmtp();
+    expect(warn.mock.calls.join(" ")).toMatch(/SMTP_HOST/);
+    expect(transportMock.verify).not.toHaveBeenCalled();
+  });
+
+  // verify() only logs in when auth is configured, so it passes against a
+  // provider that requires auth, and then every send fails.
+  test("warns in production when no SMTP credentials are set", async () => {
+    setEnv({ NODE_ENV: "production", SMTP_USER: undefined, SMTP_FROM: "noreply@avoinvaalikone.fi" });
+    transportMock.verify.mockResolvedValue(true);
+    await verifySmtp();
+    expect(warn.mock.calls.join(" ")).toMatch(/SMTP_USER/);
+  });
+
+  // Plain-Node production has no compose ":?" check for the sender.
+  test("warns in production when SMTP_FROM is unset", async () => {
+    setEnv({ NODE_ENV: "production", SMTP_USER: "u", SMTP_FROM: undefined });
+    transportMock.verify.mockResolvedValue(true);
+    await verifySmtp();
+    expect(warn.mock.calls.join(" ")).toMatch(/SMTP_FROM/);
+  });
+
+  test("doesn't warn about a complete production configuration", async () => {
+    setEnv({ NODE_ENV: "production", SMTP_HOST: "smtp.example.fi", SMTP_PORT: "587",
+      SMTP_USER: "u", SMTP_FROM: "noreply@avoinvaalikone.fi" });
+    transportMock.verify.mockResolvedValue(true);
+    await verifySmtp();
+    expect(warn).not.toHaveBeenCalled();
+    expect(Sentry.captureMessage).not.toHaveBeenCalled();
+  });
+
+  // .env.example (which operators copy to .env) holds dev values that pass the
+  // prod compose file's ":?" checks: a provider host with them left in sends
+  // on mailpit's port, from a sender receivers reject.
+  test.each([
+    ["SMTP_HOST", { SMTP_HOST: "localhost" }],
+    ["SMTP_HOST", { SMTP_HOST: "mailpit" }],
+    ["SMTP_PORT", { SMTP_PORT: "1025" }],
+    ["SMTP_FROM", { SMTP_FROM: "noreply@example.com" }],
+    ["SMTP_FROM", { SMTP_FROM: "Vaalikone <noreply@EXAMPLE.org>" }],
+    ["ADMIN_EMAIL", { ADMIN_EMAIL: "admin@example.com" }],
+  ])("warns in production about a dev or placeholder %s (%o), also to Sentry", async (key, vars) => {
+    setEnv({ NODE_ENV: "production", SMTP_HOST: "smtp.example.fi", SMTP_PORT: "587",
+      SMTP_USER: "u", SMTP_FROM: "noreply@avoinvaalikone.fi", ...vars });
+    transportMock.verify.mockResolvedValue(true);
+    await verifySmtp();
+    expect(warn.mock.calls.join(" ")).toContain(key);
+    expect(Sentry.captureMessage).toHaveBeenCalledWith(expect.stringContaining(key), "warning");
+  });
+
+  test("doesn't warn about dev values outside production", async () => {
+    setEnv({ NODE_ENV: "development", SMTP_HOST: "localhost", SMTP_PORT: "1025", SMTP_FROM: "noreply@example.com" });
+    transportMock.verify.mockResolvedValue(true);
+    await verifySmtp();
+    expect(warn).not.toHaveBeenCalled();
   });
 });

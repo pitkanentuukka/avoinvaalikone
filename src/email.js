@@ -1,4 +1,5 @@
 const nodemailer = require("nodemailer");
+const Sentry = require("@sentry/node");
 const db = require("./db/pool");
 
 function sanitizeHeader(value) {
@@ -27,6 +28,67 @@ function getTransport() {
   return transport;
 }
 
+const DEV_SMTP_HOSTS = ["localhost", "127.0.0.1", "::1", "mailpit"];
+const PLACEHOLDER_ADDRESS = /@example\.(com|org|net)>?\s*$/i;
+
+/**
+ * Settings that can't work in production but pass the prod compose file's
+ * ":?" checks: the dev values in .env.example (which operators copy to .env)
+ * and missing credentials. verify() logs in only when credentials are set, so
+ * without them it passes against a provider that requires auth, and every
+ * send then fails.
+ */
+function productionSmtpProblems() {
+  const { SMTP_HOST, SMTP_PORT, SMTP_FROM, SMTP_USER } = process.env;
+  const problems = [];
+  if (DEV_SMTP_HOSTS.includes(String(SMTP_HOST).toLowerCase())) {
+    problems.push(`SMTP_HOST=${SMTP_HOST} on kehitysympäristön arvo: sähköpostit eivät lähde.`);
+  }
+  if (SMTP_PORT === "1025") {
+    problems.push("SMTP_PORT=1025 on kehitysympäristön (mailpit) portti: palveluntarjoajat käyttävät porttia 587 tai 465.");
+  }
+  if (!SMTP_FROM) {
+    problems.push("SMTP_FROM ei ole asetettu: lähettäjäksi tulee noreply@example.com, jonka vastaanottajat hylkäävät.");
+  } else if (PLACEHOLDER_ADDRESS.test(SMTP_FROM)) {
+    problems.push(`SMTP_FROM=${SMTP_FROM} on esimerkkiosoite, jonka vastaanottajat hylkäävät.`);
+  }
+  if (process.env.ADMIN_EMAIL && PLACEHOLDER_ADDRESS.test(process.env.ADMIN_EMAIL)) {
+    problems.push(`ADMIN_EMAIL=${process.env.ADMIN_EMAIL} on esimerkkiosoite: ilmoitukset uusista kysymyssarjoista eivät tule perille.`);
+  }
+  if (!SMTP_USER) {
+    problems.push("SMTP_USER ei ole asetettu: jos palveluntarjoaja vaatii kirjautumisen, sähköpostit epäonnistuvat.");
+  }
+  return problems;
+}
+
+/**
+ * Check the SMTP connection once at startup and log the outcome. A wrong
+ * SMTP_HOST or bad credentials otherwise surface only as failed rows in
+ * email_log (#190). A failed check also goes to Sentry (a no-op without
+ * SENTRY_DSN). Never throws: the API keeps serving either way.
+ */
+async function verifySmtp() {
+  if (!process.env.SMTP_HOST) {
+    console.warn("SMTP_HOST ei ole asetettu: sähköpostit (ehdokaslinkit, ilmoitukset) eivät lähde.");
+    return;
+  }
+  if (process.env.NODE_ENV === "production") {
+    for (const problem of productionSmtpProblems()) {
+      console.warn(problem);
+      Sentry.captureMessage(problem, "warning");
+    }
+  }
+  const server = `${process.env.SMTP_HOST}:${process.env.SMTP_PORT || "587"}`;
+  try {
+    await getTransport().verify();
+    console.log(`SMTP-yhteys toimii: ${server}`);
+  } catch (err) {
+    const message = `SMTP-tarkistus epäonnistui (${server}), sähköpostit eivät lähde: ${err.message || err}`;
+    console.error(message);
+    Sentry.captureMessage(message, "error");
+  }
+}
+
 /**
  * Send one message and record the outcome in email_log. Rethrows a send
  * failure so callers that report back (re-sending a candidate's link) still
@@ -36,7 +98,7 @@ async function deliver(kind, message, { candidateId = null, partyId = null } = {
   let sendErr = null;
   try {
     await getTransport().sendMail({
-      from: process.env.SMTP_FROM || "noreply@vaalikone.fi",
+      from: process.env.SMTP_FROM || "noreply@example.com",
       ...message,
     });
   } catch (err) {
@@ -264,6 +326,7 @@ async function sendCandidateLinkEmail(candidate, partyName, frontendBaseUrl) {
 }
 
 module.exports = {
+  verifySmtp,
   sendCandidateLinkEmail,
   sendNewQuestionSetNotification,
   sendQuestionSetReviewedNotification,

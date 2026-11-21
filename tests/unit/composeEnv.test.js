@@ -70,3 +70,51 @@ describe("docker-compose.yml db command", () => {
     expect(db.slice(0, end === -1 ? undefined : end + 1)).not.toMatch(/^ {4}command:/m);
   });
 });
+
+// docker-compose.yml defaults SMTP_HOST to the dev-only mailpit service, which
+// production never starts. Without its own SMTP settings, a production deploy
+// sent every email to a leftover mailpit container (recorded as "sent", readable
+// on its published web UI) or to a host that doesn't resolve (issue #190).
+describe("docker-compose.prod.yml email", () => {
+  const prod = () => fs.readFileSync(path.join(__dirname, "../../docker-compose.prod.yml"), "utf8");
+
+  function serviceBlock(text, name) {
+    const start = text.search(new RegExp(`^ {2}${name}:\\s*$`, "m"));
+    if (start === -1) return "";
+    const rest = text.slice(start + 1);
+    const end = rest.search(/^ {2}\S/m);
+    return text.slice(start, end === -1 ? undefined : start + 1 + end);
+  }
+
+  test.each(["SMTP_HOST", "SMTP_FROM"])("requires %s instead of inheriting the dev default", (key) => {
+    expect(serviceBlock(prod(), "backend")).toMatch(new RegExp(`^ {6}${key}: \\$\\{${key}:\\?[^}]+\\}\\s*$`, "m"));
+  });
+
+  // The base file's SMTP_PORT default is mailpit's 1025; a provider set up
+  // with only the required host and sender would be dialled on 1025.
+  test("doesn't inherit mailpit's port 1025", () => {
+    expect(serviceBlock(prod(), "backend")).toMatch(/^ {6}SMTP_PORT: \$\{SMTP_PORT:-587\}\s*$/m);
+  });
+
+  // .env.example is what operators copy to .env, and SMTP_FROM's ":?" can't
+  // tell a copied example sender from a real one.
+  test.each([".env.example", "docker-compose.yml", "src/email.js"])(
+    "%s doesn't default the sender to a real domain this deployment doesn't control",
+    (file) => {
+      const text = fs.readFileSync(path.join(__dirname, "../..", file), "utf8");
+      expect(text).not.toMatch(/noreply@vaalikone\.fi/);
+    }
+  );
+
+  test("never publishes mailpit's ports, even if someone starts it there", () => {
+    expect(serviceBlock(prod(), "mailpit")).toMatch(/^ {4}ports: !reset \[\]\s*$/m);
+  });
+});
+
+// Without this call nothing reports an unreachable SMTP server until a send
+// fails (#190); the call itself only runs when the server starts.
+test("src/index.js verifies SMTP once the server is listening", () => {
+  const src = fs.readFileSync(path.join(__dirname, "../../src/index.js"), "utf8");
+  const listen = src.slice(src.indexOf("app.listen("));
+  expect(listen.slice(0, listen.indexOf("});"))).toMatch(/^\s+verifySmtp\(\);$/m);
+});

@@ -214,9 +214,41 @@ introduces.
   sidecar still runs and keeps a local dump, logging a warning instead of
   uploading. Restore steps: `scripts/backup/restore.md`.
 
+## Email
+
+Candidate links, party portal links and NGO notifications all go out by
+email, so production can't run without a working SMTP provider.
+
+- `docker-compose.prod.yml` requires `SMTP_HOST` and `SMTP_FROM` (#190). Until
+  `.env` sets them, every `docker compose -f docker-compose.yml -f
+  docker-compose.prod.yml …` command fails, including `logs`, `ps` and
+  `exec`, and so does `scripts/deploy.sh`; the running containers are left as
+  they are, apart from mailpit, which deploy.sh removes first. The base file's `SMTP_HOST=mailpit` and `SMTP_PORT=1025` defaults
+  are for local dev only; the prod file defaults the port to 587.
+- Use a transactional email provider on port 587 (STARTTLS, `SMTP_SECURE=false`)
+  or 465 (`SMTP_PORT=465`, `SMTP_SECURE=true`), not 25. Set `SMTP_USER` /
+  `SMTP_PASS` from the provider.
+- `SMTP_FROM` must be on a domain you control (`noreply@avoinvaalikone.fi`),
+  with the provider's SPF and DKIM records and a DMARC record in its DNS.
+  Otherwise receivers reject the mail or file it as spam.
+- At startup each backend replica logs `SMTP-yhteys toimii: <host>:<port>`,
+  or `SMTP-tarkistus epäonnistui (<host>:<port>) …` with the error, which also
+  goes to Sentry. In production it also warns, to the log and Sentry, about
+  settings that pass the compose checks but can't work: dev values copied from
+  `.env.example` (`SMTP_HOST` `localhost`/`mailpit`, `SMTP_PORT=1025`, an
+  `@example.com` sender or `ADMIN_EMAIL`) and a missing `SMTP_USER` (the check can't log in
+  without credentials, so it would pass against a provider that requires them). Every send is recorded in
+  `email_log` (`sent` / `failed` with the error).
+- mailpit (the dev mail catcher, `--profile dev`) must never run in
+  production: it keeps every message, magic links included. The prod file
+  doesn't publish its ports, and `scripts/deploy.sh` removes any mailpit
+  container, including one left over from before the profile existed. If one
+  ever ran with published ports, treat the links it captured as leaked: rotate
+  the party and registration tokens.
+
 ## New environment variables
 
-All optional; defaults keep local dev working unchanged. See `.env.example`.
+Optional unless marked required; defaults keep local dev working unchanged. See `.env.example`.
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -227,6 +259,8 @@ All optional; defaults keep local dev working unchanged. See `.env.example`.
 | `SENTRY_DSN` / `VITE_SENTRY_DSN` | unset | Error tracking (inert when unset) |
 | `BACKUP_BUCKET` | unset | S3 bucket for nightly dumps; unset → local-only |
 | `BACKUP_S3_ENDPOINT` / `BACKUP_S3_ACCESS_KEY` / `BACKUP_S3_SECRET_KEY` | unset | UpCloud Object Storage credentials |
+| `SMTP_HOST` / `SMTP_FROM` | **required in production** | SMTP provider and sender address (see Email) |
+| `SMTP_PORT` / `SMTP_SECURE` | 587 / false in production | 465 / true for implicit TLS |
 
 ## New dependencies
 

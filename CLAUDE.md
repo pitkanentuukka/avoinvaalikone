@@ -37,7 +37,7 @@ docker compose up --build                 # Start without mailpit
 docker compose down                       # Stop all services
 ```
 
-`mailpit` (dev SMTP capture, web UI at http://localhost:8025) is gated behind the `dev` Compose profile, so it only starts when you pass `--profile dev`. Production (`docker-compose.prod.yml`) never requests the profile, so mailpit is absent there.
+`mailpit` (dev SMTP capture, web UI at http://localhost:8025) is gated behind the `dev` Compose profile, so it only starts when you pass `--profile dev`. Production (`docker-compose.prod.yml`) never requests the profile, but `up` without it leaves an existing mailpit container running, so `scripts/deploy.sh` removes it and the prod file resets its ports. The base file's `SMTP_HOST=mailpit` default is dev-only: `docker-compose.prod.yml` requires `SMTP_HOST` and `SMTP_FROM` (#190), and each backend logs whether SMTP is reachable at startup (`verifySmtp()` in `src/email.js`).
 
 ## Architecture
 
