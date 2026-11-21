@@ -33,9 +33,9 @@ async function seed() {
     // ─── Parties ───
     const { rows: parties } = await client.query(`
       INSERT INTO parties (name, token, email) VALUES
-        ('Sosialidemokraatit', 'sd-2026-x7k9',  'sihteeri@sdp.fi'),
-        ('Kokoomus',           'nc-2026-m3p1',  'sihteeri@kokoomus.fi'),
-        ('Vihreät',            'gl-2026-q8w2',  'sihteeri@vihreat.fi')
+        ('Sosialidemokraatit', 'sd-2027-x7k9',  'sihteeri@sdp.fi'),
+        ('Kokoomus',           'nc-2027-m3p1',  'sihteeri@kokoomus.fi'),
+        ('Vihreät',            'gl-2027-q8w2',  'sihteeri@vihreat.fi')
       ON CONFLICT (name) DO NOTHING
       RETURNING id, name, token
     `);
@@ -119,7 +119,7 @@ async function seed() {
          'Ammattiyhdistysaktivisti ja työoikeuden asiantuntija Oulusta. Puolustan työntekijöiden oikeuksia ja reilua työelämää kaikille suomalaisille.')
       RETURNING id, name
     `,
-      [partyMap["sd-2026-x7k9"], partyMap["nc-2026-m3p1"], partyMap["gl-2026-q8w2"]]
+      [partyMap["sd-2027-x7k9"], partyMap["nc-2027-m3p1"], partyMap["gl-2027-q8w2"]]
     );
     console.log(`✓ Inserted ${candidates.length} candidates`);
 
