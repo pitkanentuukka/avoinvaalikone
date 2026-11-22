@@ -7,17 +7,6 @@ cd "$(dirname "$0")/.."
 
 dc="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
 
-# One deploy at a time. CI's deploy job queues later deploys, but it gives up
-# on a server that stops answering (#178), and a deploy it lost contact with
-# can still be running here when the next one arrives. Wait for it (10 min,
-# well inside the job's timeout) rather than run two `up --build` at once.
-# DEPLOY_LOCK and DEPLOY_LOCK_WAIT are for tests.
-exec 9>"${DEPLOY_LOCK:-/var/lock/vaalikone-deploy.lock}"
-if ! flock -w "${DEPLOY_LOCK_WAIT:-600}" 9; then
-  echo "Another deploy is still running on this server; not starting a second one." >&2
-  exit 1
-fi
-
 # mailpit is dev-only (profile "dev"), but `up` without the profile leaves a
 # container started before the profile existed running: it swallowed every
 # email and published its web UI, magic links included (#190). Remove it with

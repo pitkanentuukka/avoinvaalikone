@@ -76,7 +76,7 @@ check_cached() {
     HIT)
       return 0 ;;
     NO_RESPONSE)
-      echo "FAIL: no response from $url (timed out or unreachable; curl's error is above), so the cache couldn't be checked." >&2 ;;
+      echo "FAIL: the request to $url failed before a CF-Cache-Status header arrived (timed out or unreachable; curl's error is above), so the cache couldn't be checked." >&2 ;;
     MISSING)
       echo "FAIL: no CF-Cache-Status header on $url — is the site behind Cloudflare (orange cloud)?" >&2 ;;
     DYNAMIC)

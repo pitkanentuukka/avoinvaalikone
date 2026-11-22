@@ -115,8 +115,9 @@ function run(cfKey, probe = "", style = "", candidatesKey = "", extraEnv = {}) {
     const res = spawnSync("bash", [SCRIPT, "example.test"], {
       env: { PATH: `${bin}:/usr/bin:/bin`, STUB_DIR: dir, STUB_CF_KEY: cfKey, STUB_PROBE: probe, STUB_STYLE: style, STUB_CF_KEY_CANDIDATES: candidatesKey, ...extraEnv },
       encoding: "utf8",
-      // A hung script is killed here rather than hanging the test run.
-      timeout: 5000,
+      // A hung script is killed here rather than hanging the test run
+      // (only where a hang is being tested: a loaded runner can be slow).
+      timeout: extraEnv.STUB_HANG ? 5000 : undefined,
     });
     // Requests and sleeps, in order; `requests` is the requests alone.
     const events = fs.readFileSync(path.join(dir, "requests"), "utf8").split("\n").filter(Boolean);
@@ -288,8 +289,8 @@ describe("a connection that never answers (#178)", () => {
     expect(res.status).toBe(1);
     expect(res.waited).toHaveLength(res.requests.length);
     expect(res.stdout).toContain("first=NO_RESPONSE second=NO_RESPONSE");
-    expect(res.stderr).toMatch(/no response from .*\/api\/question-sets \(timed out or unreachable/);
-    expect(res.stderr).toMatch(/no response from .*\/api\/candidates \(timed out or unreachable/);
+    expect(res.stderr).toMatch(/request to .*\/api\/question-sets failed before a CF-Cache-Status header arrived \(timed out or unreachable/);
+    expect(res.stderr).toMatch(/request to .*\/api\/candidates failed before a CF-Cache-Status header arrived \(timed out or unreachable/);
     // Not mistaken for a Cloudflare configuration problem.
     expect(res.stderr).not.toMatch(/Cloudflare|Cache Rule/);
   });
