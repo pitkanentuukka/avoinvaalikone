@@ -5,6 +5,7 @@ import translations from "./translations";
 import { createApi, isTransientError } from "./api";
 import { cleanToken, readInitialLink, rememberLink, tokenLinkFromParams } from "./tokenLinks";
 import { answeredCount, distinctQuestions } from "./questions";
+import { newMatchSubmission, runMatch } from "./voterMatch";
 import { answersFromProfile, reconcileAnswers } from "./candidateAnswers";
 import voterGuideContent from "./guides/voter-guide.md?raw";
 import candidateGuideContent from "./guides/candidate-guide.md?raw";
@@ -1959,27 +1960,62 @@ function VoterView() {
     else setStep("weight");
   }
 
-  async function finishWeighting() {
+  // The last match submission, kept so a retry after a failure resends it
+  // unchanged (issue #153).
+  const submissionRef = useRef(null);
+
+  async function sendMatch() {
     setStep("loading-results");
     setError(null);
-    try {
-      const { results: matchResults, questionCount: scoredCount } = await api.voterMatch({
-        answers: voterAnswers,
-        weights,
-        questionSetIds: [...selectedSetIds],
-        constituency: constituency || null,
-        includeInResearch,
-      });
-      setResults(matchResults ?? []);
-      setQuestionCount(scoredCount ?? 0);
-      setStep("results");
-    } catch (e) {
-      setError(e.message);
-      setStep("results");
+    const outcome = await runMatch(api, submissionRef.current);
+    if (outcome.step === "results") {
+      setResults(outcome.results);
+      setQuestionCount(outcome.questionCount);
+      submissionRef.current = null; // the next submission is a new session
     }
+    setError(outcome.error);
+    setStep(outcome.step);
+  }
+
+  function finishWeighting() {
+    submissionRef.current = newMatchSubmission({
+      answers: voterAnswers,
+      weights,
+      questionSetIds: [...selectedSetIds],
+      constituency: constituency || null,
+      includeInResearch,
+    }, submissionRef.current);
+    return sendMatch();
+  }
+
+  // From the failure step: the same submission again, or back to weighting
+  // with everything kept.
+  function retryMatch() {
+    return sendMatch();
+  }
+
+  function backToWeighting() {
+    setError(null);
+    setStep("weight");
   }
 
   if (step === "loading" || step === "loading-results") return <LoadingState text={step === "loading-results" ? t.voterCalculating : t.loading} />;
+
+  // The match failed even after the API client's own retry. Answers, weights,
+  // sets, constituency and research choice are all still in state.
+  if (step === "match-failed") {
+    return (
+      <div style={{ maxWidth: 560, margin: "0 auto", padding: "40px 24px" }}>
+        <h2 style={{ fontSize: "26px", fontWeight: 800, letterSpacing: "-0.02em", marginBottom: "12px" }}>{t.voterMatchFailedTitle}</h2>
+        <p style={{ color: palette.textMuted, lineHeight: 1.7, marginBottom: "20px" }}>{t.voterMatchFailedDesc}</p>
+        {error && <ErrorBanner message={error} />}
+        <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
+          <Button size="lg" onClick={retryMatch}>{t.retry}</Button>
+          <Button variant="ghost" size="lg" onClick={backToWeighting}>{t.voterBackToWeighting}</Button>
+        </div>
+      </div>
+    );
+  }
 
   // GDPR consent
   if (step === "consent") {
@@ -2188,7 +2224,6 @@ function VoterView() {
     <div style={{ maxWidth: 740, margin: "0 auto", padding: "40px 24px" }}>
       <h2 style={{ fontSize: "28px", fontWeight: 800, letterSpacing: "-0.02em", marginBottom: "8px" }}>{t.voterResultsTitle}</h2>
       <p style={{ color: palette.textMuted, marginBottom: "28px" }}>{t.voterResultsDesc}</p>
-      {error && <ErrorBanner message={error} />}
       {results.length === 0 && <p style={{ color: palette.textLight }}>{t.voterNoCandidates}</p>}
       {results.map((c) => {
         const isExpanded = expandedCandidate === c.id;
