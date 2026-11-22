@@ -23,7 +23,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 
-const { workflowBlock, blockSetting } = require("../helpers/workflow");
+const { step } = require("../helpers/workflow");
 
 const SCRIPT = path.join(__dirname, "../../scripts/verify-edge-cache.sh");
 
@@ -59,7 +59,7 @@ reply() {
 if [ -n "\${STUB_HANG:-}" ]; then
   # Without a limit, hang (long enough to show; not forever, so the test
   # process isn't held up by a leftover stub).
-  [ -n "$max_time" ] || exec /bin/sleep 15 </dev/null >/dev/null 2>&1
+  [ -n "$max_time" ] || exec /bin/sleep 8 </dev/null >/dev/null 2>&1
   echo "$max_time" >> "$STUB_DIR/waited"
   # worst: the second request to each path answers HIT just inside its
   # limit, so the script goes on to the probe, which hangs too.
@@ -76,6 +76,9 @@ case "$url" in *\\?*)
   case "\${STUB_PROBE:-}" in
     "") ;;
     network) echo "curl: (6) Could not resolve host" >&2; exit 6 ;;
+    connectTimeout) printf 'HTTP/1.1 200 Connection established\\r\\n\\r\\n'; echo "curl: (28) Operation timed out" >&2; exit 28 ;;
+    partial) printf 'HTTP/2 200\\r\\n'; echo "curl: (28) Operation timed out" >&2; exit 28 ;;
+    slowBody) printf 'HTTP/2 200\\r\\ncf-cache-status: HIT\\r\\n\\r\\n'; echo "curl: (28) Operation timed out" >&2; exit 28 ;;
 ${Object.entries(PROBE_SHAPES).map(([k, v]) => `    ${k}) printf '${v}'; exit 0 ;;`).join("\n")}
     *) reply "$STUB_PROBE" ;;
   esac
@@ -204,6 +207,14 @@ test("passes with HTTP/1.1-style headers", () => {
   expect(res.status).toBe(0);
 });
 
+// Review round 2 (#178): a timeout after the headers arrived (a slow body)
+// doesn't throw away what they say.
+test("headers that arrived before a timeout still count", () => {
+  const res = run("path", "slowBody");
+  expect(res.stdout).toMatch(/new query string: HIT\n/);
+  expect(res.status).toBe(0);
+});
+
 test("a 103 Early Hints block before the response is skipped", () => {
   const res = run("path", "hints");
   expect(res.stdout).toMatch(/new query string: HIT\n/);
@@ -216,6 +227,10 @@ test.each([
   ["earlyStatus", "MISSING"],
   ["connect503", "HTTP_503"],
   ["network", "NO_RESPONSE"],
+  // Behind a proxy: its CONNECT reply, then nothing from the site.
+  ["connectTimeout", "NO_RESPONSE"],
+  // The final response's headers cut off partway.
+  ["partial", "NO_RESPONSE"],
   ["DYNAMIC", "DYNAMIC"],
   ["BYPASS", "BYPASS"],
 ])("a probe answering %s fails without blaming the cache key", (probe, status) => {
@@ -287,15 +302,18 @@ describe("a connection that never answers (#178)", () => {
     expect(res.stderr).not.toMatch(/reaches the cache key/);
   });
 
-  test("the slowest possible run fits well inside the step's timeout", () => {
-    const minutes = Number(blockSetting(workflowBlock("- name: Verify edge cache"), "timeout-minutes"));
-    expect(minutes).toBeGreaterThan(0);
+  test("the slowest possible run fits well inside the time the step gives it", () => {
+    const s = step("deploy", "Verify edge cache");
+    // The step runs the script under `timeout N`, inside its timeout-minutes.
+    const limit = Number(s.run.match(/\btimeout (\d+) bash scripts\/verify-edge-cache\.sh\b/)?.[1]);
+    expect(limit).toBeGreaterThan(0);
+    expect(limit).toBeLessThan(s["timeout-minutes"] * 60);
     const res = run("path", "", "", "", { STUB_HANG: "worst" });
     // Every request the script can make, each taking its whole limit.
     expect(res.requests).toHaveLength(6);
     expect(res.waited).toHaveLength(6);
     const total = [...res.waited, ...res.slept].reduce((a, b) => a + b, 0);
     // Room to spare for the runner and bash itself.
-    expect(total).toBeLessThanOrEqual(minutes * 60 * 0.75);
+    expect(total).toBeLessThanOrEqual(limit * 0.75);
   });
 });

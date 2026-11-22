@@ -17,21 +17,30 @@ CANDIDATES_URL="https://$HOST/api/candidates"
 # deploy and later deploys queue behind it, so a connection that never answers
 # (a stuck TLS handshake, a black-holed route) must not hold it (#178). The
 # six requests at most 10 s each, plus the two pauses, stay well inside the
-# step's timeout-minutes in .github/workflows/ci-cd.yml.
+# `timeout` the deploy job runs this under (.github/workflows/ci-cd.yml).
 CURL_LIMITS=(--connect-timeout 5 --max-time 10)
 
-# Prints the response's CF-Cache-Status, HTTP_<code> for an HTTP error, or
-# MISSING when the response has no header, or NO_RESPONSE when there was no
-# response at all (timed out, unreachable); always one word.
+# Prints the response's CF-Cache-Status, HTTP_<code> for an HTTP error,
+# MISSING when the response has no such header, or NO_RESPONSE when curl
+# failed (timed out, unreachable) before the final response's headers had
+# one; always one word. Headers that did arrive before a failure (a body that
+# timed out) still count.
 # -D - can write several header blocks (a proxy's CONNECT reply, a 103 Early
 # Hints); each status line starts a new one, so only the final response's
-# block counts.
+# block counts. A CONNECT reply with nothing after it is still no response.
 status_of() {
-  { curl -sS "${CURL_LIMITS[@]}" -o /dev/null -D - "${1:-$URL}" || true; } | tr -d '\r' |
-    awk 'BEGIN { s = "NO_RESPONSE" }
+  { curl -sS "${CURL_LIMITS[@]}" -o /dev/null -D - "${1:-$URL}" && rc=0 || rc=$?
+    # On a line of its own even if the headers stopped mid-line.
+    printf '\nCURL_EXIT %s\n' "$rc"; } | tr -d '\r' |
+    awk 'BEGIN { s = "MISSING" }
+         /^CURL_EXIT / { rc = $2; next }
          /^HTTP\// { code = $2; s = "MISSING" }
          tolower($1) == "cf-cache-status:" { s = toupper($2) }
-         END { if (code + 0 >= 400) s = "HTTP_" code; print s }'
+         END {
+           if (rc != 0 && s == "MISSING") s = "NO_RESPONSE"
+           if (code + 0 >= 400) s = "HTTP_" code
+           print s
+         }'
 }
 
 # The endpoints ignore the query string, so the edge must too: with

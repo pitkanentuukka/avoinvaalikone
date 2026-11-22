@@ -179,13 +179,14 @@ jobs:
       # The Cloudflare Cache Rule is manual dashboard state; if it vanishes,
       # origin load multiplies silently. Warn (don't fail the deploy) so the
       # site stays up while someone recreates the rule per docs/scaling.md.
-      # The script time-limits each request; timeout-minutes is the backstop
-      # (#178), and continue-on-error keeps hitting it from failing the deploy
-      # (the step shows as failed, the job stays green).
+      # The script time-limits each request (#178); `timeout` is a backstop
+      # that still ends in the warning, and timeout-minutes one for the step
+      # itself, with continue-on-error so hitting it doesn't fail the deploy
+      # either (the step shows as failed, the job stays green).
       - name: Verify edge cache
         timeout-minutes: 2
         continue-on-error: true
         run: |
-          if ! bash scripts/verify-edge-cache.sh avoinvaalikone.fi; then
+          if ! timeout 90 bash scripts/verify-edge-cache.sh avoinvaalikone.fi; then
             echo "::warning::Cloudflare edge cache check failed — see this step's log and the Cache Rule in docs/scaling.md"
           fi

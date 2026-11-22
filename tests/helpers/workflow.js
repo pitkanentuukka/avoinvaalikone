@@ -1,29 +1,19 @@
-// Reads a block of .github/workflows/ci-cd.yml as text: the line that is
-// exactly `header` (after indentation), e.g. "- name: Verify edge cache" or
-// "deploy:", and every line under it, up to the next line indented no deeper.
+// .github/workflows/ci-cd.yml, parsed, for tests that check its settings.
 const fs = require("fs");
 const path = require("path");
+const yaml = require("js-yaml");
 
 const WORKFLOW = path.join(__dirname, "../../.github/workflows/ci-cd.yml");
 
-function workflowBlock(header) {
-  const lines = fs.readFileSync(WORKFLOW, "utf8").split("\n");
-  const start = lines.findIndex((l) => l.trim() === header);
-  if (start === -1) throw new Error(`no "${header}" in ${WORKFLOW}`);
-  const indent = lines[start].search(/\S/);
-  const rest = lines.slice(start + 1);
-  const end = rest.findIndex((l) => l.trim() && l.search(/\S/) <= indent);
-  return [lines[start], ...(end === -1 ? rest : rest.slice(0, end))].join("\n");
+function workflow() {
+  return yaml.load(fs.readFileSync(WORKFLOW, "utf8"));
 }
 
-// A setting of the block itself, e.g. timeout-minutes: a key two columns
-// deeper than the header, for a job ("deploy:") and a step ("- name: …")
-// alike. Deeper lines (a step's, inside a job block) don't count.
-function blockSetting(block, key) {
-  const [first, ...rest] = block.split("\n");
-  const indent = first.search(/\S/) + 2;
-  const line = rest.find((l) => l.search(/\S/) === indent && l.trim().startsWith(`${key}:`));
-  return line === undefined ? undefined : line.trim().slice(key.length + 1).trim();
+// A job's step by its name.
+function step(job, name) {
+  const found = workflow().jobs[job].steps.find((s) => s.name === name);
+  if (!found) throw new Error(`no step "${name}" in job ${job} of ${WORKFLOW}`);
+  return found;
 }
 
-module.exports = { workflowBlock, blockSetting };
+module.exports = { workflow, step };
