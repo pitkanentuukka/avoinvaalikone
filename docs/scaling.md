@@ -186,7 +186,7 @@ ssh user@80.69.172.220 "docker compose logs backend 2>&1 | grep -E '010|already 
 # backend-3:   Migration 010_match_covering_index.sql already applied, skipping
 ```
 
-### 3. Create the Cloudflare Cache Rule (one-time manual step)
+### 3. Create the Cloudflare Cache Rule (and on Free, URL Rewrite Rules; one-time manual step)
 
 **This is required.** Cloudflare does not cache `application/json` by default.
 
@@ -202,7 +202,40 @@ ssh user@80.69.172.220 "docker compose logs backend 2>&1 | grep -E '010|already 
      ```
    - **Cache eligibility:** Eligible for cache
    - **Edge TTL:** Respect origin headers
+   - **Cache key → Query string:** Ignore query string, **if the zone's plan
+     offers it** (Cloudflare documents it for Enterprise and Pay-as-you-go,
+     not Free). On the Free plan, leave the cache key alone and create the
+     URL Rewrite Rules in sub-step 5 below instead.
 4. Save and deploy the rule.
+5. **Free plan only: drop the query string before the cache lookup.** These
+   endpoints ignore the query string, and so does the micro-cache. With the
+   default cache key, each new query string (`?x=<random>`) is a separate
+   edge entry, so every such request misses and reaches the origin (#159).
+   URL Rewrite Rules run before Cache Rules, so a rewrite that empties the
+   query string makes them all one entry. Create two rules, one per path,
+   under **Rules → Overview → Create rule → URL Rewrite Rule**:
+   - **Rule name:** `Drop query string: candidates` /
+     `Drop query string: question sets`
+   - **If incoming requests match:** Wildcard pattern, **Request URL**
+     `https://avoinvaalikone.fi/api/candidates*` /
+     `https://avoinvaalikone.fi/api/question-sets*`
+   - **Then rewrite the path and/or query:** Path: *Preserve*. Query:
+     *Rewrite to*, **Target query** `*` (no leading `?`: the query field
+     never contains it), **Rewrite to** left **empty** ("Leave this field
+     empty to remove the query string", in Cloudflare's docs). The target
+     must match the whole query; left empty, it would match only an empty
+     query and change nothing.
+   - Deploy both; sub-step 6 checks that each works.
+
+   URL Rewrite Rules are Transform Rules, which every plan has (Free allows
+   10 active ones; these use 2). Nothing under these paths reads the query
+   string (the token routes and POSTs included), so the rewrite changes no
+   response.
+6. Check: `scripts/verify-edge-cache.sh` must pass (it runs after every
+   deploy; see "4. Verify edge caching" for the manual checks). It probes
+   both `/api/question-sets` and `/api/candidates` with a never-seen query
+   string, so it checks the result whichever of sub-step 3 or 5 the zone
+   uses, and each rewrite rule on its own.
 
 **Safety:** The rule only caches responses where the origin sends
 `Cache-Control: public, s-maxage=...`. Party-token and admin routes send
@@ -218,6 +251,20 @@ curl -sI https://avoinvaalikone.fi/api/question-sets | grep cf-cache-status
 # Second request — served from edge
 curl -sI https://avoinvaalikone.fi/api/question-sets | grep cf-cache-status
 # cf-cache-status: HIT
+
+# A new query string is served from the same edge entry
+curl -sI "https://avoinvaalikone.fi/api/question-sets?x=$(date +%s)$$" | grep cf-cache-status
+# cf-cache-status: HIT  (UPDATING/EXPIRED/REVALIDATED/STALE if the entry just
+# expired are fine too; MISS means the query string still reaches the cache key)
+
+# The same for the candidate list (on the Free plan it has its own rewrite
+# rule): request it twice, then with a new query string
+curl -sI https://avoinvaalikone.fi/api/candidates | grep cf-cache-status; sleep 2
+curl -sI https://avoinvaalikone.fi/api/candidates | grep cf-cache-status
+# cf-cache-status: HIT  (DYNAMIC: the Cache Rule doesn't cover /api/candidates)
+curl -sI "https://avoinvaalikone.fi/api/candidates?x=$(date +%s)$$" | grep cf-cache-status
+# cf-cache-status: HIT  (MISS: the query string reaches the cache key; on the
+# Free plan, check this path's rewrite rule)
 
 # Party-token route must NOT be cached
 curl -sI https://avoinvaalikone.fi/api/candidates/party/some-token | grep cf-cache-status
@@ -296,7 +343,7 @@ for the test.
 
 ## Election-night checklist
 
-- [ ] Cache Rule active in Cloudflare (verify `cf-cache-status: HIT`)
+- [ ] Cache Rule active in Cloudflare, and the edge ignoring the query string (the rule's cache key, or the URL Rewrite Rules on Free): `scripts/verify-edge-cache.sh` passes
 - [ ] 3 backend replicas healthy (`docker compose ps`)
 - [ ] Redis healthy (`docker compose exec redis redis-cli ping`)
 - [ ] `RATE_LIMIT_MATCH_MAX` set appropriately (raise if CGNAT complaints)

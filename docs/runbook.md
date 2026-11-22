@@ -26,7 +26,7 @@ there. Not a bare `compose up`: it doesn't pick up a changed Caddyfile.
 | `DB pool saturated: … waiting=N` in backend logs | Queries queueing for connections | Check for slow queries (db logs, `log_min_duration_statement=250`; bind parameters are left out, and errors are logged terse, without DETAIL/HINT/CONTEXT (so a deadlock shows no process or query detail), as they'd log tokens, #36); dials: `PG_POOL_MAX`, backend `replicas`, `RATE_LIMIT_MATCH_MAX` |
 | `Redis error:` (repeats on every reconnect attempt, ~2 s apart) | Shared rate-limit store down | Limiters fail open: requests go through **unlimited** (no per-process fallback) until Redis is back, then limiting resumes by itself. Restart redis soon |
 | Lots of 429s on `/api/voter/match` | Rate limit too tight for CGNAT crowds | Raise `RATE_LIMIT_MATCH_MAX` in `/opt/vaalikone/.env`, `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d backend` (keep both files to preserve 3 replicas, proxy trust and unpublished backend ports; `restart` keeps the old environment) |
-| Slow `/api/*` GETs + high DB load | Edge cache not serving | `scripts/verify-edge-cache.sh` — if DYNAMIC, recreate the Cloudflare Cache Rule (docs/scaling.md) |
+| Slow `/api/*` GETs + high DB load | Edge cache not serving | `scripts/verify-edge-cache.sh` — if DYNAMIC, recreate the Cloudflare Cache Rule (and on the Free plan the URL Rewrite Rules); if only a query-string probe misses, set the rule's cache key to ignore the query string, or on Free add or fix that path's URL Rewrite Rule (docs/scaling.md, "3. Create the Cloudflare Cache Rule") |
 | `statement timeout` errors | A query hit `PG_STATEMENT_TIMEOUT_MS` (10 s) | Find and fix the query; the timeout is protective, don't just raise it |
 | `SMTP-tarkistus epäonnistui` in backend logs or Sentry, or `failed` rows in `email_log` | Email isn't going out (candidate links, notifications) | Check `SMTP_*` in `/opt/vaalikone/.env` and the provider's status; after fixing, `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d backend`. Re-send missed candidate links from the admin's per-party "send candidate links" |
 | Deploy fails with `required variable SMTP_HOST` (or `SMTP_FROM`) `is missing a value` | `.env` has no SMTP settings | Add them (docs/production-readiness.md, Email) and deploy again. The old containers keep running meanwhile, but every `docker compose -f docker-compose.yml -f docker-compose.prod.yml …` command (`logs`, `ps`, `exec`) fails the same way until `.env` has them |
@@ -39,7 +39,7 @@ token, and a wrong token counts toward the admin rate limit). Errors: Sentry (ba
 
 ## Election-night checklist
 
-- [ ] `scripts/verify-edge-cache.sh` passes (CF-Cache-Status: HIT)
+- [ ] `scripts/verify-edge-cache.sh` passes (CF-Cache-Status: HIT, also with a new query string)
 - [ ] Latest nightly dump exists in the backup bucket (`postgres/vaalikone-<yesterday>.dump`); take a fresh manual one: `docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backup backup.sh`
 - [ ] Restore drill done in the weeks before the election (date: ____), not tonight ([scripts/backup/restore.md](../scripts/backup/restore.md#restore-drill))
 - [ ] Email goes out: backend logs show `SMTP-yhteys toimii`, and a re-sent candidate link arrives (not in spam)
