@@ -3,7 +3,8 @@
 // end-of-life). The versions are read from the files themselves, so a bump
 // that misses one of them fails here. So does a release that has since
 // reached end-of-life: this test starts failing on its own on that date,
-// which is the reminder to move to the next LTS.
+// which is the reminder to move to the next LTS. Deploys need this job, so
+// from then on main does not deploy until the version is bumped.
 const fs = require("fs");
 const path = require("path");
 
@@ -46,7 +47,9 @@ describe("Node.js runtime version", () => {
     expect(new Set(majors.map((m) => m.major)).size).toBe(1);
   });
 
-  test.each(majors.map((m) => [m.where, m.major]))("%s uses a supported LTS release (Node %i)", (_where, major) => {
+  const distinct = [...new Map(majors.map((m) => [`${m.where} ${m.major}`, [m.where, m.major]])).values()];
+
+  test.each(distinct)("%s uses a supported LTS release (Node %i)", (_where, major) => {
     const eol = LTS_END_OF_LIFE[major];
     expect(eol).toBeDefined();
     expect(Date.now()).toBeLessThan(new Date(`${eol}T23:59:59Z`).getTime());
@@ -66,12 +69,13 @@ describe("GitHub Actions runtime", () => {
     m[1],
     Number(m[2]),
   ]);
+  const distinct = [...new Map(uses.map((u) => [u.join("@"), u])).values()];
 
   test("the workflow uses actions", () => {
     expect(uses.length).toBeGreaterThan(0);
   });
 
-  test.each(uses)("%s@v%i does not run on the Node 20 action runtime", (action, major) => {
+  test.each(distinct)("%s@v%i does not run on the Node 20 action runtime", (action, major) => {
     const lastNode20 = NODE20_ACTION_MAJORS[action];
     if (lastNode20 !== undefined) expect(major).toBeGreaterThan(lastNode20);
   });
