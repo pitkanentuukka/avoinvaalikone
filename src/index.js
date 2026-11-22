@@ -5,12 +5,12 @@ const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
 const morgan = require("morgan");
-const rateLimit = require("express-rate-limit");
 
 const { redactTokens } = require("./redactTokens");
 const { noStore } = require("./middleware/cacheControl");
 const { isAdminRequest } = require("./middleware/auth");
 const redisStore = require("./middleware/rateLimitStore");
+const { failOpenLimiter } = require("./middleware/rateLimiter");
 const redisClient = require("./redis");
 const { pool } = require("./db/pool");
 const { verifySmtp } = require("./email");
@@ -44,12 +44,10 @@ app.use(helmet({
 // Stores live in Redis when REDIS_URL is set, so the limits hold across
 // backend replicas instead of multiplying by the replica count.
 //
-// passOnStoreError makes the limiter fail *open*: if Redis is unreachable or
-// rejects a write (single instance, noeviction), the request is allowed
-// through instead of 500ing. Losing shared rate limiting during a Redis
-// outage is far better than dropping the voter-match endpoint on election
-// night. Until Redis is back no limit applies at all: there is no per-process
-// fallback then (only without REDIS_URL, in dev).
+// failOpenLimiter (src/middleware/rateLimiter.js) lets requests through when
+// Redis is unreachable or rejects a write (single instance, noeviction),
+// instead of 500ing; the outage is logged at most a line a minute
+// (src/outageLog.js).
 
 // Rate limiting for admin endpoints (strict). It only exists to stop guessing
 // ADMIN_SECRET, so requests carrying the valid secret are skipped: one admin
@@ -57,23 +55,21 @@ app.use(helmet({
 // about ten actions. Skipping (rather than skipSuccessfulRequests) also keeps
 // the admin's own 4xx responses from counting, and keeps the real admin in
 // even when failed guesses from the same IP have used up the budget.
-const adminLimiter = rateLimit({
+const adminLimiter = failOpenLimiter({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 30,
   message: { error: "Liian monta pyyntöä. Yritä myöhemmin uudelleen." },
   skip: (req) => process.env.NODE_ENV !== 'production' || isAdminRequest(req),
   store: redisStore("rl:admin:"),
-  passOnStoreError: true,
 });
 
 // Rate limiting for public submission endpoints
-const submissionLimiter = rateLimit({
+const submissionLimiter = failOpenLimiter({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 20,
   message: { error: "Liian monta pyyntöä. Yritä myöhemmin uudelleen." },
   skip: (req) => process.env.NODE_ENV !== 'production',
   store: redisStore("rl:submission:"),
-  passOnStoreError: true,
 });
 
 // Rate limiting for voter match endpoint. The default allows for heavy carrier
@@ -93,13 +89,12 @@ if (rawMatchMax !== undefined && rawMatchMax !== "") {
     console.warn("RATE_LIMIT_MATCH_MAX must be a positive safe integer; falling back to 300");
   }
 }
-const matchLimiter = rateLimit({
+const matchLimiter = failOpenLimiter({
   windowMs: 1 * 60 * 1000, // 1 minute
   max: matchMax,
   message: { error: "Liian monta pyyntöä. Yritä myöhemmin uudelleen." },
   skip: (req) => process.env.NODE_ENV !== 'production',
   store: redisStore("rl:match:"),
-  passOnStoreError: true,
 });
 
 // :url masks party, registration and candidate tokens: rate-limited (429)
