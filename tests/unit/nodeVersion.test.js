@@ -1,8 +1,9 @@
 // CI and both Docker images must run a Node release that still gets
 // security fixes (issue #174: they stayed on Node 20 past its April 2026
 // end-of-life). The versions are read from the files themselves, so a bump
-// that misses one of them fails here, and so does a release that has since
-// reached end-of-life.
+// that misses one of them fails here. So does a release that has since
+// reached end-of-life: this test starts failing on its own on that date,
+// which is the reminder to move to the next LTS.
 const fs = require("fs");
 const path = require("path");
 
@@ -35,7 +36,7 @@ describe("Node.js runtime version", () => {
 
   test("CI jobs and both Dockerfiles each pin a Node version", () => {
     const where = majors.map((m) => m.where);
-    expect(where.filter((w) => w === ".github/workflows/ci-cd.yml")).toHaveLength(2);
+    expect(where).toContain(".github/workflows/ci-cd.yml");
     expect(where).toContain("Dockerfile");
     expect(where).toContain("vaalikone-frontend/Dockerfile");
   });
@@ -49,5 +50,29 @@ describe("Node.js runtime version", () => {
     const eol = LTS_END_OF_LIFE[major];
     expect(eol).toBeDefined();
     expect(Date.now()).toBeLessThan(new Date(`${eol}T23:59:59Z`).getTime());
+  });
+});
+
+// The workflow's actions run on a Node runtime of their own, named in each
+// action's action.yml (`using: node20`). These majors still run on Node 20.
+const NODE20_ACTION_MAJORS = {
+  "actions/checkout": 4,
+  "actions/setup-node": 4,
+  "actions/upload-artifact": 5,
+};
+
+describe("GitHub Actions runtime", () => {
+  const uses = [...read(".github/workflows/ci-cd.yml").matchAll(/uses:\s*([\w-]+\/[\w-]+)@v(\d+)/g)].map((m) => [
+    m[1],
+    Number(m[2]),
+  ]);
+
+  test("the workflow uses actions", () => {
+    expect(uses.length).toBeGreaterThan(0);
+  });
+
+  test.each(uses)("%s@v%i does not run on the Node 20 action runtime", (action, major) => {
+    const lastNode20 = NODE20_ACTION_MAJORS[action];
+    if (lastNode20 !== undefined) expect(major).toBeGreaterThan(lastNode20);
   });
 });
