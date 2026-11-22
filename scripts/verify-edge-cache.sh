@@ -13,13 +13,21 @@ HOST="${1:-avoinvaalikone.fi}"
 URL="https://$HOST/api/question-sets"
 CANDIDATES_URL="https://$HOST/api/candidates"
 
+# Every request gives up on its own: the deploy job runs this after each
+# deploy and later deploys queue behind it, so a connection that never answers
+# (a stuck TLS handshake, a black-holed route) must not hold it (#178). The
+# six requests at most 10 s each, plus the two pauses, stay well inside the
+# step's timeout-minutes in .github/workflows/ci-cd.yml.
+CURL_LIMITS=(--connect-timeout 5 --max-time 10)
+
 # Prints the response's CF-Cache-Status, HTTP_<code> for an HTTP error, or
-# MISSING when there is no header (or no response at all); always one word.
+# MISSING when there is no header (or no response at all, as when the request
+# timed out); always one word.
 # -D - can write several header blocks (a proxy's CONNECT reply, a 103 Early
 # Hints); each status line starts a new one, so only the final response's
 # block counts.
 status_of() {
-  { curl -sS -o /dev/null -D - "${1:-$URL}" || true; } | tr -d '\r' |
+  { curl -sS "${CURL_LIMITS[@]}" -o /dev/null -D - "${1:-$URL}" || true; } | tr -d '\r' |
     awk 'BEGIN { s = "MISSING" }
          /^HTTP\// { code = $2; s = "MISSING" }
          tolower($1) == "cf-cache-status:" { s = toupper($2) }

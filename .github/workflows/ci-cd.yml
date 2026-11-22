@@ -148,10 +148,14 @@ jobs:
         run: |
           ssh -i ~/.ssh/deploy_key root@80.69.172.220 "sh /opt/vaalikone/scripts/deploy.sh"
 
+      # Each try and the step itself are time-limited: later deploys queue
+      # behind this job, so a connection that never answers must not hold it
+      # until GitHub's 6-hour limit (#178).
       - name: Verify deployment
+        timeout-minutes: 5
         run: |
           for i in {1..15}; do
-            if curl -sf https://avoinvaalikone.fi/api/health; then
+            if curl -sf --connect-timeout 5 --max-time 10 https://avoinvaalikone.fi/api/health; then
               echo "✓ Deployment verified"
               exit 0
             fi
@@ -163,7 +167,11 @@ jobs:
       # The Cloudflare Cache Rule is manual dashboard state; if it vanishes,
       # origin load multiplies silently. Warn (don't fail the deploy) so the
       # site stays up while someone recreates the rule per docs/scaling.md.
+      # The script time-limits each request; timeout-minutes is the backstop
+      # (#178), and continue-on-error makes hitting it a warning too.
       - name: Verify edge cache
+        timeout-minutes: 2
+        continue-on-error: true
         run: |
           if ! bash scripts/verify-edge-cache.sh avoinvaalikone.fi; then
             echo "::warning::Cloudflare edge cache check failed — see this step's log and the Cache Rule in docs/scaling.md"
