@@ -429,8 +429,11 @@ function HomeView({ navigate, openLink }) {
   return (
     <div style={{ maxWidth: 680, margin: "0 auto", padding: "60px 24px", textAlign: "center" }}>
       <h1 style={{ fontSize: "42px", fontWeight: 800, letterSpacing: "-0.03em", marginBottom: "16px", lineHeight: 1.1 }}>{t.homeTitle}</h1>
-      <p style={{ fontSize: "17px", color: palette.textMuted, lineHeight: 1.6, maxWidth: 520, margin: "0 auto 48px" }}>
+      <p style={{ fontSize: "17px", color: palette.textMuted, lineHeight: 1.6, maxWidth: 520, margin: "0 auto 24px" }}>
         {t.homeSubtitle}
+      </p>
+      <p role="status" style={{ background: palette.infoLight, border: `1px solid ${palette.info}`, borderRadius: "8px", padding: "12px 16px", maxWidth: 520, margin: "0 auto 48px", fontSize: "14px", color: palette.text, lineHeight: 1.5 }}>
+        {t.homeStatus}
       </p>
       <div style={{ display: "flex", flexDirection: "column", gap: "16px", maxWidth: 400, margin: "0 auto" }}>
         <Card style={{ cursor: "pointer", textAlign: "left" }} onClick={() => navigate("voter")}>
@@ -1215,9 +1218,10 @@ function NgoView() {
   return (
     <div style={{ maxWidth: 680, margin: "0 auto", padding: "40px 24px" }}>
       <h2 style={{ fontSize: "28px", fontWeight: 800, letterSpacing: "-0.02em", marginBottom: "8px" }}>{t.ngoTitle}</h2>
-      <p style={{ color: palette.textMuted, marginBottom: "16px" }}>
+      <p style={{ color: palette.textMuted, marginBottom: "8px" }}>
         {t.ngoDesc}
       </p>
+      <p style={{ fontWeight: 600, marginBottom: "16px" }}>{t.ngoDeadline}</p>
       <div style={{ background: palette.accentLight, border: `1px solid ${palette.accent}`, borderRadius: "8px", padding: "12px 16px", marginBottom: "24px", fontSize: "14px", color: palette.text }}>
         {t.ngoCheckBefore}{" "}
         <button onClick={openApproved} style={{ background: "none", border: "none", padding: 0, color: palette.accent, fontWeight: 600, cursor: "pointer", fontSize: "14px", textDecoration: "underline" }}>

@@ -24,8 +24,23 @@ services:
       TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-3}
       # Public hostname used for the HTTP→HTTPS redirect.
       PUBLIC_HOST: ${PUBLIC_HOST:-}
+      # docker-compose.yml defaults these to the dev-only mailpit, which
+      # production never starts: a deploy without real SMTP settings sent
+      # every email nowhere, or into a leftover mailpit container (#190).
+      # The sender must be on a domain whose SPF/DKIM cover the SMTP provider.
+      # The base port default is mailpit's 1025; providers listen on 587
+      # (STARTTLS) or 465 (SMTP_SECURE=true).
+      SMTP_HOST: ${SMTP_HOST:?SMTP_HOST must be set in production (the mailpit default is dev-only)}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_FROM: ${SMTP_FROM:?SMTP_FROM must be set in production, on a domain with SPF and DKIM for the SMTP provider}
 
   frontend:
+    ports: !reset []
+
+  # Dev-only mail catcher (profile "dev"), never started here. Should it run
+  # anyway, keep it off the host's public interface: it holds every captured
+  # message, magic links included (#190). scripts/deploy.sh removes it.
+  mailpit:
     ports: !reset []
 
   # Nightly pg_dump → UpCloud Object Storage (S3-compatible) via rclone.
@@ -44,6 +59,10 @@ services:
       RCLONE_CONFIG_UPCLOUD_ENDPOINT: ${BACKUP_S3_ENDPOINT:-}
       RCLONE_CONFIG_UPCLOUD_ACCESS_KEY_ID: ${BACKUP_S3_ACCESS_KEY:-}
       RCLONE_CONFIG_UPCLOUD_SECRET_ACCESS_KEY: ${BACKUP_S3_SECRET_KEY:-}
+      # The bucket is created by hand and the key is limited to listing it and
+      # using its objects; without this rclone calls CreateBucket first and
+      # gets 403 (#194).
+      RCLONE_CONFIG_UPCLOUD_NO_CHECK_BUCKET: "true"
     volumes:
       - backup_data:/backups
     depends_on:
