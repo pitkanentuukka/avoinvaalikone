@@ -305,6 +305,32 @@ Optional unless marked required; defaults keep local dev working unchanged. See 
   in-repo store in issue #149).
 - Frontend: `@sentry/react`.
 
+## Dependency audit (issue #154, 2026-11-19)
+
+`npm audit` reports no vulnerabilities in either lockfile, with or without
+dev dependencies. Every advisory found was in a development or build tool;
+none reached the backend runtime or the nginx-served frontend bundle.
+
+- Frontend: lockfile updates within range (Vite 7.3.1 → 7.3.8, zod, esbuild,
+  postcss and others); the `vite` floor is raised to the audited `^7.3.8`.
+- Backend: Jest 30.2 → 30.5 (floor raised to `^30.5.2`). Jest 30.5 and its
+  `test-exclude` still depend on `glob` 13/10 and `minimatch` 10/9, below the
+  fixes for GHSA-3g3m-2fjr-6pw4 (glob ≤ 14.0.1) and GHSA-g3hv-75wg-m249
+  (minimatch < 11.0.1), and `npm audit fix --force` would downgrade to
+  Jest 29. So `package.json` has `overrides` for `glob` ^14.0.2 and
+  `minimatch` ^11.0.5. They are global (npm didn't apply them to all of
+  Jest's tree when nested under `jest`): any package added later that uses
+  glob ≤ 8's callback API or calls `require("minimatch")(…)` would get the
+  new majors and break. Today only Jest's tree uses them, through the named
+  `glob.sync` / `{ minimatch }` APIs; the full suite, the coverage run and
+  `--watch` pass, and no runtime dependency uses either package.
+  Neither advisory was exploitable here: both need attacker-controlled
+  patterns or a cancelled glob walk, and Jest only expands the repo's own
+  test patterns. To see whether the overrides can go, check the ranges Jest
+  asks for (`npm view jest-config dependencies.glob`,
+  `npm view test-exclude dependencies`), or remove them, `npm install` and
+  `npm audit`. `npm ls` shows only the overridden versions.
+
 ## Related docs
 
 - `docs/runbook.md` — operational runbook.
