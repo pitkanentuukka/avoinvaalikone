@@ -130,7 +130,7 @@ class FakeRedis {
       return `*2\r\n:${hits}\r\n:60000\r\n`;
     }
     if (source.includes('"DECR"')) {
-      if (this.hits.has(key)) this.hits.set(key, this.hits.get(key) - 1);
+      if (this.hits.get(key) > 0) this.hits.set(key, this.hits.get(key) - 1);
       return ":0\r\n";
     }
     return "-ERR unknown script\r\n";

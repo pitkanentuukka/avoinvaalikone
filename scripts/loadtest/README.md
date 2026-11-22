@@ -37,7 +37,7 @@ deployment hostname, update both the config key and `BASE_URL`. From a second
 test host, use a separate config mapping the same hostname to the origin's
 reachable IP, rather than `127.0.0.1`.
 
-Before raising the limit or starting a load test, verify the local HTTPS route
+Before raising the limits or starting a load test, verify the local HTTPS route
 (no redirects followed; an invalid empty match request should return the
 backend's Finnish validation JSON with HTTP 400):
 
@@ -54,14 +54,15 @@ These direct-to-origin tests omit Cloudflare. With production
 it from client-supplied `X-Forwarded-For`. The test measures origin capacity;
 it does not validate per-client rate limiting through the full proxy chain.
 
-Raise the match rate limit for the duration of the test, since the load comes
-from one test host. `NO_PROXY` below ensures an HTTPS proxy from the shell's
+Raise the match and candidate-page rate limits for the duration of the test,
+since the load comes from one test host. `NO_PROXY` below ensures an HTTPS proxy from the shell's
 environment cannot bypass k6's direct connection override:
 
 ```bash
-# in /opt/vaalikone: raise the limit for the test (keep both -f files; not `restart`,
-# which keeps the old environment)
-RATE_LIMIT_MATCH_MAX=100000 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d backend
+# in /opt/vaalikone: raise the limits for the test (keep both -f files; not `restart`,
+# which keeps the old environment). The voter flow also opens candidate pages,
+# whose misses count against RATE_LIMIT_CANDIDATE_READ_MAX, all from this one host.
+RATE_LIMIT_MATCH_MAX=100000 RATE_LIMIT_CANDIDATE_READ_MAX=100000 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d backend
 NO_PROXY=avoinvaalikone.fi no_proxy=avoinvaalikone.fi k6 run \
   --config scripts/loadtest/origin-local.json \
   -e BASE_URL=https://avoinvaalikone.fi scripts/loadtest/voter-flow.js

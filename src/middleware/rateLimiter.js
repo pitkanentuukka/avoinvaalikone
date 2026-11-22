@@ -23,4 +23,17 @@ function failOpenLimiter(options) {
   return Object.assign(failOpen, { resetKey: limiter.resetKey, getKey: limiter.getKey });
 }
 
-module.exports = { failOpenLimiter };
+// A positive safe integer from the environment, or the fallback. Compose
+// passes an unset variable as "", which also means the fallback; anything
+// else invalid warns at startup.
+function limitFromEnv(name, fallback) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return fallback;
+  const parsed = Number(raw);
+  // Rejects partial parses ("300/min"), fractions and unsafe/overflowed values.
+  if (/^[0-9]+$/.test(raw) && Number.isSafeInteger(parsed) && parsed > 0) return parsed;
+  console.warn(`${name} must be a positive safe integer; falling back to ${fallback}`);
+  return fallback;
+}
+
+module.exports = { failOpenLimiter, limitFromEnv };

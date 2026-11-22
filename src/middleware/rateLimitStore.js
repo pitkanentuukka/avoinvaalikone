@@ -53,9 +53,11 @@ return { redis.call("INCR", KEYS[1]), ttl }
 `);
 
 // Plain DECR on a key that has expired would create a counter at -1 with no
-// expiry.
+// expiry. Never below 0 either (as express-rate-limit's MemoryStore): a hit
+// counted in the previous window and uncounted in this one would otherwise
+// leave this window's counter negative, buying extra requests.
 const DECREMENT = script(`
-if redis.call("PTTL", KEYS[1]) > 0 then
+if redis.call("PTTL", KEYS[1]) > 0 and tonumber(redis.call("GET", KEYS[1])) > 0 then
   redis.call("DECR", KEYS[1])
 end
 return 0
