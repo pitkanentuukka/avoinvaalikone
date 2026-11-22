@@ -11,7 +11,10 @@
 // "path" (query string ignored). STUB_PROBE makes the query-string probe
 // answer a fixed CF-Cache-Status, or one of the shapes below. STUB_STYLE=http1
 // answers like an HTTP/1.1 server: capitalised header name, lowercase value.
-// sleep is a no-op stub.
+// STUB_HANG=1 plays a connection that never answers (a stuck TLS handshake,
+// a black-holed route): a curl given --max-time/-m "waits" that long and
+// fails with curl's timeout error, else it really hangs. sleep is a no-op
+// stub.
 
 const { spawnSync } = require("child_process");
 const fs = require("fs");
@@ -35,8 +38,20 @@ const PROBE_SHAPES = {
 };
 
 const CURL_STUB = `#!/bin/sh
-for a; do url=$a; done
+max_time= prev=
+for a; do
+  case "$prev" in --max-time|-m) max_time=$a ;; esac
+  prev=$a url=$a
+done
 echo "$url" >> "$STUB_DIR/requests"
+if [ -n "\${STUB_HANG:-}" ]; then
+  # Without a limit, hang (long enough to show; not forever, so the test
+  # process isn't held up by a leftover stub).
+  [ -n "$max_time" ] || exec /bin/sleep 15 </dev/null >/dev/null 2>&1
+  echo "$max_time" >> "$STUB_DIR/waited"
+  echo "curl: (28) Operation timed out after \${max_time}000 milliseconds" >&2
+  exit 28
+fi
 reply() {
   if [ "\${STUB_STYLE:-}" = http1 ]; then
     printf 'HTTP/1.1 200 OK\\r\\nCF-Cache-Status: %s\\r\\n\\r\\n' "$(echo "$1" | tr A-Z a-z)"
@@ -73,7 +88,8 @@ const CANDIDATES = "https://example.test/api/candidates";
 
 // candidatesKey: the cache key for /api/candidates* only (on the Free plan
 // each path has its own rewrite rule, which can be missing on its own).
-function run(cfKey, probe = "", style = "", candidatesKey = "") {
+// extraEnv: more stub settings (STUB_HANG).
+function run(cfKey, probe = "", style = "", candidatesKey = "", extraEnv = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "verify-edge-"));
   try {
     const bin = path.join(dir, "bin");
@@ -82,13 +98,21 @@ function run(cfKey, probe = "", style = "", candidatesKey = "") {
     fs.writeFileSync(path.join(bin, "sleep"), '#!/bin/sh\necho "sleep $*" >> "$STUB_DIR/requests"\n', { mode: 0o755 });
     fs.writeFileSync(path.join(dir, "requests"), "");
     const res = spawnSync("bash", [SCRIPT, "example.test"], {
-      env: { PATH: `${bin}:/usr/bin:/bin`, STUB_DIR: dir, STUB_CF_KEY: cfKey, STUB_PROBE: probe, STUB_STYLE: style, STUB_CF_KEY_CANDIDATES: candidatesKey },
+      env: { PATH: `${bin}:/usr/bin:/bin`, STUB_DIR: dir, STUB_CF_KEY: cfKey, STUB_PROBE: probe, STUB_STYLE: style, STUB_CF_KEY_CANDIDATES: candidatesKey, ...extraEnv },
       encoding: "utf8",
+      // A hung script is killed here rather than hanging the test run.
+      timeout: 5000,
     });
     // Requests and sleeps, in order; `requests` is the requests alone.
     const events = fs.readFileSync(path.join(dir, "requests"), "utf8").split("\n").filter(Boolean);
     const requests = events.filter((e) => !e.startsWith("sleep "));
-    return { ...res, events, requests };
+    // Seconds each timed-out request "waited", and the script's own sleeps.
+    const waitedFile = path.join(dir, "waited");
+    const waited = fs.existsSync(waitedFile)
+      ? fs.readFileSync(waitedFile, "utf8").split("\n").filter(Boolean).map(Number)
+      : [];
+    const slept = events.filter((e) => e.startsWith("sleep ")).map((e) => Number(e.slice(6)));
+    return { ...res, events, requests, waited, slept };
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -221,4 +245,51 @@ test("an erroring site is reported as such, not as a cache rule problem", () => 
   expect(res.stdout).toContain("second=HTTP_503");
   // Both paths are checked, neither probed.
   expect(res.requests).toEqual([URL, URL, CANDIDATES, CANDIDATES]);
+});
+
+// Issue #178: the deploy job runs this script after every deploy, and every
+// later deploy queues behind it (concurrency: deploy-production, no
+// cancel-in-progress). A connection that never answers must not hold the
+// step: each request gives up, and all of them together finish well inside
+// the step's own timeout, which is the backstop.
+describe("a connection that never answers (#178)", () => {
+  const WORKFLOW = path.join(__dirname, "../../.github/workflows/ci-cd.yml");
+
+  // The "Verify edge cache" step's lines, up to the next step.
+  function edgeCacheStep() {
+    const lines = fs.readFileSync(WORKFLOW, "utf8").split("\n");
+    const start = lines.findIndex((l) => /^\s*- name: Verify edge cache\s*$/.test(l));
+    expect(start).toBeGreaterThan(-1);
+    const indent = lines[start].indexOf("-");
+    const rest = lines.slice(start + 1);
+    const end = rest.findIndex((l) => l.trim() && l.search(/\S/) <= indent);
+    return [lines[start], ...(end === -1 ? rest : rest.slice(0, end))].join("\n");
+  }
+
+  test("every request gives up, and the script fails with a warning", () => {
+    const res = run("path", "", "", "", { STUB_HANG: "1" });
+    expect(res.error).toBeUndefined();
+    expect(res.signal).toBeNull();
+    expect(res.status).toBe(1);
+    expect(res.waited).toHaveLength(res.requests.length);
+    expect(res.stderr).toMatch(/no CF-Cache-Status header on .*\/api\/question-sets/);
+    expect(res.stderr).toMatch(/no CF-Cache-Status header on .*\/api\/candidates/);
+  });
+
+  test("the step has a timeout, and timing out only warns", () => {
+    const step = edgeCacheStep();
+    expect(step).toMatch(/^\s*timeout-minutes:\s*\d+\s*$/m);
+    // The check warns rather than fails the deploy; so must its timeout.
+    expect(step).toMatch(/^\s*continue-on-error:\s*true\s*$/m);
+  });
+
+  test("the worst case fits well inside the step's timeout", () => {
+    const minutes = Number(edgeCacheStep().match(/timeout-minutes:\s*(\d+)/)?.[1]);
+    expect(minutes).toBeGreaterThan(0);
+    const res = run("path", "", "", "", { STUB_HANG: "1" });
+    const total = [...res.waited, ...res.slept].reduce((a, b) => a + b, 0);
+    expect(res.waited.length).toBeGreaterThan(0);
+    // Room to spare for the runner, DNS and the checkout's own overhead.
+    expect(total).toBeLessThanOrEqual(minutes * 60 * 0.75);
+  });
 });
