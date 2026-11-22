@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Vaalikone 2026 is a Finnish voter advisory machine (election compass). Voters answer policy questions and are matched with candidates based on answer similarity. It consists of a Node/Express backend (repo root) and a React frontend (`vaalikone-frontend/`).
+Vaalikone 2027 is a Finnish voter advisory machine (election compass). Voters answer policy questions and are matched with candidates based on answer similarity. It consists of a Node/Express backend (repo root) and a React frontend (`vaalikone-frontend/`).
 
 ## Commands
 
@@ -37,7 +37,7 @@ docker compose up --build                 # Start without mailpit
 docker compose down                       # Stop all services
 ```
 
-`mailpit` (dev SMTP capture, web UI at http://localhost:8025) is gated behind the `dev` Compose profile, so it only starts when you pass `--profile dev`. Production (`docker-compose.prod.yml`) never requests the profile, so mailpit is absent there.
+`mailpit` (dev SMTP capture, web UI at http://localhost:8025) is gated behind the `dev` Compose profile, so it only starts when you pass `--profile dev`. Production (`docker-compose.prod.yml`) never requests the profile, but `up` without it leaves an existing mailpit container running, so `scripts/deploy.sh` removes it and the prod file resets its ports. The base file's `SMTP_HOST=mailpit` default is dev-only: `docker-compose.prod.yml` requires `SMTP_HOST` and `SMTP_FROM` (#190), and each backend logs whether SMTP is reachable at startup (`verifySmtp()` in `src/email.js`).
 
 ## Architecture
 
@@ -84,7 +84,7 @@ Tables: `parties` → `candidates` → `candidate_answers`; `question_sets` ↔ 
 
 When a set or a per-set link is removed, the route layer deletes any question that is no longer linked to **any** set (`deleteOrphanQuestions()`); deleting a question cascades to its `candidate_answers` and `voter_responses`.
 
-**Email:** `src/email.js` sends everything through one pooled nodemailer transport (`SMTP_MAX_CONNECTIONS`, default 3), so bulk fire-and-forget sends queue instead of opening a connection per message. Every attempt is recorded in `email_log` (`sent | failed`, with the error); rows addressed to a candidate or party cascade on its deletion. The admin's per-party candidate list shows each candidate's latest outcome.
+**Email:** `src/email.js` sends everything through one pooled nodemailer transport (`SMTP_MAX_CONNECTIONS`, default 3), so bulk fire-and-forget sends queue instead of opening a connection per message. Every attempt is recorded in `email_log` (`sent | failed`, with the error); rows addressed to a candidate or party cascade on its deletion. The admin's per-party candidate list shows each candidate's latest outcome. The transport requires STARTTLS (`requireTLS`) for every `SMTP_HOST` except the local dev catchers `localhost`, `127.0.0.1`, `::1` and `mailpit` (#192); this is decided by host, not `NODE_ENV`, because Compose defaults `NODE_ENV` to production for local dev too.
 
 **Registration identity:** a unique index (`idx_candidates_registration_identity`, migration 015) allows one candidate per `(party_id, lower(btrim(name)), lower(btrim(email)))`; rows without email are unconstrained. Self-registration inserts with `ON CONFLICT … DO NOTHING` on it and treats a conflict as a repeat sign-up (re-sends the existing link, never returns its token); a profile update that would collide gets 409. The index expressions, `FIND_REGISTRATION_SQL` and the `ON CONFLICT` target in `src/routes/candidates.js` must stay identical, or the lookup stops using the index and the insert stops inferring it.
 
@@ -125,4 +125,5 @@ Bugs and tasks are tracked as GitHub issues (`pitkanentuukka/avoinvaalikone`). W
    - If a finding contradicts an earlier round's fix, stop and ask the user.
 6. Mark the PR ready for review and summarise what was fixed in each round.
    List the collected pre-existing bugs and ask the user which ones to file as issues.
+   When describing bugs, include 1. steps to reproduce 2. expected behaviour and 3. actual behaviour. Include these in the filed issue too.
    The user reviews and merges.

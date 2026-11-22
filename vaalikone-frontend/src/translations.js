@@ -23,7 +23,7 @@ const translations = {
 
     // Header / Nav
     appName: "Vaalikone",
-    appYear: "2026",
+    appYear: "2027",
     navHome: "Etusivu",
     navVoter: "Äänestäjä",
     navNgo: "Järjestö",
@@ -33,6 +33,7 @@ const translations = {
     // Home
     homeTitle: "Löydä ehdokkaasi",
     homeSubtitle: "Riippumaton alusta, joka yhdistää äänestäjät ja ehdokkaat kansalaisjärjestöjen laatimien politiikkakysymysten avulla.",
+    homeStatus: "Järjestöjen kysymysten keruu eduskuntavaaleihin on käynnissä 31.1.2027 asti. Ehdokkaiden vastaukset ja ehdokasvertailu avautuvat maaliskuussa 2027.",
     homeVoterLabel: "Äänestäjä",
     homeVoterTitle: "Vertaile ehdokkaita",
     homeVoterDesc: "Vastaa politiikkakysymyksiin ja löydä lähin ehdokkaasi.",
@@ -116,6 +117,7 @@ const translations = {
     ngoRemoveStatementLabel: (n) => `Poista väittämä ${n}`,
     ngoTitle: "Lähetä kysymyksiä",
     ngoDesc: "Ehdota politiikkaväittämiä, joihin ehdokkaat vastaavat. Jokaisen väittämän tulee olla muotoiltu niin, että siihen voi vastata asteikolla \"täysin eri mieltä\" – \"täysin samaa mieltä\".",
+    ngoDeadline: "Kysymyssarjojen takaraja eduskuntavaaleihin 2027 on 31.1.2027.",
     ngoCheckBefore: "Tarkista ennen lähettämistä, ettei vastaavaa kysymyssarjaa ole jo hyväksytty.",
     ngoViewApproved: "Katso hyväksytyt kysymyssarjat",
     ngoApprovedTitle: "Hyväksytyt kysymyssarjat",
@@ -287,7 +289,7 @@ const translations = {
 
     // Header / Nav
     appName: "Vaalikone",
-    appYear: "2026",
+    appYear: "2027",
     navHome: "Home",
     navVoter: "Voter",
     navNgo: "NGO",
@@ -297,6 +299,7 @@ const translations = {
     // Home
     homeTitle: "Find your candidate",
     homeSubtitle: "An independent platform connecting voters and candidates through policy questions drafted by civil society organizations.",
+    homeStatus: "Organizations can submit questions for the parliamentary election until 31 January 2027. Candidate answers and the candidate comparison open in March 2027.",
     homeVoterLabel: "Voter",
     homeVoterTitle: "Compare candidates",
     homeVoterDesc: "Answer policy questions and find the candidate closest to you.",
@@ -380,6 +383,7 @@ const translations = {
     ngoRemoveStatementLabel: (n) => `Remove statement ${n}`,
     ngoTitle: "Submit questions",
     ngoDesc: "Propose policy statements for candidates to respond to. Each statement should be formulated so it can be answered on a scale from \"strongly disagree\" to \"strongly agree\".",
+    ngoDeadline: "The deadline for question sets for the 2027 parliamentary election is 31 January 2027.",
     ngoCheckBefore: "Before submitting, check that a similar question set has not already been approved.",
     ngoViewApproved: "View approved question sets",
     ngoApprovedTitle: "Approved question sets",

@@ -1,4 +1,4 @@
-# Vaalikone 2026
+# Vaalikone 2027
 
 A Finnish *voter advisory machine* (vaalikone / election compass): voters answer a set of policy statements, candidates answer the same statements, and the app ranks candidates by how closely their answers match the voter's.
 
@@ -35,7 +35,7 @@ Candidates, in turn, answer the pooled approved questions (each through a person
 
 Because question authorship is distributed, the compass can grow organically: a new organization can add a perspective the others missed without anyone rebuilding the questionnaire. The trade-off — and the reason the admin role exists — is that submissions need moderation to stay neutral, non-leading, and free of duplicates.
 
-> **Repurposing:** this is currently scoped to the 2026 Finnish parliamentary election (the 13 eduskuntavaalit constituencies are baked into a DB constraint and a frontend constant). To run it for other elections, update both — see *Database Schema* below and `CLAUDE.md`.
+> **Repurposing:** this is currently scoped to the 2027 Finnish parliamentary election (the 13 eduskuntavaalit constituencies are baked into a DB constraint and a frontend constant). To run it for other elections, update both — see *Database Schema* below and `CLAUDE.md`.
 
 ---
 
@@ -313,7 +313,7 @@ Copy [`.env.example`](.env.example) to `.env` for the configuration reference, i
 
 Plain `npm start` does not set `NODE_ENV`; an unset value uses non-production behavior. The example `.env` sets `NODE_ENV=development`. Docker Compose defaults an unset or empty `NODE_ENV` to `production` (`${NODE_ENV:-production}`), which enables rate limiting. The `dev` Compose profile only starts Mailpit; it does not change `NODE_ENV`.
 
-In Docker Compose, `mailpit` provides a local SMTP server (port 1025) and web UI at http://localhost:8025 when the `dev` profile is enabled, and `CORS_ORIGIN` defaults to `http://localhost:80` to match the containerized frontend. See [docker-compose.yml](docker-compose.yml) and [docker-compose.prod.yml](docker-compose.prod.yml) for container-specific defaults and overrides (including production proxy trust).
+In Docker Compose, `mailpit` provides a local SMTP server (port 1025) and web UI at http://localhost:8025 when the `dev` profile is enabled (production must set `SMTP_HOST` and `SMTP_FROM` to a real provider instead; see [docs/production-readiness.md](docs/production-readiness.md#email)), and `CORS_ORIGIN` defaults to `http://localhost:80` to match the containerized frontend. See [docker-compose.yml](docker-compose.yml) and [docker-compose.prod.yml](docker-compose.prod.yml) for container-specific defaults and overrides (including production proxy trust).
 
 ---
 

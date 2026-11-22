@@ -13,6 +13,7 @@ const redisStore = require("./middleware/rateLimitStore");
 const { failOpenLimiter, limitFromEnv } = require("./middleware/rateLimiter");
 const redisClient = require("./redis");
 const { pool } = require("./db/pool");
+const { verifySmtp } = require("./email");
 const partiesRouter = require("./routes/parties");
 const { publicRouter: questionSetsPublicRouter, adminRouter: questionSetsAdminRouter } = require("./routes/questionSets");
 const candidatesRouter = require("./routes/candidates");
@@ -199,6 +200,7 @@ if (require.main === module) {
     console.log(`\n🗳️  Vaalikone API running on http://localhost:${PORT}`);
     console.log(`   Environment: ${process.env.NODE_ENV || "development"}`);
     console.log(`   CORS origin: ${process.env.CORS_ORIGIN || "http://localhost:5173"}\n`);
+    verifySmtp();
   });
 
   // Graceful shutdown: stop accepting connections, let in-flight requests

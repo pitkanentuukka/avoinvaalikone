@@ -1,4 +1,5 @@
 const nodemailer = require("nodemailer");
+const Sentry = require("@sentry/node");
 const db = require("./db/pool");
 
 function sanitizeHeader(value) {
@@ -11,20 +12,94 @@ function sanitizeHeader(value) {
 // opening one SMTP connection per message, which providers throttle or reject.
 let transport = null;
 
+// Local mail catchers (the Compose mailpit service, or one on the host for a
+// plain-Node run). They have no TLS.
+const DEV_SMTP_HOSTS = ["localhost", "127.0.0.1", "::1", "mailpit"];
+const isDevSmtpHost = (host) => DEV_SMTP_HOSTS.includes(String(host).toLowerCase());
+
 function getTransport() {
   if (!transport) {
+    const secure = process.env.SMTP_SECURE === "true";
     transport = nodemailer.createTransport({
       pool: true,
       maxConnections: parseInt(process.env.SMTP_MAX_CONNECTIONS || "3"),
       host: process.env.SMTP_HOST,
       port: parseInt(process.env.SMTP_PORT || "587"),
-      secure: process.env.SMTP_SECURE === "true",
+      secure,
+      // Without implicit TLS, nodemailer uses STARTTLS only if the server
+      // offers it, so a server that doesn't (or an attacker stripping it)
+      // would get the credentials and the magic links in plaintext (#192).
+      // Decided by host, not NODE_ENV: Compose defaults NODE_ENV to
+      // production for local dev with mailpit too, and a plain-Node
+      // production may leave it unset. With NODE_ENV=production, verifySmtp()
+      // also warns about a dev host.
+      requireTLS: !secure && !isDevSmtpHost(process.env.SMTP_HOST),
       auth: process.env.SMTP_USER
         ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
         : undefined,
     });
   }
   return transport;
+}
+
+const PLACEHOLDER_ADDRESS = /@example\.(com|org|net)>?\s*$/i;
+
+/**
+ * Settings that can't work in production but pass the prod compose file's
+ * ":?" checks: the dev values in .env.example (which operators copy to .env)
+ * and missing credentials. verify() logs in only when credentials are set, so
+ * without them it passes against a provider that requires auth, and every
+ * send then fails.
+ */
+function productionSmtpProblems() {
+  const { SMTP_HOST, SMTP_PORT, SMTP_FROM, SMTP_USER } = process.env;
+  const problems = [];
+  if (isDevSmtpHost(SMTP_HOST)) {
+    problems.push(`SMTP_HOST=${SMTP_HOST} on kehitysympäristön arvo: sähköpostit eivät lähde.`);
+  }
+  if (SMTP_PORT === "1025") {
+    problems.push("SMTP_PORT=1025 on kehitysympäristön (mailpit) portti: palveluntarjoajat käyttävät porttia 587 tai 465.");
+  }
+  if (!SMTP_FROM) {
+    problems.push("SMTP_FROM ei ole asetettu: lähettäjäksi tulee noreply@example.com, jonka vastaanottajat hylkäävät.");
+  } else if (PLACEHOLDER_ADDRESS.test(SMTP_FROM)) {
+    problems.push(`SMTP_FROM=${SMTP_FROM} on esimerkkiosoite, jonka vastaanottajat hylkäävät.`);
+  }
+  if (process.env.ADMIN_EMAIL && PLACEHOLDER_ADDRESS.test(process.env.ADMIN_EMAIL)) {
+    problems.push(`ADMIN_EMAIL=${process.env.ADMIN_EMAIL} on esimerkkiosoite: ilmoitukset uusista kysymyssarjoista eivät tule perille.`);
+  }
+  if (!SMTP_USER) {
+    problems.push("SMTP_USER ei ole asetettu: jos palveluntarjoaja vaatii kirjautumisen, sähköpostit epäonnistuvat.");
+  }
+  return problems;
+}
+
+/**
+ * Check the SMTP connection once at startup and log the outcome. A wrong
+ * SMTP_HOST or bad credentials otherwise surface only as failed rows in
+ * email_log (#190). A failed check also goes to Sentry (a no-op without
+ * SENTRY_DSN). Never throws: the API keeps serving either way.
+ */
+async function verifySmtp() {
+  if (!process.env.SMTP_HOST) {
+    console.warn("SMTP_HOST ei ole asetettu: sähköpostit (ehdokaslinkit, ilmoitukset) eivät lähde.");
+    return;
+  }
+  if (process.env.NODE_ENV === "production") {
+    for (const problem of productionSmtpProblems()) {
+      console.warn(problem);
+      Sentry.captureMessage(problem, "warning");
+    }
+  }
+  const server = `${process.env.SMTP_HOST}:${process.env.SMTP_PORT || "587"}`;
+  try {
+    await getTransport().verify();
+    console.log(`SMTP-yhteys toimii: ${server}`);
+  } catch (err) {
+    const message = `SMTP-tarkistus epäonnistui (${server}), sähköpostit eivät lähde: ${err.message || err}`;
+    console.error(message);
+    Sentry.captureMessage(message, "error");
+  }
 }
 
 /**
@@ -36,7 +111,7 @@ async function deliver(kind, message, { candidateId = null, partyId = null } = {
   let sendErr = null;
   try {
     await getTransport().sendMail({
-      from: process.env.SMTP_FROM || "noreply@vaalikone.fi",
+      from: process.env.SMTP_FROM || "noreply@example.com",
       ...message,
     });
   } catch (err) {
@@ -95,7 +170,7 @@ async function sendQuestionSetReviewedNotification(questionSet, approved) {
       ? [
           `Hei ${questionSet.ngo_name},`,
           "",
-          `Kysymyssarjanne "${questionSet.title}" on hyväksytty ja se on nyt näkyvissä Vaalikone 2026 -järjestelmässä.`,
+          `Kysymyssarjanne "${questionSet.title}" on hyväksytty ja se on nyt näkyvissä Vaalikone 2027 -järjestelmässä.`,
           "",
           "Kiitos osallistumisestanne!",
         ].join("\n")
@@ -178,7 +253,7 @@ async function sendQuestionSetPublishedNotification(questionSet, questionCount) 
     text: [
       `Hei ${questionSet.ngo_name},`,
       "",
-      `Kysymyssarjanne "${questionSet.title}" on nyt julkaistu Vaalikone 2026 -järjestelmässä.`,
+      `Kysymyssarjanne "${questionSet.title}" on nyt julkaistu Vaalikone 2027 -järjestelmässä.`,
       "",
       `Julkaistuja kysymyksiä: ${questionCount}`,
       "",
@@ -198,7 +273,7 @@ async function sendApprovedQuestionSetNotificationToCandidate(questionSet, quest
     text: [
       `Hei ${candidate.name},`,
       "",
-      "Vaalikone 2026 -järjestelmään on hyväksytty uusi kysymyssarja, johon sinua pyydetään vastaamaan.",
+      "Vaalikone 2027 -järjestelmään on hyväksytty uusi kysymyssarja, johon sinua pyydetään vastaamaan.",
       "",
       `Järjestö: ${questionSet.ngo_name}`,
       `Kysymyssarja: ${questionSet.title}`,
@@ -221,7 +296,7 @@ async function sendApprovedQuestionSetNotificationToParty(questionSet, questionC
     text: [
       `Hei ${party.name},`,
       "",
-      "Vaalikone 2026 -järjestelmään on hyväksytty uusi kysymyssarja.",
+      "Vaalikone 2027 -järjestelmään on hyväksytty uusi kysymyssarja.",
       "Ehdokkaanne saavat ilmoituksen ja oman vastauslinkkinsä sähköpostitse. Muistuttakaa heitä vastaamaan uusiin kysymyksiin.",
       "",
       `Järjestö: ${questionSet.ngo_name}`,
@@ -248,7 +323,7 @@ async function sendCandidateLinkEmail(candidate, partyName, frontendBaseUrl) {
 
   await deliver("candidate_link", {
     to: candidate.email,
-    subject: "Henkilökohtainen vastauslinkkisi Vaalikone 2026 -järjestelmään",
+    subject: "Henkilökohtainen vastauslinkkisi Vaalikone 2027 -järjestelmään",
     text: [
       `Hei ${candidate.name},`,
       "",
@@ -264,6 +339,7 @@ async function sendCandidateLinkEmail(candidate, partyName, frontendBaseUrl) {
 }
 
 module.exports = {
+  verifySmtp,
   sendCandidateLinkEmail,
   sendNewQuestionSetNotification,
   sendQuestionSetReviewedNotification,
