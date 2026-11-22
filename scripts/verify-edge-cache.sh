@@ -21,14 +21,14 @@ CANDIDATES_URL="https://$HOST/api/candidates"
 CURL_LIMITS=(--connect-timeout 5 --max-time 10)
 
 # Prints the response's CF-Cache-Status, HTTP_<code> for an HTTP error, or
-# MISSING when there is no header (or no response at all, as when the request
-# timed out); always one word.
+# MISSING when the response has no header, or NO_RESPONSE when there was no
+# response at all (timed out, unreachable); always one word.
 # -D - can write several header blocks (a proxy's CONNECT reply, a 103 Early
 # Hints); each status line starts a new one, so only the final response's
 # block counts.
 status_of() {
   { curl -sS "${CURL_LIMITS[@]}" -o /dev/null -D - "${1:-$URL}" || true; } | tr -d '\r' |
-    awk 'BEGIN { s = "MISSING" }
+    awk 'BEGIN { s = "NO_RESPONSE" }
          /^HTTP\// { code = $2; s = "MISSING" }
          tolower($1) == "cf-cache-status:" { s = toupper($2) }
          END { if (code + 0 >= 400) s = "HTTP_" code; print s }'
@@ -66,6 +66,8 @@ check_cached() {
   case "$second" in
     HIT)
       return 0 ;;
+    NO_RESPONSE)
+      echo "FAIL: no response from $url (timed out or unreachable; curl's error is above), so the cache couldn't be checked." >&2 ;;
     MISSING)
       echo "FAIL: no CF-Cache-Status header on $url — is the site behind Cloudflare (orange cloud)?" >&2 ;;
     DYNAMIC)

@@ -11,15 +11,19 @@
 // "path" (query string ignored). STUB_PROBE makes the query-string probe
 // answer a fixed CF-Cache-Status, or one of the shapes below. STUB_STYLE=http1
 // answers like an HTTP/1.1 server: capitalised header name, lowercase value.
-// STUB_HANG=1 plays a connection that never answers (a stuck TLS handshake,
+// STUB_HANG=all plays a connection that never answers (a stuck TLS handshake,
 // a black-holed route): a curl given --max-time/-m "waits" that long and
-// fails with curl's timeout error, else it really hangs. sleep is a no-op
+// fails with curl's timeout error, else it really hangs. STUB_HANG=worst is
+// the slowest run that still gets through: every request takes its whole
+// limit, and the second request to each path is a HIT. sleep is a no-op
 // stub.
 
 const { spawnSync } = require("child_process");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+
+const { workflowBlock, blockSetting } = require("../helpers/workflow");
 
 const SCRIPT = path.join(__dirname, "../../scripts/verify-edge-cache.sh");
 
@@ -44,14 +48,6 @@ for a; do
   prev=$a url=$a
 done
 echo "$url" >> "$STUB_DIR/requests"
-if [ -n "\${STUB_HANG:-}" ]; then
-  # Without a limit, hang (long enough to show; not forever, so the test
-  # process isn't held up by a leftover stub).
-  [ -n "$max_time" ] || exec /bin/sleep 15 </dev/null >/dev/null 2>&1
-  echo "$max_time" >> "$STUB_DIR/waited"
-  echo "curl: (28) Operation timed out after \${max_time}000 milliseconds" >&2
-  exit 28
-fi
 reply() {
   if [ "\${STUB_STYLE:-}" = http1 ]; then
     printf 'HTTP/1.1 200 OK\\r\\nCF-Cache-Status: %s\\r\\n\\r\\n' "$(echo "$1" | tr A-Z a-z)"
@@ -60,6 +56,22 @@ reply() {
   fi
   exit 0
 }
+if [ -n "\${STUB_HANG:-}" ]; then
+  # Without a limit, hang (long enough to show; not forever, so the test
+  # process isn't held up by a leftover stub).
+  [ -n "$max_time" ] || exec /bin/sleep 15 </dev/null >/dev/null 2>&1
+  echo "$max_time" >> "$STUB_DIR/waited"
+  # worst: the second request to each path answers HIT just inside its
+  # limit, so the script goes on to the probe, which hangs too.
+  if [ "$STUB_HANG" = worst ]; then
+    case "$url" in *\\?*) ;; *)
+      grep -qxF "$url" "$STUB_DIR/seen" 2>/dev/null && reply HIT
+      echo "$url" >> "$STUB_DIR/seen" ;;
+    esac
+  fi
+  echo "curl: (28) Operation timed out after \${max_time}000 milliseconds" >&2
+  exit 28
+fi
 case "$url" in *\\?*)
   case "\${STUB_PROBE:-}" in
     "") ;;
@@ -203,7 +215,7 @@ test.each([
   ["http404", "HTTP_404"],
   ["earlyStatus", "MISSING"],
   ["connect503", "HTTP_503"],
-  ["network", "MISSING"],
+  ["network", "NO_RESPONSE"],
   ["DYNAMIC", "DYNAMIC"],
   ["BYPASS", "BYPASS"],
 ])("a probe answering %s fails without blaming the cache key", (probe, status) => {
@@ -251,45 +263,39 @@ test("an erroring site is reported as such, not as a cache rule problem", () => 
 // later deploy queues behind it (concurrency: deploy-production, no
 // cancel-in-progress). A connection that never answers must not hold the
 // step: each request gives up, and all of them together finish well inside
-// the step's own timeout, which is the backstop.
+// the step's own timeout, which is the backstop (its settings are checked in
+// deployWorkflowTimeouts.test.js).
 describe("a connection that never answers (#178)", () => {
-  const WORKFLOW = path.join(__dirname, "../../.github/workflows/ci-cd.yml");
-
-  // The "Verify edge cache" step's lines, up to the next step.
-  function edgeCacheStep() {
-    const lines = fs.readFileSync(WORKFLOW, "utf8").split("\n");
-    const start = lines.findIndex((l) => /^\s*- name: Verify edge cache\s*$/.test(l));
-    expect(start).toBeGreaterThan(-1);
-    const indent = lines[start].indexOf("-");
-    const rest = lines.slice(start + 1);
-    const end = rest.findIndex((l) => l.trim() && l.search(/\S/) <= indent);
-    return [lines[start], ...(end === -1 ? rest : rest.slice(0, end))].join("\n");
-  }
-
-  test("every request gives up, and the script fails with a warning", () => {
-    const res = run("path", "", "", "", { STUB_HANG: "1" });
+  test("every request gives up, and the script fails saying so", () => {
+    const res = run("path", "", "", "", { STUB_HANG: "all" });
     expect(res.error).toBeUndefined();
     expect(res.signal).toBeNull();
     expect(res.status).toBe(1);
     expect(res.waited).toHaveLength(res.requests.length);
-    expect(res.stderr).toMatch(/no CF-Cache-Status header on .*\/api\/question-sets/);
-    expect(res.stderr).toMatch(/no CF-Cache-Status header on .*\/api\/candidates/);
+    expect(res.stdout).toContain("first=NO_RESPONSE second=NO_RESPONSE");
+    expect(res.stderr).toMatch(/no response from .*\/api\/question-sets \(timed out or unreachable/);
+    expect(res.stderr).toMatch(/no response from .*\/api\/candidates \(timed out or unreachable/);
+    // Not mistaken for a Cloudflare configuration problem.
+    expect(res.stderr).not.toMatch(/Cloudflare|Cache Rule/);
   });
 
-  test("the step has a timeout, and timing out only warns", () => {
-    const step = edgeCacheStep();
-    expect(step).toMatch(/^\s*timeout-minutes:\s*\d+\s*$/m);
-    // The check warns rather than fails the deploy; so must its timeout.
-    expect(step).toMatch(/^\s*continue-on-error:\s*true\s*$/m);
+  test("a probe that gets no response is inconclusive, not a cache-key failure", () => {
+    const res = run("path", "", "", "", { STUB_HANG: "worst" });
+    expect(res.status).toBe(1);
+    expect(res.stdout).toContain("new query string: NO_RESPONSE\n");
+    expect(res.stderr).toMatch(/couldn't be checked/);
+    expect(res.stderr).not.toMatch(/reaches the cache key/);
   });
 
-  test("the worst case fits well inside the step's timeout", () => {
-    const minutes = Number(edgeCacheStep().match(/timeout-minutes:\s*(\d+)/)?.[1]);
+  test("the slowest possible run fits well inside the step's timeout", () => {
+    const minutes = Number(blockSetting(workflowBlock("- name: Verify edge cache"), "timeout-minutes"));
     expect(minutes).toBeGreaterThan(0);
-    const res = run("path", "", "", "", { STUB_HANG: "1" });
+    const res = run("path", "", "", "", { STUB_HANG: "worst" });
+    // Every request the script can make, each taking its whole limit.
+    expect(res.requests).toHaveLength(6);
+    expect(res.waited).toHaveLength(6);
     const total = [...res.waited, ...res.slept].reduce((a, b) => a + b, 0);
-    expect(res.waited.length).toBeGreaterThan(0);
-    // Room to spare for the runner, DNS and the checkout's own overhead.
+    // Room to spare for the runner and bash itself.
     expect(total).toBeLessThanOrEqual(minutes * 60 * 0.75);
   });
 });
