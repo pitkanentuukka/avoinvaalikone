@@ -535,6 +535,8 @@ function AdminView() {
   const [newPartyEmail, setNewPartyEmail] = useState("");
   const [partyCandidates, setPartyCandidates] = useState({}); // { [partyId]: candidates } for expanded parties
   const [linksQueued, setLinksQueued] = useState({});         // { [partyId]: { queued, withoutEmail } }
+  const [linkRotated, setLinkRotated] = useState({});         // { [candidateId]: emailed } — this session's rotations
+  const [allLinksRotated, setAllLinksRotated] = useState({}); // { [partyId]: count }
   const [actionLoading, setActionLoading] = useState(null);
   const [reviewState, setReviewState] = useState({}); // { [setId]: { [questionId]: { rejected, reason, duplicateOf } } }
   const [newQuestionText, setNewQuestionText] = useState({}); // { [setId]: string }
@@ -790,6 +792,34 @@ function AdminView() {
     try {
       const result = await api.sendPartyCandidateLinks(adminSecret, id);
       setLinksQueued((prev) => ({ ...prev, [id]: result }));
+    } catch (e) { setError(e.message); }
+    finally { setActionLoading(null); }
+  }
+
+  async function rotateCandidateLink(partyId, c) {
+    if (import.meta.env.VITE_NODE_ENV !== "development" && !window.confirm(t.adminRotateCandidateLinkConfirm(c.name))) return;
+    setActionLoading(`rotate-candidate-${c.id}`);
+    try {
+      const { emailed } = await api.rotateCandidateTokenAdmin(adminSecret, partyId, c.id);
+      setLinkRotated((prev) => ({ ...prev, [c.id]: emailed }));
+      await loadPartyCandidates(partyId);
+    } catch (e) { setError(e.message); }
+    finally { setActionLoading(null); }
+  }
+
+  async function rotateAllCandidateLinks(id) {
+    if (import.meta.env.VITE_NODE_ENV !== "development" && !window.confirm(t.adminRotateAllLinksConfirm)) return;
+    setActionLoading(`rotate-all-${id}`);
+    try {
+      const { rotated } = await api.rotatePartyCandidateTokens(adminSecret, id);
+      setAllLinksRotated((prev) => ({ ...prev, [id]: rotated }));
+      // Links sent before the rotation are dead: let the admin send the new ones.
+      setLinksQueued((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+      await loadPartyCandidates(id);
     } catch (e) { setError(e.message); }
     finally { setActionLoading(null); }
   }
@@ -1118,6 +1148,10 @@ function AdminView() {
                       {c.email && <div style={{ fontSize: "12px", marginTop: "2px" }}>{emailStatus(c)}</div>}
                     </div>
                     <CopyField value={candidateLink(c.token)} label={t.adminCandidateLinkLabel(c.name)} />
+                    <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap", marginTop: "6px" }}>
+                      <Button variant="ghost" size="sm" onClick={() => rotateCandidateLink(p.id, c)} loading={actionLoading === `rotate-candidate-${c.id}`}>{t.adminRotateCandidateLink}</Button>
+                      {c.id in linkRotated && <span style={{ fontSize: "12px", color: palette.textMuted }}>{t.adminCandidateLinkRotated(linkRotated[c.id])}</span>}
+                    </div>
                   </div>
                 ))}
                 {partyCandidates[p.id].length > 0 && (
@@ -1125,6 +1159,12 @@ function AdminView() {
                     <Button variant="secondary" size="sm" onClick={() => sendPartyCandidateLinks(p.id)} loading={actionLoading === `links-${p.id}`} disabled={!!linksQueued[p.id]}>
                       {t.adminSendLinks}
                     </Button>
+                    <Button variant="ghost" size="sm" onClick={() => rotateAllCandidateLinks(p.id)} loading={actionLoading === `rotate-all-${p.id}`}>
+                      {t.adminRotateAllLinks}
+                    </Button>
+                    {p.id in allLinksRotated && !linksQueued[p.id] && (
+                      <span style={{ fontSize: "13px", color: palette.textMuted }}>{t.adminAllLinksRotated(allLinksRotated[p.id])}</span>
+                    )}
                     {linksQueued[p.id] && (
                       <>
                         <span style={{ fontSize: "13px", color: palette.textMuted }}>{t.adminLinksQueued(linksQueued[p.id].queued, linksQueued[p.id].withoutEmail)}</span>
@@ -1423,6 +1463,7 @@ function PartyView({ partyToken }) {
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(null);
   const [sent, setSent] = useState({});
+  const [rotated, setRotated] = useState({});
 
   useEffect(() => {
     async function load() {
@@ -1474,6 +1515,18 @@ function PartyView({ partyToken }) {
     setSent((s) => ({ ...s, [c.id]: true }));
   });
 
+  // The new link only goes to the candidate's email; the party never sees it.
+  const rotateLink = (c) => {
+    if (!confirmAction(t.partyRotateCandidateConfirm(c.name))) return;
+    // Even a failed send (502) has changed the link, so "send link" must be
+    // available again to send the new one.
+    setSent((s) => ({ ...s, [c.id]: false }));
+    run(`rotate-${c.id}`, async () => {
+      await api.rotateCandidateLink(partyToken, c.id);
+      setRotated((r) => ({ ...r, [c.id]: true }));
+    });
+  };
+
   const remove = (c) => {
     if (!confirmAction(t.partyRemoveConfirm(c.name))) return;
     run(`remove-${c.id}`, async () => {
@@ -1516,9 +1569,12 @@ function PartyView({ partyToken }) {
                 </div>
               </div>
             </div>
-            <div style={{ display: "flex", gap: "8px" }}>
+            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
               <Button variant="secondary" size="sm" onClick={() => sendLink(c)} disabled={!c.email || sent[c.id]} loading={busy === `send-${c.id}`}>
                 {sent[c.id] ? t.partyLinkSent : t.partySendLink}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => rotateLink(c)} disabled={!c.email || rotated[c.id]} loading={busy === `rotate-${c.id}`}>
+                {rotated[c.id] ? t.partyCandidateLinkRotated : t.partyRotateCandidateLink}
               </Button>
               <Button variant="danger" size="sm" onClick={() => remove(c)} loading={busy === `remove-${c.id}`}>{t.partyRemoveCandidate}</Button>
             </div>

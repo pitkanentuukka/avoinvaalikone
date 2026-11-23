@@ -136,6 +136,9 @@ export function createApi({
       apiFetch(path`/candidates/party/${token}/registration-token`, { method: "POST" }),
     sendCandidateLink: (token, id) =>
       apiFetch(path`/candidates/party/${token}/candidates/${id}/send-link`, { method: "POST" }),
+    // Revokes the old link and emails the new one; the party never sees it.
+    rotateCandidateLink: (token, id) =>
+      apiFetch(path`/candidates/party/${token}/candidates/${id}/token`, { method: "POST" }),
     removeCandidate: (token, id) =>
       apiFetch(path`/candidates/party/${token}/candidates/${id}`, { method: "DELETE" }),
 
@@ -170,6 +173,10 @@ export function createApi({
       apiFetch(path`/admin/parties/${id}/candidates`, { adminSecret: secret }),
     sendPartyCandidateLinks: (secret, id) =>
       apiFetch(path`/admin/parties/${id}/send-candidate-links`, { method: "POST", adminSecret: secret }),
+    rotateCandidateTokenAdmin: (secret, partyId, id) =>
+      apiFetch(path`/admin/parties/${partyId}/candidates/${id}/token`, { method: "POST", adminSecret: secret }),
+    rotatePartyCandidateTokens: (secret, id) =>
+      apiFetch(path`/admin/parties/${id}/candidate-tokens`, { method: "POST", adminSecret: secret }),
     getAllQuestionSets: (secret) => apiFetch("/admin/question-sets", { adminSecret: secret }),
     approveQuestionSet: (secret, id) =>
       apiFetch(path`/admin/question-sets/${id}/approve`, { method: "PATCH", adminSecret: secret }),

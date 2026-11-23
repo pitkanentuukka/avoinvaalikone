@@ -146,7 +146,8 @@ router.get("/:id", validateUUIDParam("id"), publicCache(300), microCache(), cand
 });
 
 // ─── Party-token gated (secretary's management access) ───
-// The party can see its candidates, re-send their links, remove sign-ups and
+// The party can see its candidates, re-send their links, rotate a candidate's
+// link (the new one goes only to the candidate's email), remove sign-ups and
 // rotate the registration link — but never sees candidate tokens, so it cannot
 // change a candidate's profile or answers.
 
@@ -216,6 +217,54 @@ router.post(
         return res.status(502).json({ error: "Sähköpostin lähetys epäonnistui" });
       }
       res.json({ sent: true });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// POST /api/candidates/party/:partyToken/candidates/:id/token — rotate the
+// candidate's personal link (e.g. it leaked) and email the new one to the
+// candidate. The old link stops working at once; profile and answers are kept.
+// The response never carries the new token. Refused before rotating when the
+// new link couldn't be emailed at all, since the party can't hand it over.
+router.post(
+  "/party/:partyToken/candidates/:id/token",
+  requirePartyToken,
+  validateUUIDParam("id"),
+  async (req, res, next) => {
+    try {
+      const { rows: found } = await db.query(
+        "SELECT id, email FROM candidates WHERE id = $1 AND party_id = $2",
+        [req.params.id, req.party.id]
+      );
+      if (found.length === 0) {
+        return res.status(404).json({ error: "Ehdokasta ei löytynyt tässä puolueessa" });
+      }
+      if (!found[0].email) {
+        return res.status(409).json({ error: "Ehdokkaalla ei ole sähköpostiosoitetta" });
+      }
+      if (!process.env.SMTP_HOST) {
+        return res.status(503).json({ error: "Sähköpostin lähetys ei ole käytössä" });
+      }
+      const { rows } = await db.query(
+        `UPDATE candidates SET token = DEFAULT
+         WHERE id = $1 AND party_id = $2
+         RETURNING id, name, email, token`,
+        [req.params.id, req.party.id]
+      );
+      if (rows.length === 0) {
+        return res.status(404).json({ error: "Ehdokasta ei löytynyt tässä puolueessa" });
+      }
+      try {
+        await sendCandidateLinkEmail(rows[0], req.party.name, frontendBaseUrl());
+      } catch (mailErr) {
+        console.error("Ehdokaslinkin lähetys epäonnistui:", mailErr);
+        return res.status(502).json({
+          error: "Linkki vaihdettiin, mutta sähköpostin lähetys epäonnistui. Lähetä uusi linkki uudelleen.",
+        });
+      }
+      res.json({ rotated: true, sent: true });
     } catch (err) {
       next(err);
     }

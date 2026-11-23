@@ -129,6 +129,64 @@ router.get("/:id/candidates", requireAdmin, validateUUIDParam("id"), async (req,
   }
 });
 
+// POST /api/admin/parties/:id/candidates/:candidateId/token — rotate one
+// candidate's personal token (e.g. their link leaked). The old link stops
+// working at once; profile and answers are kept. The new link is emailed when
+// the candidate has an address and SMTP is set up, and returned either way so
+// the admin can hand it over by hand. emailed says whether the send succeeded.
+router.post(
+  "/:id/candidates/:candidateId/token",
+  requireAdmin,
+  validateUUIDParam("id"),
+  validateUUIDParam("candidateId"),
+  async (req, res, next) => {
+    try {
+      const { rows } = await db.query(
+        `UPDATE candidates c SET token = DEFAULT
+         FROM parties p
+         WHERE c.id = $1 AND c.party_id = $2 AND p.id = c.party_id
+         RETURNING c.id, c.name, c.email, c.token, p.name AS party_name`,
+        [req.params.candidateId, req.params.id]
+      );
+      if (rows.length === 0) {
+        return res.status(404).json({ error: "Ehdokasta ei löytynyt tässä puolueessa" });
+      }
+      const { party_name: partyName, ...candidate } = rows[0];
+      let emailed = false;
+      if (candidate.email && process.env.SMTP_HOST) {
+        try {
+          await sendCandidateLinkEmail(candidate, partyName, process.env.CORS_ORIGIN || "http://localhost:5173");
+          emailed = true;
+        } catch (mailErr) {
+          console.error("Ehdokaslinkin lähetys epäonnistui:", mailErr);
+        }
+      }
+      res.json({ id: candidate.id, token: candidate.token, emailed });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// POST /api/admin/parties/:id/candidate-tokens — rotate every candidate's
+// token in the party at once, after a bulk leak. Sends nothing: follow up with
+// send-candidate-links below, which sends the new links.
+router.post("/:id/candidate-tokens", requireAdmin, validateUUIDParam("id"), async (req, res, next) => {
+  try {
+    const { rows: parties } = await db.query("SELECT id FROM parties WHERE id = $1", [req.params.id]);
+    if (parties.length === 0) {
+      return res.status(404).json({ error: "Puoluetta ei löytynyt" });
+    }
+    const { rowCount } = await db.query(
+      "UPDATE candidates SET token = DEFAULT WHERE party_id = $1",
+      [req.params.id]
+    );
+    res.json({ rotated: rowCount });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // POST /api/admin/parties/:id/send-candidate-links — email every candidate of
 // the party their personal link, e.g. once after migration 011 gave existing
 // candidates tokens nobody had seen yet. Sends in the background; each outcome
