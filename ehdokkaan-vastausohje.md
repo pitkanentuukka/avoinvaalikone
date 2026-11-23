@@ -109,7 +109,7 @@ Sähköpostiosoitettasi **ei näytetä** äänestäjille.
 
 ## Ongelmatilanteissa
 
-**Linkki ei kelpaa** — tarkista, että kopioit linkin kokonaan. Jos rekisteröitymislinkki ei toimi, puolueesi on ehkä luonut uuden: pyydä se yhteyshenkilöltäsi.
+**Linkki ei kelpaa** — tarkista, että kopioit linkin kokonaan. Jos rekisteröitymislinkki ei toimi, puolueesi on ehkä luonut uuden: pyydä se yhteyshenkilöltäsi. Jos henkilökohtainen linkkisi lakkasi toimimasta, se on ehkä vaihdettu turvallisuussyistä: uusi linkki on lähetetty sähköpostiisi, tai pyydä puolueesi yhteyshenkilöä lähettämään se.
 
 **Henkilökohtainen linkki on kadonnut** — etsi sähköpostistasi viesti "Henkilökohtainen vastauslinkkisi". Jos et löydä sitä, pyydä puolueesi yhteyshenkilöä lähettämään linkki uudelleen, tai rekisteröidy uudelleen **samalla nimellä ja sähköpostiosoitteella**: uutta profiilia ei luoda, vaan linkki lähetetään sähköpostiisi.
 

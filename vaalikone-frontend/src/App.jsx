@@ -800,9 +800,17 @@ function AdminView() {
     if (import.meta.env.VITE_NODE_ENV !== "development" && !window.confirm(t.adminRotateCandidateLinkConfirm(c.name))) return;
     setActionLoading(`rotate-candidate-${c.id}`);
     try {
-      const { emailed } = await api.rotateCandidateTokenAdmin(adminSecret, partyId, c.id);
+      const { token, emailed } = await api.rotateCandidateTokenAdmin(adminSecret, partyId, c.id);
+      // Show the new link from the response, so a failed refresh below can't
+      // leave the revoked one on screen to be handed over.
+      const withToken = (list) => list?.map((x) => (x.id === c.id ? { ...x, token } : x));
+      setPartyCandidates((prev) => (prev[partyId] ? { ...prev, [partyId]: withToken(prev[partyId]) } : prev));
       setLinkRotated((prev) => ({ ...prev, [c.id]: emailed }));
-      await loadPartyCandidates(partyId);
+      // Refresh for the email status; the new link is already shown.
+      try {
+        const candidates = await api.getPartyCandidatesAdmin(adminSecret, partyId);
+        setPartyCandidates((prev) => (prev[partyId] ? { ...prev, [partyId]: withToken(candidates) } : prev));
+      } catch { /* keep the list as updated above */ }
     } catch (e) { setError(e.message); }
     finally { setActionLoading(null); }
   }
@@ -813,6 +821,12 @@ function AdminView() {
     try {
       const { rotated } = await api.rotatePartyCandidateTokens(adminSecret, id);
       setAllLinksRotated((prev) => ({ ...prev, [id]: rotated }));
+      // Every link a single rotation sent before this one is dead now too.
+      setLinkRotated((prev) => {
+        const next = { ...prev };
+        for (const c of partyCandidates[id] ?? []) delete next[c.id];
+        return next;
+      });
       // Links sent before the rotation are dead: let the admin send the new ones.
       setLinksQueued((prev) => {
         const next = { ...prev };
@@ -1463,7 +1477,6 @@ function PartyView({ partyToken }) {
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(null);
   const [sent, setSent] = useState({});
-  const [rotated, setRotated] = useState({});
 
   useEffect(() => {
     async function load() {
@@ -1519,11 +1532,12 @@ function PartyView({ partyToken }) {
   const rotateLink = (c) => {
     if (!confirmAction(t.partyRotateCandidateConfirm(c.name))) return;
     // Even a failed send (502) has changed the link, so "send link" must be
-    // available again to send the new one.
+    // available again to send the new one. On success the new link was
+    // emailed, which the send button then reports.
     setSent((s) => ({ ...s, [c.id]: false }));
     run(`rotate-${c.id}`, async () => {
       await api.rotateCandidateLink(partyToken, c.id);
-      setRotated((r) => ({ ...r, [c.id]: true }));
+      setSent((s) => ({ ...s, [c.id]: true }));
     });
   };
 
@@ -1573,8 +1587,8 @@ function PartyView({ partyToken }) {
               <Button variant="secondary" size="sm" onClick={() => sendLink(c)} disabled={!c.email || sent[c.id]} loading={busy === `send-${c.id}`}>
                 {sent[c.id] ? t.partyLinkSent : t.partySendLink}
               </Button>
-              <Button variant="ghost" size="sm" onClick={() => rotateLink(c)} disabled={!c.email || rotated[c.id]} loading={busy === `rotate-${c.id}`}>
-                {rotated[c.id] ? t.partyCandidateLinkRotated : t.partyRotateCandidateLink}
+              <Button variant="ghost" size="sm" onClick={() => rotateLink(c)} disabled={!c.email} loading={busy === `rotate-${c.id}`}>
+                {t.partyRotateCandidateLink}
               </Button>
               <Button variant="danger" size="sm" onClick={() => remove(c)} loading={busy === `remove-${c.id}`}>{t.partyRemoveCandidate}</Button>
             </div>
