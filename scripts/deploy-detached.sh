@@ -15,7 +15,7 @@ set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 logs=${DEPLOY_LOG_DIR:-/var/log/vaalikone-deploy}
 if ! mkdir -p "$logs" 2>/dev/null || [ ! -w "$logs" ]; then
-  logs=${XDG_STATE_HOME:-$HOME/.local/state}/vaalikone-deploy
+  logs=${XDG_STATE_HOME:-${HOME:?no HOME for the fallback log directory}/.local/state}/vaalikone-deploy
   mkdir -p "$logs"
 fi
 # Old logs are only housekeeping: never a reason not to deploy.

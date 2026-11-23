@@ -63,6 +63,8 @@ beforeEach(() => {
     STUB_TREE: tree,
     DEPLOY_LOG_DIR: path.join(dir, "deploy-logs"),
   };
+  // The log-directory fallback must land under this HOME, not the developer's.
+  delete env.XDG_STATE_HOME;
 });
 
 afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -103,8 +105,9 @@ describe("Build & restart services", () => {
   // pipes close (output from then on gets SIGPIPE), and anything left in its
   // process group is hung up on.
   test("the deploy finishes on the server when the connection drops mid-deploy", async () => {
-    const child = startStep("Build & restart services", { STUB_UP_SLEEP: "1" });
+    const child = startStep("Build & restart services", { STUB_UP_SLEEP: "3" });
     expect(await waitFor(upStarted)).toBe(true);
+    expect(deployDone()).toBe(false);
     child.stdout.destroy();
     child.stderr.destroy();
     try {
@@ -153,9 +156,10 @@ describe("one deploy at a time", () => {
   // The deploy CI lost contact with keeps running; the next job's rsync must
   // not rewrite the tree under it.
   test("the next rsync waits for a deploy that is still running", async () => {
-    const deploy = startStep("Build & restart services", { STUB_UP_SLEEP: "2" });
+    const deploy = startStep("Build & restart services", { STUB_UP_SLEEP: "3" });
     try {
       expect(await waitFor(upStarted)).toBe(true);
+      expect(deployDone()).toBe(false);
       const src = path.join(dir, "checkout");
       fs.mkdirSync(src);
       fs.writeFileSync(path.join(src, "marker"), "new tree\n");
@@ -205,7 +209,7 @@ describe("one deploy at a time", () => {
   // Otherwise a wait that runs out shows in the step only as rsync's
   // "connection unexpectedly closed".
   test("rsync's wait for the lock shows in the step's log", async () => {
-    const release = await holdLock(1);
+    const release = await holdLock(3);
     try {
       const src = path.join(dir, "checkout");
       fs.mkdirSync(src);
