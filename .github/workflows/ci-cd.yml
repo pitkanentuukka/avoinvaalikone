@@ -151,7 +151,8 @@ jobs:
       # says so on stderr (not flock --verbose: it writes to stdout, which is
       # rsync's protocol stream), and one that runs out leaves only rsync's
       # "connection unexpectedly closed", hence the hint. mkdir: flock would
-      # create a missing tree as a file.
+      # create a missing tree as a file. docs/scaling.md's manual deploy
+      # repeats this command (tests/unit/manualDeployDoc.test.js).
       - name: Rsync to server
         run: |
           rsync -az --delete \

@@ -176,8 +176,15 @@ below) are automatic.
 CI/CD handles this on push to `main`. If deploying manually:
 
 ```bash
-# --rsync-path takes the deploy lock: waits for a deploy still running there.
-rsync -avz --exclude='.git' --exclude='node_modules' --exclude='.env' \
+# The same rsync as CI's "Rsync to server" step (.github/workflows/ci-cd.yml;
+# tests/unit/manualDeployDoc.test.js keeps them in step). The excludes keep
+# untracked local files off the server; --delete removes
+# what the repo no longer has. --rsync-path takes the deploy lock: waits for
+# a deploy still running there.
+rsync -avz --delete \
+  --exclude='node_modules' --exclude='.git' --exclude='.github' \
+  --exclude='.env' --exclude='test-results' --exclude='laptop*' \
+  --exclude='upcloud*' --exclude='.claude' \
   --rsync-path="mkdir -p /opt/vaalikone && { flock -n /opt/vaalikone true || echo 'Waiting for another deploy to finish' >&2; } && flock -w 600 /opt/vaalikone timeout 300 rsync" \
   ./ user@80.69.172.220:/opt/vaalikone/
 # Builds and restarts; also restarts caddy if the Caddyfile changed, which
