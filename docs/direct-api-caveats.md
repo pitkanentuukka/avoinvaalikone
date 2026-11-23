@@ -149,3 +149,19 @@ does.
 **Fix:** require a boolean `rejected`, and a string `rejectionReason` with a
 length limit. Treat `editedStatement: ""` as "no edit", or reject it with its
 own message.
+
+## Candidate link rotation checks the address only when asked
+
+**Endpoints:** `POST /api/candidates/party/:partyToken/candidates/:id/token`,
+`POST /api/admin/parties/:id/candidates/:candidateId/token`
+
+The rotated link goes to the candidate's current email address. Whoever holds
+a leaked candidate link can change that address to their own, so the new link
+would reach them. With `{ "expectedEmail": "…" }` in the body, the routes
+refuse with 409 and rotate nothing when the stored address differs (compared
+trimmed and case-insensitively). Without it, they rotate and send unchecked.
+
+**Why the frontend is unaffected:** it always sends the address it showed the
+user, and names that address in the confirm dialog.
+
+**Fix:** make `expectedEmail` required on both routes.

@@ -187,7 +187,7 @@ describe("POST /api/candidates/party/:partyToken/candidates/:id/token", () => {
     const [[sql, params]] = rotations();
     expect(sql).toMatch(/UPDATE candidates SET token = DEFAULT/);
     expect(sql).toMatch(/party_id = \$2/);
-    expect(params).toEqual([CANDIDATE_ID, PARTY.id]);
+    expect(params).toEqual([CANDIDATE_ID, PARTY.id, null]);
     expect(sendCandidateLinkEmail).toHaveBeenCalledWith(
       { ...candidate, token: NEW_TOKEN }, PARTY.name, expect.any(String)
     );
@@ -242,6 +242,45 @@ describe("POST /api/candidates/party/:partyToken/candidates/:id/token", () => {
     expect(res.status).toBe(502);
     expect(res.body.error).toMatch(/vaihdettiin/);
     expect(JSON.stringify(res.body)).not.toContain(NEW_TOKEN);
+  });
+
+  // Whoever holds a leaked link can change the address; the secretary
+  // confirms the address they were shown, and a changed one is refused.
+  test("address changed since the secretary saw it → 409, nothing rotated", async () => {
+    db.query.mockResolvedValueOnce({ rows: [PARTY] });
+    db.query.mockResolvedValueOnce({ rows: [{ ...candidate, email: "hyokkaaja@example.com" }] });
+    const res = await request(app).post(url).send({ expectedEmail: "eeva@example.fi" });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/sähköpostiosoite on muuttunut/i);
+    expect(rotations()).toHaveLength(0);
+    expect(sendCandidateLinkEmail).not.toHaveBeenCalled();
+  });
+
+  test("expected address matching up to case and spaces → rotates, checked again in the UPDATE", async () => {
+    db.query.mockResolvedValueOnce({ rows: [PARTY] });
+    db.query.mockResolvedValueOnce({ rows: [candidate] });
+    db.query.mockResolvedValueOnce({ rows: [{ ...candidate, token: NEW_TOKEN }] });
+    const res = await request(app).post(url).send({ expectedEmail: " Eeva@Example.FI " });
+    expect(res.status).toBe(200);
+    const [[sql, params]] = rotations();
+    expect(sql).toMatch(/lower\(btrim\(email\)\) = lower\(btrim\(\$3\)\)/);
+    expect(params).toEqual([CANDIDATE_ID, PARTY.id, " Eeva@Example.FI "]);
+  });
+
+  test("address changed between the check and the UPDATE → 409", async () => {
+    db.query.mockResolvedValueOnce({ rows: [PARTY] });
+    db.query.mockResolvedValueOnce({ rows: [candidate] });
+    db.query.mockResolvedValueOnce({ rows: [] });
+    const res = await request(app).post(url).send({ expectedEmail: candidate.email });
+    expect(res.status).toBe(409);
+    expect(sendCandidateLinkEmail).not.toHaveBeenCalled();
+  });
+
+  test("non-string expectedEmail → 400", async () => {
+    db.query.mockResolvedValueOnce({ rows: [PARTY] });
+    const res = await request(app).post(url).send({ expectedEmail: ["eeva@example.fi"] });
+    expect(res.status).toBe(400);
+    expect(rotations()).toHaveLength(0);
   });
 
   test("invalid candidate id → 400", async () => {

@@ -304,3 +304,17 @@ describe("path parameters", () => {
     expect(fetch.mock.calls[0][0]).toBe(`/api/candidates/party/${token}`);
   });
 });
+
+// #193: rotation sends the address the user was shown, so the server can
+// refuse when the candidate's address has changed since.
+describe("candidate link rotation", () => {
+  test.each([
+    ["rotateCandidateLink", (api) => api.rotateCandidateLink("tok", "c1", "maija@example.fi")],
+    ["rotateCandidateTokenAdmin", (api) => api.rotateCandidateTokenAdmin("secret", "p1", "c1", "maija@example.fi")],
+  ])("%s sends expectedEmail", async (_, call) => {
+    const { api, fetch } = apiWith(jsonResponse(200, {}));
+    await call(api);
+    expect(fetch.mock.calls[0][1].method).toBe("POST");
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ expectedEmail: "maija@example.fi" });
+  });
+});

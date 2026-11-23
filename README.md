@@ -161,7 +161,7 @@ All primary keys are UUIDs (`gen_random_uuid()`). New migrations should follow t
 | POST | `/api/admin/parties` | Create party — response includes the secret `token` and `registration_token` |
 | POST | `/api/admin/parties/:id/token` | Rotate the party token (old party portal link stops working) |
 | GET | `/api/admin/parties/:id/candidates` | Party's candidates **with** their personal tokens — for handing a link over by hand |
-| POST | `/api/admin/parties/:id/candidates/:candidateId/token` | Rotate one candidate's personal link (old link stops working; profile and answers kept). Returns the new `token`, and `emailed` says whether it also went to the candidate's address |
+| POST | `/api/admin/parties/:id/candidates/:candidateId/token` | Rotate one candidate's personal link (old link stops working; profile and answers kept). Returns the new `token`, and `emailed` says whether it also went to the candidate's address. Optional body `{ expectedEmail }`: 409 and nothing rotated if the address has changed since |
 | POST | `/api/admin/parties/:id/candidate-tokens` | Rotate every candidate's link in the party at once (`{ rotated }`); sends nothing — follow up with `send-candidate-links` |
 | POST | `/api/admin/parties/:id/send-candidate-links` | Email every candidate of the party their personal link (202, sent in the background; 503 without SMTP) |
 | DELETE | `/api/admin/parties/:id` | Delete party |
@@ -218,7 +218,7 @@ Each entry in `questions` is a string or `{ "statement": "..." }`, at most 50 en
 | GET | `/api/candidates/party/:partyToken` | Party info incl. `registrationToken`, candidates with answer counts (never their tokens) |
 | POST | `/api/candidates/party/:partyToken/registration-token` | Rotate the registration link |
 | POST | `/api/candidates/party/:partyToken/candidates/:id/send-link` | Email the candidate their personal link (to their own address) |
-| POST | `/api/candidates/party/:partyToken/candidates/:id/token` | Rotate the candidate's personal link and email the new one to their address; never returns it (409 without an address, 503 without SMTP, nothing rotated; 502 if the send fails after rotating) |
+| POST | `/api/candidates/party/:partyToken/candidates/:id/token` | Rotate the candidate's personal link and email the new one to their address; never returns it (409 without an address or when it no longer matches the optional body `{ expectedEmail }`, 503 without SMTP, nothing rotated; 502 if the send fails after rotating) |
 | DELETE | `/api/candidates/party/:partyToken/candidates/:id` | Remove a candidate |
 
 **Registration-token gated** (self-registration; candidates are visible to voters immediately):

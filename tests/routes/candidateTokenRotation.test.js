@@ -109,6 +109,32 @@ describeWithDb("candidate token rotation (#193)", () => {
     await expectRotated(c.token, emailed, "Maija");
   });
 
+  test("a party token can't rotate another party's candidate", async () => {
+    const other = await addCandidate(otherPartyId, "Liisa");
+    const res = await request(app).post(`/api/candidates/party/${PARTY_TOKEN}/candidates/${other.id}/token`);
+    expect(res.status).toBe(404);
+    expect((await q("SELECT token FROM candidates WHERE id = $1", [other.id]))[0].token).toBe(other.token);
+    expect(sendCandidateLinkEmail).not.toHaveBeenCalled();
+  });
+
+  // Whoever holds the leaked link may have changed the address to their own.
+  test("an address changed since the secretary saw it is refused; the old link isn't rotated", async () => {
+    const c = await addCandidate(partyId, "Maija");
+    await request(app)
+      .put(`/api/candidates/me/${c.token}`)
+      .send({ name: "Maija", email: "hyokkaaja@example.com", constituency: "Helsingin vaalipiiri" })
+      .expect(200);
+
+    for (const res of [
+      await request(app).post(`/api/candidates/party/${PARTY_TOKEN}/candidates/${c.id}/token`).send({ expectedEmail: "maija@example.fi" }),
+      await request(app).post(`/api/admin/parties/${partyId}/candidates/${c.id}/token`).set("Authorization", auth).send({ expectedEmail: "maija@example.fi" }),
+    ]) {
+      expect(res.status).toBe(409);
+    }
+    expect((await q("SELECT token FROM candidates WHERE id = $1", [c.id]))[0].token).toBe(c.token);
+    expect(sendCandidateLinkEmail).not.toHaveBeenCalled();
+  });
+
   test("bulk rotation changes every link in the party and none elsewhere", async () => {
     const a = await addCandidate(partyId, "Maija");
     const b = await addCandidate(partyId, "Matti");

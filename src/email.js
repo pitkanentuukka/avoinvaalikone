@@ -334,6 +334,7 @@ async function sendCandidateLinkEmail(candidate, partyName, frontendBaseUrl) {
       "",
       "Säilytä linkki itselläsi äläkä jaa sitä: kuka tahansa linkin haltija voi muuttaa vastauksiasi.",
       "Jos linkki katoaa, puolueesi yhteyshenkilö voi lähettää sen uudelleen.",
+      "Jos olet saanut useamman linkin, käytä uusinta: linkki on voitu vaihtaa, jolloin vanhemmat eivät enää toimi.",
     ].join("\n"),
   }, { candidateId: candidate.id });
 }

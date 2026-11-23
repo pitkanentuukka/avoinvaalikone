@@ -378,7 +378,7 @@ describe("POST /api/admin/parties/:id/candidates/:candidateId/token", () => {
   });
 
   test("candidate not in that party → 404", async () => {
-    db.query.mockResolvedValueOnce({ rows: [] });
+    db.query.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [] });
     const res = await request(app).post(url).set("Authorization", authHeader);
     expect(res.status).toBe(404);
     expect(sendCandidateLinkEmail).not.toHaveBeenCalled();
@@ -395,12 +395,34 @@ describe("POST /api/admin/parties/:id/candidates/:candidateId/token", () => {
     const [sql, params] = db.query.mock.calls[0];
     expect(sql).toMatch(/SET token = DEFAULT/);
     expect(sql).toMatch(/party_id = \$2/);
-    expect(params).toEqual([CANDIDATE_ID, VALID_UUID]);
+    expect(params).toEqual([CANDIDATE_ID, VALID_UUID, null]);
     expect(sendCandidateLinkEmail).toHaveBeenCalledWith(
       { id: CANDIDATE_ID, name: "Maija", email: "maija@example.fi", token: rotated.token },
       "Vihreät",
       expect.any(String)
     );
+  });
+
+  test("address changed since the admin saw it → 409, nothing emailed", async () => {
+    process.env.SMTP_HOST = "smtp.example.fi";
+    db.query
+      .mockResolvedValueOnce({ rows: [] }) // the UPDATE's address check fails
+      .mockResolvedValueOnce({ rows: [{ id: CANDIDATE_ID }] }); // but the candidate exists
+
+    const res = await request(app).post(url).set("Authorization", authHeader).send({ expectedEmail: "maija@example.fi" });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/sähköpostiosoite on muuttunut/i);
+    const [sql, params] = db.query.mock.calls[0];
+    expect(sql).toMatch(/lower\(btrim\(c\.email\)\) = lower\(btrim\(\$3\)\)/);
+    expect(params).toEqual([CANDIDATE_ID, VALID_UUID, "maija@example.fi"]);
+    expect(sendCandidateLinkEmail).not.toHaveBeenCalled();
+  });
+
+  test("non-string expectedEmail → 400", async () => {
+    const res = await request(app).post(url).set("Authorization", authHeader).send({ expectedEmail: 5 });
+    expect(res.status).toBe(400);
+    expect(db.query).not.toHaveBeenCalled();
   });
 
   // The admin sees the new link and can hand it over, so a missing address,

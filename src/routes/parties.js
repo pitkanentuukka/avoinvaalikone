@@ -7,6 +7,9 @@ const { sendCandidateLinkEmail } = require("../email");
 
 const router = Router();
 
+const EMAIL_CHANGED_ERROR =
+  "Ehdokkaan sähköpostiosoite on muuttunut. Lataa sivu uudelleen ja tarkista osoite ennen kuin vaihdat linkin.";
+
 // Generate a URL-safe party token. The slug is only a human-readable prefix;
 // the security comes from 24 random bytes (192 bits) of CSPRNG entropy, since
 // the token is a bearer credential for the party portal. Migration 012 builds
@@ -134,22 +137,36 @@ router.get("/:id/candidates", requireAdmin, validateUUIDParam("id"), async (req,
 // working at once; profile and answers are kept. The new link is emailed when
 // the candidate has an address and SMTP is set up, and returned either way so
 // the admin can hand it over by hand. emailed says whether the send succeeded.
+// Optional { expectedEmail }: the address the admin was shown. Whoever holds a
+// leaked link can change the address to their own, so a changed one gets 409
+// and nothing is rotated.
 router.post(
   "/:id/candidates/:candidateId/token",
   requireAdmin,
   validateUUIDParam("id"),
   validateUUIDParam("candidateId"),
   async (req, res, next) => {
+    const expectedEmail = req.body?.expectedEmail ?? null;
+    if (expectedEmail !== null && typeof expectedEmail !== "string") {
+      return res.status(400).json({ error: "Virheellinen sähköpostiosoite" });
+    }
     try {
       const { rows } = await db.query(
         `UPDATE candidates c SET token = DEFAULT
          FROM parties p
          WHERE c.id = $1 AND c.party_id = $2 AND p.id = c.party_id
+           AND ($3::text IS NULL OR lower(btrim(c.email)) = lower(btrim($3)))
          RETURNING c.id, c.name, c.email, c.token, p.name AS party_name`,
-        [req.params.candidateId, req.params.id]
+        [req.params.candidateId, req.params.id, expectedEmail]
       );
       if (rows.length === 0) {
-        return res.status(404).json({ error: "Ehdokasta ei löytynyt tässä puolueessa" });
+        const { rows: found } = await db.query(
+          "SELECT id FROM candidates WHERE id = $1 AND party_id = $2",
+          [req.params.candidateId, req.params.id]
+        );
+        return found.length
+          ? res.status(409).json({ error: EMAIL_CHANGED_ERROR })
+          : res.status(404).json({ error: "Ehdokasta ei löytynyt tässä puolueessa" });
       }
       const { party_name: partyName, ...candidate } = rows[0];
       let emailed = false;

@@ -44,6 +44,8 @@ const CHECK_VIOLATION = "23514";
 const UNIQUE_VIOLATION = "23505";
 const isIdentityConflict = (err) =>
   err.code === UNIQUE_VIOLATION && err.constraint === "idx_candidates_registration_identity";
+const EMAIL_CHANGED_ERROR =
+  "Ehdokkaan sähköpostiosoite on muuttunut. Lataa sivu uudelleen ja tarkista osoite ennen kuin vaihdat linkin.";
 const IDENTITY_CONFLICT_ERROR = "Puolueessasi on jo ehdokas tällä nimellä ja sähköpostiosoitteella";
 
 /**
@@ -228,11 +230,19 @@ router.post(
 // candidate. The old link stops working at once; profile and answers are kept.
 // The response never carries the new token. Refused before rotating when the
 // new link couldn't be emailed at all, since the party can't hand it over.
+// Optional { expectedEmail }: the address the secretary was shown. Whoever
+// holds a leaked link can change the address to their own, so a changed one
+// gets 409 and nothing is rotated.
 router.post(
   "/party/:partyToken/candidates/:id/token",
   requirePartyToken,
   validateUUIDParam("id"),
   async (req, res, next) => {
+    const expectedEmail = req.body?.expectedEmail ?? null;
+    if (expectedEmail !== null && typeof expectedEmail !== "string") {
+      return res.status(400).json({ error: "Virheellinen sähköpostiosoite" });
+    }
+    const sameEmail = (a, b) => a.trim().toLowerCase() === b.trim().toLowerCase();
     try {
       const { rows: found } = await db.query(
         "SELECT id, email FROM candidates WHERE id = $1 AND party_id = $2",
@@ -244,17 +254,24 @@ router.post(
       if (!found[0].email) {
         return res.status(409).json({ error: "Ehdokkaalla ei ole sähköpostiosoitetta" });
       }
+      if (expectedEmail !== null && !sameEmail(found[0].email, expectedEmail)) {
+        return res.status(409).json({ error: EMAIL_CHANGED_ERROR });
+      }
       if (!process.env.SMTP_HOST) {
         return res.status(503).json({ error: "Sähköpostin lähetys ei ole käytössä" });
       }
+      // The address is checked again here, in case it changed since the SELECT.
       const { rows } = await db.query(
         `UPDATE candidates SET token = DEFAULT
          WHERE id = $1 AND party_id = $2
+           AND ($3::text IS NULL OR lower(btrim(email)) = lower(btrim($3)))
          RETURNING id, name, email, token`,
-        [req.params.id, req.party.id]
+        [req.params.id, req.party.id, expectedEmail]
       );
       if (rows.length === 0) {
-        return res.status(404).json({ error: "Ehdokasta ei löytynyt tässä puolueessa" });
+        return expectedEmail === null
+          ? res.status(404).json({ error: "Ehdokasta ei löytynyt tässä puolueessa" })
+          : res.status(409).json({ error: EMAIL_CHANGED_ERROR });
       }
       try {
         await sendCandidateLinkEmail(rows[0], req.party.name, frontendBaseUrl());
