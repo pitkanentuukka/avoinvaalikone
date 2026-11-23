@@ -174,6 +174,32 @@ describe("verifySmtp", () => {
     expect(Sentry.captureMessage).toHaveBeenCalledWith(expect.stringContaining(key), "warning");
   });
 
+  // Port 465 always uses implicit TLS, so an explicit SMTP_SECURE=false there
+  // is overridden; say so, whatever NODE_ENV is (issue #199).
+  test.each(["false", "0", "NO"])("warns that SMTP_SECURE=%s is ignored on port 465", async (value) => {
+    setEnv({ NODE_ENV: "development", SMTP_PORT: "465", SMTP_SECURE: value });
+    transportMock.verify.mockResolvedValue(true);
+    await verifySmtp();
+    expect(warn.mock.calls.join(" ")).toMatch(new RegExp(`SMTP_SECURE=${value}.*465`));
+    expect(Sentry.captureMessage).toHaveBeenCalledWith(expect.stringContaining("SMTP_SECURE"), "warning");
+  });
+
+  test("warns about an unrecognised SMTP_SECURE value", async () => {
+    setEnv({ NODE_ENV: "development", SMTP_PORT: "587", SMTP_SECURE: "ture" });
+    transportMock.verify.mockResolvedValue(true);
+    await verifySmtp();
+    expect(warn.mock.calls.join(" ")).toContain("SMTP_SECURE=ture");
+  });
+
+  test.each([
+    ["465", undefined], ["465", "true"], ["587", "false"], ["587", ""], ["2465", "1"],
+  ])("doesn't warn about port %s with SMTP_SECURE=%p", async (port, value) => {
+    setEnv({ NODE_ENV: "development", SMTP_PORT: port, SMTP_SECURE: value });
+    transportMock.verify.mockResolvedValue(true);
+    await verifySmtp();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
   test("doesn't warn about dev values outside production", async () => {
     setEnv({ NODE_ENV: "development", SMTP_HOST: "localhost", SMTP_PORT: "1025", SMTP_FROM: "noreply@example.com" });
     transportMock.verify.mockResolvedValue(true);
