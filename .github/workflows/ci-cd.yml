@@ -163,8 +163,6 @@ jobs:
             --exclude='.github' \
             --exclude='.env' \
             --exclude='test-results' \
-            --exclude='laptop*' \
-            --exclude='upcloud*' \
             --exclude='.claude' \
             ./ root@80.69.172.220:/opt/vaalikone/ ||
             { echo "::error::rsync failed. If it was waiting for another deploy, that one still holds the lock: see docs/runbook.md"; exit 1; }
