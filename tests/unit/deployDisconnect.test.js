@@ -132,7 +132,10 @@ describe("Build & restart services", () => {
     runStep("Build & restart services");
     const logs = fs.readdirSync(env.DEPLOY_LOG_DIR);
     expect(logs).toHaveLength(1);
-    expect(fs.readFileSync(path.join(env.DEPLOY_LOG_DIR, logs[0]), "utf8")).toContain("Caddyfile changed");
+    const text = fs.readFileSync(path.join(env.DEPLOY_LOG_DIR, logs[0]), "utf8");
+    expect(text).toContain("Caddyfile changed");
+    // Read after losing the connection, it still tells how the deploy ended.
+    expect(text.trim().split("\n").pop()).toMatch(/exit status 0$/);
   });
 });
 

@@ -1,9 +1,25 @@
 #!/bin/sh
 # Builds and (re)starts production. Runs on the server after the tree has
-# been rsynced to /opt/vaalikone: CI's deploy step calls it, and so should a
-# manual deploy (docs/scaling.md, docs/runbook.md).
+# been rsynced to /opt/vaalikone: CI's deploy step calls it through
+# deploy-detached.sh, and so should a manual deploy (docs/runbook.md).
 set -eu
 cd "$(dirname "$0")/.."
+
+# One deploy at a time, and no rsync into the tree while one runs (#205):
+# CI's rsync takes the same lock (its --rsync-path in
+# .github/workflows/ci-cd.yml). The lock is on the tree's directory, which
+# every deploying user can open; a lock file in a shared directory such as
+# /var/lock would make root's open fail when another user created it
+# (fs.protected_regular). Every command below inherits fd 9, so the lock is
+# held until the script ends.
+exec 9<.
+if ! flock -n 9; then
+  echo "Waiting for another deploy (or rsync) into $PWD to finish"
+  if ! flock -w "${DEPLOY_LOCK_WAIT:-600}" 9; then
+    echo "Gave up: another deploy is still running in $PWD (logs in ${DEPLOY_LOG_DIR:-/var/log/vaalikone-deploy})" >&2
+    exit 1
+  fi
+fi
 
 dc="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
 

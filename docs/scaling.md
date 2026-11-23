@@ -168,7 +168,7 @@ hostname every 10 seconds. Without this, nginx pins the IPs at startup and
 ## Deployment steps
 
 These steps apply on first deploy after the scaling work. Subsequent deploys
-via CI/CD (rsync + `scripts/deploy.sh`, the same script as a manual deploy
+via CI/CD (rsync + `scripts/deploy-detached.sh`, the same as a manual deploy
 below) are automatic.
 
 ### 1. Deploy the code
@@ -176,11 +176,14 @@ below) are automatic.
 CI/CD handles this on push to `main`. If deploying manually:
 
 ```bash
+# --rsync-path takes the deploy lock: waits for a deploy still running there.
 rsync -avz --exclude='.git' --exclude='node_modules' --exclude='.env' \
+  --rsync-path="flock -w 600 /opt/vaalikone timeout 300 rsync" \
   ./ user@80.69.172.220:/opt/vaalikone/
 # Builds and restarts; also restarts caddy if the Caddyfile changed, which
-# `up -d` alone doesn't pick up.
-ssh user@80.69.172.220 "sh /opt/vaalikone/scripts/deploy.sh"
+# `up -d` alone doesn't pick up. Runs detached on the server, so a dropped
+# connection doesn't cut it short; the log is in /var/log/vaalikone-deploy/.
+ssh user@80.69.172.220 "sh /opt/vaalikone/scripts/deploy-detached.sh"
 ```
 
 ### 2. Verify replicas are up

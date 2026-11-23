@@ -15,9 +15,12 @@ git push origin main         # CI redeploys the reverted tree
 
 Migrations are **forward-only** (`migration_history` table): never delete or edit
 an applied migration — write a new compensating migration instead. If a deploy is
-stuck and CI is unavailable, rsync an earlier checkout to the box (as the
-workflow's "Rsync to server" step does) and run `sh /opt/vaalikone/scripts/deploy.sh`
-there. Not a bare `compose up`: it doesn't pick up a changed Caddyfile.
+stuck and CI is unavailable, rsync an earlier checkout to the box as the
+workflow's "Rsync to server" step does (its `--rsync-path` waits for a deploy
+still running there), and run `sh /opt/vaalikone/scripts/deploy-detached.sh`
+there: it runs `scripts/deploy.sh` detached, so a dropped connection doesn't cut
+the deploy short, and logs it in `/var/log/vaalikone-deploy/`. Not a bare
+`compose up`: it doesn't pick up a changed Caddyfile.
 
 ## Incident quick reference
 
@@ -31,7 +34,8 @@ there. Not a bare `compose up`: it doesn't pick up a changed Caddyfile.
 | `statement timeout` errors | A query hit `PG_STATEMENT_TIMEOUT_MS` (10 s) | Find and fix the query; the timeout is protective, don't just raise it |
 | `SMTP-tarkistus epäonnistui` in backend logs or Sentry, or `failed` rows in `email_log` | Email isn't going out (candidate links, notifications) | Check `SMTP_*` in `/opt/vaalikone/.env` and the provider's status; after fixing, `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d backend`. Re-send missed candidate links from the admin's per-party "send candidate links" |
 | Deploy fails with `required variable SMTP_HOST` (or `SMTP_FROM`) `is missing a value` | `.env` has no SMTP settings | Add them (docs/production-readiness.md, Email) and deploy again. The old containers keep running meanwhile, but every `docker compose -f docker-compose.yml -f docker-compose.prod.yml …` command (`logs`, `ps`, `exec`) fails the same way until `.env` has them |
-| Deploy job timed out, or ssh says `Timeout, server not responding` | CI lost the server mid-deploy (#178); `deploy.sh` may have stopped partway (some services recreated, some not), or still be running there | On the server, check nothing is still deploying (`pgrep -af 'deploy.sh\|docker compose'`), then re-run the **latest** deploy job or push again (re-running an older one deploys its older tree) |
+| Deploy job timed out, or ssh says `Timeout, server not responding` | CI lost the server mid-deploy (#178). The deploy itself carries on there, detached (#205) | Read the newest log in `/var/log/vaalikone-deploy/` on the server: it ends with the deploy's outcome once it has finished. If it failed, or the site looks wrong, re-run the **latest** deploy job or push again (re-running an older one deploys its older tree); it waits for a deploy that is still running |
+| Deploy fails with `flock: timeout while waiting to get lock` (rsync) or `Gave up: another deploy is still running` | A deploy has held the tree's lock for 10 minutes (#205) | Find it (`pgrep -af 'deploy.sh\|docker compose'`) and its log in `/var/log/vaalikone-deploy/`; once it has finished or been stopped, deploy again |
 | Backend restart loops | Migration failure (runs on every start) | `docker compose -f docker-compose.yml -f docker-compose.prod.yml logs backend`, fix the migration, redeploy |
 | 502/504 from the site | A proxy can't reach the next hop | Caddy and nginx don't log upstream errors (they'd log tokens, #36). `docker compose -f docker-compose.yml -f docker-compose.prod.yml ps` for a down container; `docker compose -f docker-compose.yml -f docker-compose.prod.yml logs frontend`: `upstream=-` = the backend name didn't resolve (no replica running), `upstream_status=502` with `uct=-` = no connection (a backend refused or is gone), 504 / a high `urt` = hung. No line there = Caddy couldn't reach the frontend |
 

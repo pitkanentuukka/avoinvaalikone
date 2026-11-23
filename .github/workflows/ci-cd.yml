@@ -141,10 +141,16 @@ jobs:
             ServerAliveCountMax 4
           SSH_CONFIG
 
+      # Waits for a deploy still running on the server (one this job's
+      # predecessor lost contact with, say) by taking deploy.sh's lock on the
+      # tree (#205). The server-side rsync is time-limited: one whose client
+      # is gone holds the lock until it ends, and only sshd would notice,
+      # after about 15 minutes. The lock wait outlasts that limit.
       - name: Rsync to server
         run: |
           rsync -az --delete \
             -e "ssh -i ~/.ssh/deploy_key" \
+            --rsync-path="flock -w 600 /opt/vaalikone timeout 300 rsync" \
             --exclude='node_modules' \
             --exclude='.git' \
             --exclude='.github' \
@@ -155,10 +161,12 @@ jobs:
             --exclude='.claude' \
             ./ root@80.69.172.220:/opt/vaalikone/
 
-      # Also restarts caddy when the Caddyfile changed (see the script).
+      # Also restarts caddy when the Caddyfile changed (see deploy.sh). The
+      # deploy runs detached on the server and this follows its log (#205):
+      # losing the connection fails this step, but not the deploy.
       - name: Build & restart services
         run: |
-          ssh -i ~/.ssh/deploy_key root@80.69.172.220 "sh /opt/vaalikone/scripts/deploy.sh"
+          ssh -i ~/.ssh/deploy_key root@80.69.172.220 "sh /opt/vaalikone/scripts/deploy-detached.sh"
 
       # Each try and the step itself are time-limited: later deploys queue
       # behind this job, so a connection that never answers must not hold it
