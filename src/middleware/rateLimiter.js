@@ -24,13 +24,18 @@ const { StoreError } = require("./rateLimitStore");
 // holds at most 256 /64s, so even on a network that gives each subscriber
 // their own /64 it is far fewer clients than one carrier CGNAT IPv4 address.
 // IPv4 stays one key per address, and an IPv4-mapped IPv6 address
-// (::ffff:a.b.c.d) counts as the plain IPv4 address. A custom keyGenerator
-// that uses the address must mask it with express-rate-limit's
-// ipKeyGenerator(); the library warns at startup about one that doesn't.
+// (::ffff:a.b.c.d) counts as the plain IPv4 address.
+//
+// ipv6Subnet only applies to the default key. A limiter with its own
+// keyGenerator that uses the address must mask it itself, with
+// ipKeyGenerator(req.ip, IPV6_SUBNET) from express-rate-limit: the library's
+// startup check for that only looks for "req.ip" in the function's source.
 const IPV6_SUBNET = 56;
 
 function failOpenLimiter(options) {
-  const limiter = rateLimit({ ipv6Subnet: IPV6_SUBNET, ...options, passOnStoreError: false });
+  // With a keyGenerator, express-rate-limit would log that ipv6Subnet is ignored.
+  const keying = options.keyGenerator ? {} : { ipv6Subnet: IPV6_SUBNET };
+  const limiter = rateLimit({ ...keying, ...options, passOnStoreError: false });
   const failOpen = (req, res, next) =>
     limiter(req, res, (err) => (err instanceof StoreError ? next() : next(err)));
   // Keep the limiter's own methods reachable through the wrapper.
@@ -50,4 +55,4 @@ function limitFromEnv(name, fallback) {
   return fallback;
 }
 
-module.exports = { failOpenLimiter, limitFromEnv };
+module.exports = { failOpenLimiter, limitFromEnv, IPV6_SUBNET };

@@ -104,7 +104,10 @@ i.e. everything that arrives through Caddy/Cloudflare in production.
   fill Redis with a key per address. A /56 is at most 256 subscribers' /64s,
   far fewer voters than one carrier CGNAT IPv4 address, which the limits
   already allow for. An IPv4-mapped address (`::ffff:a.b.c.d`) counts as the
-  plain IPv4 address.
+  plain IPv4 address. This relies on the IPv6 address reaching the origin:
+  keep Cloudflare's Network → Pseudo IPv4 off (or at "Add header"), since
+  "Overwrite headers" puts a derived IPv4 address in `X-Forwarded-For`
+  instead, and the limiters would key on that.
 - Falls back to per-process in-memory store when `REDIS_URL` is unset (local
   dev without compose).
 - **Match limit raised 60 → 300 req/min/IP**. Finnish carriers (DNA/Elisa/Telia)

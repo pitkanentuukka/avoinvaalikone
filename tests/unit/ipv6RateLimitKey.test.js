@@ -72,7 +72,9 @@ beforeAll(async () => {
     DATABASE_URL: "postgresql://vaalikone@127.0.0.1:1/vaalikone",
     ADMIN_SECRET: "test-admin-secret",
   };
-  delete env.REDIS_URL;
+  // Empty, not deleted: tests/setupEnv.js sets it empty so that dotenv can't
+  // load a developer's REDIS_URL from .env into the app.
+  env.REDIS_URL = "";
   // Too many requests for one argument: they go over IPC instead.
   const child = fork(CHILD, [], { execArgv: [], silent: true, env });
   child.send(plan);
