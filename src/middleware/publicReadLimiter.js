@@ -20,7 +20,8 @@ const redisStore = require("./rateLimitStore");
 //
 // Neither sends rate-limit headers: publicCache() has already marked these
 // responses public, so Cloudflare would replay one client's counter to every
-// visitor. They limit per address, as a Cloudflare per-IP rule would; a flood
+// visitor. They limit per address (IPv6 per /56, see rateLimiter.js), as a
+// Cloudflare per-IP rule would; a flood
 // spread over many addresses isn't bounded by either (docs/scaling.md).
 
 const common = {

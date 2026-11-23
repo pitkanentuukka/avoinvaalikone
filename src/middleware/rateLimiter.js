@@ -15,8 +15,22 @@ const { StoreError } = require("./rateLimitStore");
 // once per minute at most. Any other error still reaches Express. As with
 // passOnStoreError, a request let through gets no rate-limit headers or
 // req.rateLimit: nothing that could pass for a real count.
+//
+// Every limiter keys on the client address (req.ip), with IPv6 addresses
+// grouped by /56 (issue #182): one IPv6 host has at least a /64 of source
+// addresses, and a home connection is usually delegated a /56, so keying on
+// the full address let a single host rotate past every limit and fill Redis
+// (noeviction) with a key per address until the limiters failed open. A /56
+// holds at most 256 /64s, so even on a network that gives each subscriber
+// their own /64 it is far fewer clients than one carrier CGNAT IPv4 address.
+// IPv4 stays one key per address, and an IPv4-mapped IPv6 address
+// (::ffff:a.b.c.d) counts as the plain IPv4 address. A custom keyGenerator
+// that uses the address must mask it with express-rate-limit's
+// ipKeyGenerator(); the library warns at startup about one that doesn't.
+const IPV6_SUBNET = 56;
+
 function failOpenLimiter(options) {
-  const limiter = rateLimit({ ...options, passOnStoreError: false });
+  const limiter = rateLimit({ ipv6Subnet: IPV6_SUBNET, ...options, passOnStoreError: false });
   const failOpen = (req, res, next) =>
     limiter(req, res, (err) => (err instanceof StoreError ? next() : next(err)));
   // Keep the limiter's own methods reachable through the wrapper.

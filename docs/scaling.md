@@ -97,6 +97,14 @@ i.e. everything that arrives through Caddy/Cloudflare in production.
   candidate ids (random ones are 404s the micro-cache doesn't keep, and each
   id is a new URL to Cloudflare) cost a database read per request (#158).
   All eight limiters apply only when `NODE_ENV=production`.
+- "Per IP" means per client address (`req.ip`), except that IPv6 addresses
+  are grouped by /56 (`failOpenLimiter()` in `src/middleware/rateLimiter.js`,
+  #182). One IPv6 host has at least a /64 of addresses and usually a /56, so
+  keying on the full address let a single host rotate past every limit and
+  fill Redis with a key per address. A /56 is at most 256 subscribers' /64s,
+  far fewer voters than one carrier CGNAT IPv4 address, which the limits
+  already allow for. An IPv4-mapped address (`::ffff:a.b.c.d`) counts as the
+  plain IPv4 address.
 - Falls back to per-process in-memory store when `REDIS_URL` is unset (local
   dev without compose).
 - **Match limit raised 60 → 300 req/min/IP**. Finnish carriers (DNA/Elisa/Telia)
@@ -251,7 +259,7 @@ ssh user@80.69.172.220 "docker compose logs backend 2>&1 | grep -E '010|already 
    uses, and each rewrite rule on its own.
 
 **Optional: a Cloudflare rate-limiting rule on `/api/*`.** It counts per IP,
-like the origin limiters, so it doesn't add a bound; it moves a single-address
+much like the origin limiters, so it doesn't add a bound; it moves a single-address
 flood's cost (proxying through Caddy, nginx and Node to the 429) to the edge.
 Security → WAF → Rate limiting rules, on
 `starts_with(http.request.uri.path, "/api/")`. It counts every `/api/`
