@@ -762,7 +762,8 @@ function AdminView() {
   // finishing after a rotation would show revoked links, or a "sending" state
   // for emails that carried them. linkBusy[partyId] is the running action's
   // key, for its spinner; the ref is the guard, current even between renders.
-  const linkBusyRef = useRef(new Map());
+  const linkBusyRef = useRef(null);
+  linkBusyRef.current ??= new Map();
   const [linkBusy, setLinkBusy] = useState({});
   async function linkAction(partyId, key, fn) {
     if (linkBusyRef.current.has(partyId)) return;
@@ -884,6 +885,11 @@ function AdminView() {
         return next;
       });
       setLinksQueued((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+      setAllLinksRotated((prev) => {
         const next = { ...prev };
         delete next[id];
         return next;

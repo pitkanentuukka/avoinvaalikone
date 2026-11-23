@@ -151,8 +151,8 @@ describeWithDb("candidate token rotation (#193)", () => {
     await expectRotated(admin.body.token, sendCandidateLinkEmail.mock.calls.at(-1)[0].token, "Maija");
   });
 
-  // The UPDATE re-checks the address the route's SELECT already checked.
-  test("party route: address changed between its check and the UPDATE → 409, nothing rotated", async () => {
+  // After the route's own SELECT: the UPDATE itself must compare the address.
+  test("party route: address changed just before the UPDATE → 409, nothing rotated", async () => {
     const c = await addCandidate(partyId, "Maija");
     db.query.mockImplementation(async (sql, params) => {
       if (/UPDATE candidates SET token = DEFAULT/.test(sql)) {
