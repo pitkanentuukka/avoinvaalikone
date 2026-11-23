@@ -246,13 +246,16 @@ describe("POST /api/candidates/party/:partyToken/candidates/:id/token", () => {
 
   // Whoever holds a leaked link can change the address; the secretary
   // confirms the address they were shown, and a changed one is refused.
-  test("address changed since the secretary saw it → 409, nothing rotated", async () => {
+  // (The real-DB suite shows the stored token really is left alone.)
+  test("address changed since the secretary saw it → 409, nothing emailed", async () => {
     db.query.mockResolvedValueOnce({ rows: [PARTY] });
     db.query.mockResolvedValueOnce({ rows: [{ ...candidate, email: "hyokkaaja@example.com" }] });
+    db.query.mockResolvedValueOnce({ rows: [] }); // UPDATE: address doesn't match
+    db.query.mockResolvedValueOnce({ rows: [{ id: CANDIDATE_ID }] }); // still there
     const res = await request(app).post(url).send({ expectedEmail: "eeva@example.fi" });
     expect(res.status).toBe(409);
     expect(res.body.error).toMatch(/sähköpostiosoite on muuttunut/i);
-    expect(rotations()).toHaveLength(0);
+    expect(rotations()[0][1]).toEqual([CANDIDATE_ID, PARTY.id, "eeva@example.fi"]);
     expect(sendCandidateLinkEmail).not.toHaveBeenCalled();
   });
 

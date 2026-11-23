@@ -757,13 +757,32 @@ function AdminView() {
     finally { setActionLoading(null); }
   }
 
-  async function loadPartyCandidates(id) {
-    setActionLoading(`candidates-${id}`);
+  // One candidate-link action per party at a time (loading the list, sending
+  // everyone's links, rotating one or all): one that read the old tokens
+  // finishing after a rotation would show revoked links, or a "sending" state
+  // for emails that carried them. linkBusy[partyId] is the running action's
+  // key, for its spinner; the ref is the guard, current even between renders.
+  const linkBusyRef = useRef(new Map());
+  const [linkBusy, setLinkBusy] = useState({});
+  async function linkAction(partyId, key, fn) {
+    if (linkBusyRef.current.has(partyId)) return;
+    linkBusyRef.current.set(partyId, key);
+    setLinkBusy(Object.fromEntries(linkBusyRef.current));
     try {
-      const candidates = await api.getPartyCandidatesAdmin(adminSecret, id);
-      setPartyCandidates((prev) => ({ ...prev, [id]: candidates }));
-    } catch (e) { setError(e.message); }
-    finally { setActionLoading(null); }
+      await fn();
+    } finally {
+      linkBusyRef.current.delete(partyId);
+      setLinkBusy(Object.fromEntries(linkBusyRef.current));
+    }
+  }
+
+  function loadPartyCandidates(id) {
+    return linkAction(id, "candidates", async () => {
+      try {
+        const candidates = await api.getPartyCandidatesAdmin(adminSecret, id);
+        setPartyCandidates((prev) => ({ ...prev, [id]: candidates }));
+      } catch (e) { setError(e.message); }
+    });
   }
 
   function togglePartyCandidates(id) {
@@ -787,19 +806,20 @@ function AdminView() {
   }
 
   async function sendPartyCandidateLinks(id) {
+    if (linkBusyRef.current.has(id)) return;
     if (import.meta.env.VITE_NODE_ENV !== "development" && !window.confirm(t.adminSendLinksConfirm)) return;
-    setActionLoading(`links-${id}`);
-    try {
-      const result = await api.sendPartyCandidateLinks(adminSecret, id);
-      setLinksQueued((prev) => ({ ...prev, [id]: result }));
-      // A "new link not emailed" note is out of date now that everyone got theirs.
-      setLinkRotated((prev) => {
-        const next = { ...prev };
-        for (const c of partyCandidates[id] ?? []) delete next[c.id];
-        return next;
-      });
-    } catch (e) { setError(e.message); }
-    finally { setActionLoading(null); }
+    await linkAction(id, "links", async () => {
+      try {
+        const result = await api.sendPartyCandidateLinks(adminSecret, id);
+        setLinksQueued((prev) => ({ ...prev, [id]: result }));
+        // A "new link not emailed" note is out of date now that everyone got theirs.
+        setLinkRotated((prev) => {
+          const next = { ...prev };
+          for (const c of partyCandidates[id] ?? []) delete next[c.id];
+          return next;
+        });
+      } catch (e) { setError(e.message); }
+    });
   }
 
   function closePartyCandidates(id) {
@@ -824,31 +844,10 @@ function AdminView() {
     }
   }
 
-  // One rotation per party at a time: an older rotation's response arriving
-  // after a newer one would put its already revoked link back on screen.
-  const rotatingRef = useRef(new Set());
-  const [rotatingParties, setRotatingParties] = useState(() => new Set());
-  async function rotationFor(partyId, fn) {
-    if (rotatingRef.current.has(partyId)) return;
-    rotatingRef.current.add(partyId);
-    setRotatingParties(new Set(rotatingRef.current));
-    try {
-      await fn();
-    } finally {
-      rotatingRef.current.delete(partyId);
-      setRotatingParties(new Set(rotatingRef.current));
-    }
-  }
-
   async function rotateCandidateLink(partyId, c) {
-    if (rotatingRef.current.has(partyId)) return;
+    if (linkBusyRef.current.has(partyId)) return;
     if (import.meta.env.VITE_NODE_ENV !== "development" && !window.confirm(t.adminRotateCandidateLinkConfirm(c.name, c.email))) return;
-    await rotationFor(partyId, () => rotateCandidateLinkNow(partyId, c));
-  }
-
-  async function rotateCandidateLinkNow(partyId, c) {
-    setActionLoading(`rotate-candidate-${c.id}`);
-    try {
+    await linkAction(partyId, `rotate-candidate-${c.id}`, async () => {
       let result;
       try {
         result = await api.rotateCandidateTokenAdmin(adminSecret, partyId, c.id, c.email);
@@ -864,49 +863,39 @@ function AdminView() {
       const withToken = (list) => list.map((x) => (x.id === c.id ? { ...x, token } : x));
       setPartyCandidates((prev) => (prev[partyId] ? { ...prev, [partyId]: withToken(prev[partyId]) } : prev));
       setLinkRotated((prev) => ({ ...prev, [c.id]: emailed }));
-      // Refresh for the email status. The server's list already has this
-      // rotation, or a later one (a bulk rotation meanwhile), so store it as
-      // returned; on failure keep the list as updated above.
+      // Refresh for the email status; on failure keep the list as updated above.
       try {
         const candidates = await api.getPartyCandidatesAdmin(adminSecret, partyId);
         setPartyCandidates((prev) => (prev[partyId] ? { ...prev, [partyId]: candidates } : prev));
       } catch { /* keep the list as updated above */ }
-    } finally { setActionLoading(null); }
+    });
   }
 
   async function rotateAllCandidateLinks(id) {
-    if (rotatingRef.current.has(id)) return;
+    if (linkBusyRef.current.has(id)) return;
     if (import.meta.env.VITE_NODE_ENV !== "development" && !window.confirm(t.adminRotateAllLinksConfirm)) return;
-    await rotationFor(id, () => rotateAllCandidateLinksNow(id));
-  }
-
-  async function rotateAllCandidateLinksNow(id) {
-    setActionLoading(`rotate-all-${id}`);
-    try {
-      let rotated;
-      try {
-        ({ rotated } = await api.rotatePartyCandidateTokens(adminSecret, id));
-      } catch (e) {
-        setError(e.message);
-        // The rotation may have taken effect even though its response was lost.
-        await refreshAfterRotation(id);
-        return;
-      }
-      setAllLinksRotated((prev) => ({ ...prev, [id]: rotated }));
-      // Every link a single rotation sent before this one is dead now too.
+    await linkAction(id, "rotate-all", async () => {
+      // Cleared before the request: even a lost response may mean the links
+      // changed, and then the links sent earlier are dead and sending must be
+      // possible again.
       setLinkRotated((prev) => {
         const next = { ...prev };
         for (const c of partyCandidates[id] ?? []) delete next[c.id];
         return next;
       });
-      // Links sent before the rotation are dead: let the admin send the new ones.
       setLinksQueued((prev) => {
         const next = { ...prev };
         delete next[id];
         return next;
       });
+      try {
+        const { rotated } = await api.rotatePartyCandidateTokens(adminSecret, id);
+        setAllLinksRotated((prev) => ({ ...prev, [id]: rotated }));
+      } catch (e) {
+        setError(e.message);
+      }
       await refreshAfterRotation(id);
-    } finally { setActionLoading(null); }
+    });
   }
 
   async function addParty() {
@@ -1217,7 +1206,7 @@ function AdminView() {
               </div>
             </div>
             <div style={{ display: "flex", gap: "8px", marginTop: "10px", flexWrap: "wrap" }}>
-              <Button variant="ghost" size="sm" onClick={() => togglePartyCandidates(p.id)} loading={actionLoading === `candidates-${p.id}`}>
+              <Button variant="ghost" size="sm" onClick={() => togglePartyCandidates(p.id)} disabled={!partyCandidates[p.id] && p.id in linkBusy} loading={linkBusy[p.id] === "candidates"}>
                 {partyCandidates[p.id] ? t.adminHideCandidates : t.adminShowCandidates}
               </Button>
               <Button variant="ghost" size="sm" onClick={() => rotatePartyToken(p.id)} loading={actionLoading === `rotate-${p.id}`}>{t.adminRotatePartyToken}</Button>
@@ -1234,17 +1223,17 @@ function AdminView() {
                     </div>
                     <CopyField value={candidateLink(c.token)} label={t.adminCandidateLinkLabel(c.name)} />
                     <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap", marginTop: "6px" }}>
-                      <Button variant="ghost" size="sm" onClick={() => rotateCandidateLink(p.id, c)} disabled={rotatingParties.has(p.id)} loading={actionLoading === `rotate-candidate-${c.id}`}>{t.adminRotateCandidateLink}</Button>
+                      <Button variant="ghost" size="sm" onClick={() => rotateCandidateLink(p.id, c)} disabled={p.id in linkBusy} loading={linkBusy[p.id] === `rotate-candidate-${c.id}`}>{t.adminRotateCandidateLink}</Button>
                       {c.id in linkRotated && <span style={{ fontSize: "12px", color: palette.textMuted }}>{t.adminCandidateLinkRotated(linkRotated[c.id])}</span>}
                     </div>
                   </div>
                 ))}
                 {partyCandidates[p.id].length > 0 && (
                   <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
-                    <Button variant="secondary" size="sm" onClick={() => sendPartyCandidateLinks(p.id)} loading={actionLoading === `links-${p.id}`} disabled={!!linksQueued[p.id]}>
+                    <Button variant="secondary" size="sm" onClick={() => sendPartyCandidateLinks(p.id)} loading={linkBusy[p.id] === "links"} disabled={!!linksQueued[p.id] || p.id in linkBusy}>
                       {t.adminSendLinks}
                     </Button>
-                    <Button variant="ghost" size="sm" onClick={() => rotateAllCandidateLinks(p.id)} disabled={rotatingParties.has(p.id)} loading={actionLoading === `rotate-all-${p.id}`}>
+                    <Button variant="ghost" size="sm" onClick={() => rotateAllCandidateLinks(p.id)} disabled={p.id in linkBusy} loading={linkBusy[p.id] === "rotate-all"}>
                       {t.adminRotateAllLinks}
                     </Button>
                     {p.id in allLinksRotated && !linksQueued[p.id] && (
@@ -1253,7 +1242,7 @@ function AdminView() {
                     {linksQueued[p.id] && (
                       <>
                         <span style={{ fontSize: "13px", color: palette.textMuted }}>{t.adminLinksQueued(linksQueued[p.id].queued, linksQueued[p.id].withoutEmail)}</span>
-                        <Button variant="ghost" size="sm" onClick={() => loadPartyCandidates(p.id)} loading={actionLoading === `candidates-${p.id}`}>{t.adminRefreshEmailStatus}</Button>
+                        <Button variant="ghost" size="sm" onClick={() => loadPartyCandidates(p.id)} disabled={p.id in linkBusy} loading={linkBusy[p.id] === "candidates"}>{t.adminRefreshEmailStatus}</Button>
                       </>
                     )}
                   </div>

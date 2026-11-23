@@ -242,7 +242,6 @@ router.post(
     if (expectedEmail === undefined) {
       return res.status(400).json({ error: "Virheellinen sähköpostiosoite" });
     }
-    const sameEmail = (a, b) => a.trim().toLowerCase() === b.trim().toLowerCase();
     try {
       const { rows: found } = await db.query(
         "SELECT id, email FROM candidates WHERE id = $1 AND party_id = $2",
@@ -254,13 +253,11 @@ router.post(
       if (!found[0].email) {
         return res.status(409).json({ error: "Ehdokkaalla ei ole sähköpostiosoitetta" });
       }
-      if (expectedEmail !== null && !sameEmail(found[0].email, expectedEmail)) {
-        return res.status(409).json({ error: EMAIL_CHANGED_ERROR });
-      }
       if (!process.env.SMTP_HOST) {
         return res.status(503).json({ error: "Sähköpostin lähetys ei ole käytössä" });
       }
-      // The address is checked again here, in case it changed since the SELECT.
+      // The address is compared here, in SQL only (one set of trim and case
+      // rules), so it can't change between the check and the rotation.
       const { rows } = await db.query(
         `UPDATE candidates SET token = DEFAULT
          WHERE id = $1 AND party_id = $2
