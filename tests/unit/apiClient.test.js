@@ -244,6 +244,7 @@ describe("path parameters", () => {
     ["getPartyOverview", (api, t) => api.getPartyOverview(t), "/api/candidates/party/T"],
     ["rotateRegistrationLink", (api, t) => api.rotateRegistrationLink(t), "/api/candidates/party/T/registration-token"],
     ["sendCandidateLink", (api, t) => api.sendCandidateLink(t, "c1"), "/api/candidates/party/T/candidates/c1/send-link"],
+    ["rotateCandidateLink", (api, t) => api.rotateCandidateLink(t, "c1"), "/api/candidates/party/T/candidates/c1/token"],
     ["removeCandidate", (api, t) => api.removeCandidate(t, "c1"), "/api/candidates/party/T/candidates/c1"],
     ["getRegistration", (api, t) => api.getRegistration(t), "/api/candidates/register/T"],
     ["register", (api, t) => api.register(t, {}), "/api/candidates/register/T"],
@@ -277,6 +278,9 @@ describe("path parameters", () => {
   test.each([
     ["sendCandidateLink's candidate id", (api) => api.sendCandidateLink("tok", "..")],
     ["removeCandidate's candidate id", (api) => api.removeCandidate("tok", "")],
+    ["rotateCandidateLink's candidate id", (api) => api.rotateCandidateLink("tok", "..")],
+    ["rotateCandidateTokenAdmin's candidate id", (api) => api.rotateCandidateTokenAdmin("secret", "p1", "..")],
+    ["rotatePartyCandidateTokens's party id", (api) => api.rotatePartyCandidateTokens("secret", "..")],
     ["an admin id", (api) => api.deleteParty("secret", "..")],
     ["getCandidate's id", (api) => api.getCandidate("\uD800")],
   ])("%s is checked too, as a rejection rather than a throw", async (_, call) => {

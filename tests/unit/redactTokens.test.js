@@ -26,6 +26,7 @@ describe.each(implementations)("redactTokens (%s)", (_name, impl) => {
     [`/api/candidates/me/${T}`, "/api/candidates/me/[token]"],
     [`/api/candidates/register/${T}`, "/api/candidates/register/[token]"],
     [`/api/candidates/party/${T}/candidates/${ID}/send-link`, `/api/candidates/party/[token]/candidates/${ID}/send-link`],
+    [`/api/candidates/party/${T}/candidates/${ID}/token`, `/api/candidates/party/[token]/candidates/${ID}/token`],
     [`/api/candidates/party/${T}/registration-token`, "/api/candidates/party/[token]/registration-token"],
     [`https://avoinvaalikone.fi/api/candidates/me/${T}?x=1`, "https://avoinvaalikone.fi/api/candidates/me/[token]?x=1"],
     // Express routes case-insensitively, so this reaches the same handler.
