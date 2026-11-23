@@ -270,10 +270,20 @@ describe("POST /api/candidates/party/:partyToken/candidates/:id/token", () => {
   test("address changed between the check and the UPDATE → 409", async () => {
     db.query.mockResolvedValueOnce({ rows: [PARTY] });
     db.query.mockResolvedValueOnce({ rows: [candidate] });
-    db.query.mockResolvedValueOnce({ rows: [] });
+    db.query.mockResolvedValueOnce({ rows: [] }); // UPDATE
+    db.query.mockResolvedValueOnce({ rows: [{ id: CANDIDATE_ID }] }); // still there
     const res = await request(app).post(url).send({ expectedEmail: candidate.email });
     expect(res.status).toBe(409);
     expect(sendCandidateLinkEmail).not.toHaveBeenCalled();
+  });
+
+  test("removed between the check and the UPDATE, with expectedEmail → 404", async () => {
+    db.query.mockResolvedValueOnce({ rows: [PARTY] });
+    db.query.mockResolvedValueOnce({ rows: [candidate] });
+    db.query.mockResolvedValueOnce({ rows: [] }); // UPDATE
+    db.query.mockResolvedValueOnce({ rows: [] }); // gone
+    const res = await request(app).post(url).send({ expectedEmail: candidate.email });
+    expect(res.status).toBe(404);
   });
 
   test("non-string expectedEmail → 400", async () => {

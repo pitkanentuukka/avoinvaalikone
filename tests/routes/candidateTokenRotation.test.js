@@ -211,14 +211,17 @@ describeWithDb("candidate token rotation (#193)", () => {
       if (/UPDATE candidates\s+SET name/.test(sql)) await rotateFirst();
       return ctx.pool.query(sql, params);
     });
+    // A wrapper, not a patched client: the real one goes back to the pool on
+    // release, and a patched query there would hang the next pool.query.
     db.getClient.mockImplementation(async () => {
       const client = await ctx.pool.connect();
-      const query = client.query.bind(client);
-      client.query = async (sql, params) => {
-        if (/UPDATE candidates SET updated_at/.test(sql)) await rotateFirst();
-        return query(sql, params);
+      return {
+        query: async (sql, params) => {
+          if (/UPDATE candidates SET updated_at/.test(sql)) await rotateFirst();
+          return client.query(sql, params);
+        },
+        release: (err) => client.release(err),
       };
-      return client;
     });
 
     const res = await send(c.token);

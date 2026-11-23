@@ -814,18 +814,39 @@ function AdminView() {
   // spinner or reopening a list the admin closed meanwhile. If that fails,
   // close the list: the links on screen may have been revoked, and handing
   // one over would give the candidate a dead link.
-  async function refreshAfterRotation(partyId, fix = (list) => list) {
+  async function refreshAfterRotation(partyId) {
     try {
       const candidates = await api.getPartyCandidatesAdmin(adminSecret, partyId);
-      setPartyCandidates((prev) => (prev[partyId] ? { ...prev, [partyId]: fix(candidates) } : prev));
+      setPartyCandidates((prev) => (prev[partyId] ? { ...prev, [partyId]: candidates } : prev));
     } catch {
       closePartyCandidates(partyId);
       setError(t.adminLinksRotatedRefreshFailed);
     }
   }
 
+  // One rotation per party at a time: an older rotation's response arriving
+  // after a newer one would put its already revoked link back on screen.
+  const rotatingRef = useRef(new Set());
+  const [rotatingParties, setRotatingParties] = useState(() => new Set());
+  async function rotationFor(partyId, fn) {
+    if (rotatingRef.current.has(partyId)) return;
+    rotatingRef.current.add(partyId);
+    setRotatingParties(new Set(rotatingRef.current));
+    try {
+      await fn();
+    } finally {
+      rotatingRef.current.delete(partyId);
+      setRotatingParties(new Set(rotatingRef.current));
+    }
+  }
+
   async function rotateCandidateLink(partyId, c) {
+    if (rotatingRef.current.has(partyId)) return;
     if (import.meta.env.VITE_NODE_ENV !== "development" && !window.confirm(t.adminRotateCandidateLinkConfirm(c.name, c.email))) return;
+    await rotationFor(partyId, () => rotateCandidateLinkNow(partyId, c));
+  }
+
+  async function rotateCandidateLinkNow(partyId, c) {
     setActionLoading(`rotate-candidate-${c.id}`);
     try {
       let result;
@@ -854,7 +875,12 @@ function AdminView() {
   }
 
   async function rotateAllCandidateLinks(id) {
+    if (rotatingRef.current.has(id)) return;
     if (import.meta.env.VITE_NODE_ENV !== "development" && !window.confirm(t.adminRotateAllLinksConfirm)) return;
+    await rotationFor(id, () => rotateAllCandidateLinksNow(id));
+  }
+
+  async function rotateAllCandidateLinksNow(id) {
     setActionLoading(`rotate-all-${id}`);
     try {
       let rotated;
@@ -1208,7 +1234,7 @@ function AdminView() {
                     </div>
                     <CopyField value={candidateLink(c.token)} label={t.adminCandidateLinkLabel(c.name)} />
                     <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap", marginTop: "6px" }}>
-                      <Button variant="ghost" size="sm" onClick={() => rotateCandidateLink(p.id, c)} loading={actionLoading === `rotate-candidate-${c.id}`}>{t.adminRotateCandidateLink}</Button>
+                      <Button variant="ghost" size="sm" onClick={() => rotateCandidateLink(p.id, c)} disabled={rotatingParties.has(p.id)} loading={actionLoading === `rotate-candidate-${c.id}`}>{t.adminRotateCandidateLink}</Button>
                       {c.id in linkRotated && <span style={{ fontSize: "12px", color: palette.textMuted }}>{t.adminCandidateLinkRotated(linkRotated[c.id])}</span>}
                     </div>
                   </div>
@@ -1218,7 +1244,7 @@ function AdminView() {
                     <Button variant="secondary" size="sm" onClick={() => sendPartyCandidateLinks(p.id)} loading={actionLoading === `links-${p.id}`} disabled={!!linksQueued[p.id]}>
                       {t.adminSendLinks}
                     </Button>
-                    <Button variant="ghost" size="sm" onClick={() => rotateAllCandidateLinks(p.id)} loading={actionLoading === `rotate-all-${p.id}`}>
+                    <Button variant="ghost" size="sm" onClick={() => rotateAllCandidateLinks(p.id)} disabled={rotatingParties.has(p.id)} loading={actionLoading === `rotate-all-${p.id}`}>
                       {t.adminRotateAllLinks}
                     </Button>
                     {p.id in allLinksRotated && !linksQueued[p.id] && (

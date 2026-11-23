@@ -413,7 +413,7 @@ describe("POST /api/admin/parties/:id/candidates/:candidateId/token", () => {
 
     expect(res.status).toBe(409);
     expect(res.body.error).toMatch(/sähköpostiosoite on muuttunut/i);
-    const [sql, params] = db.query.mock.calls[0];
+    const [, params] = db.query.mock.calls[0];
     expect(params).toEqual([CANDIDATE_ID, VALID_UUID, "maija@example.fi"]);
     expect(sendCandidateLinkEmail).not.toHaveBeenCalled();
   });

@@ -269,9 +269,13 @@ router.post(
         [req.params.id, req.party.id, expectedEmail]
       );
       if (rows.length === 0) {
-        return expectedEmail === null
-          ? res.status(404).json({ error: "Ehdokasta ei löytynyt tässä puolueessa" })
-          : res.status(409).json({ error: EMAIL_CHANGED_ERROR });
+        // Removed since the SELECT, or (with expectedEmail) its address changed.
+        const { rows: still } = expectedEmail === null
+          ? { rows: [] }
+          : await db.query("SELECT id FROM candidates WHERE id = $1 AND party_id = $2", [req.params.id, req.party.id]);
+        return still.length
+          ? res.status(409).json({ error: EMAIL_CHANGED_ERROR })
+          : res.status(404).json({ error: "Ehdokasta ei löytynyt tässä puolueessa" });
       }
       try {
         await sendCandidateLinkEmail(rows[0], req.party.name, frontendBaseUrl());
