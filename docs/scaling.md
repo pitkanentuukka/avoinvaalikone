@@ -178,7 +178,7 @@ CI/CD handles this on push to `main`. If deploying manually:
 ```bash
 # --rsync-path takes the deploy lock: waits for a deploy still running there.
 rsync -avz --exclude='.git' --exclude='node_modules' --exclude='.env' \
-  --rsync-path="flock -w 600 /opt/vaalikone timeout 300 rsync" \
+  --rsync-path="mkdir -p /opt/vaalikone && { flock -n /opt/vaalikone true || echo 'Waiting for another deploy to finish' >&2; } && flock -w 600 /opt/vaalikone timeout 300 rsync" \
   ./ user@80.69.172.220:/opt/vaalikone/
 # Builds and restarts; also restarts caddy if the Caddyfile changed, which
 # `up -d` alone doesn't pick up. Runs detached on the server, so a dropped

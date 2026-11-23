@@ -4,12 +4,22 @@
 # deploy (#205): if the connection drops, only the following stops. The
 # deploy itself finishes, or fails, on the server, and its lock (see
 # deploy.sh) keeps the next deploy's rsync out of the tree until it has.
-# Each run's log stays in $DEPLOY_LOG_DIR for 30 days.
+# Each run's log stays for 30 days in $DEPLOY_LOG_DIR, or, for a deploying
+# user who can't write there (only root can create the default), in
+# ~/.local/state/vaalikone-deploy.
+#
+# Assumes logind doesn't kill a session's processes when it ends
+# (KillUserProcesses=no, the Debian and Ubuntu default): setsid leaves the
+# deploy in the ssh login's systemd scope.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 logs=${DEPLOY_LOG_DIR:-/var/log/vaalikone-deploy}
-mkdir -p "$logs"
-find "$logs" -name 'deploy-*.log' -mtime +30 -delete
+if ! mkdir -p "$logs" 2>/dev/null || [ ! -w "$logs" ]; then
+  logs=${XDG_STATE_HOME:-$HOME/.local/state}/vaalikone-deploy
+  mkdir -p "$logs"
+fi
+# Old logs are only housekeeping: never a reason not to deploy.
+find "$logs" -name 'deploy-*.log' -mtime +30 -delete 2>/dev/null || true
 log="$logs/deploy-$(date -u +%Y%m%dT%H%M%SZ)-$$.log"
 # Before tail opens it: tail -f gives up on a file that doesn't exist yet.
 : >"$log"

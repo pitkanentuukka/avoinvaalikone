@@ -16,7 +16,7 @@ exec 9<.
 if ! flock -n 9; then
   echo "Waiting for another deploy (or rsync) into $PWD to finish"
   if ! flock -w "${DEPLOY_LOCK_WAIT:-600}" 9; then
-    echo "Gave up: another deploy is still running in $PWD (logs in ${DEPLOY_LOG_DIR:-/var/log/vaalikone-deploy})" >&2
+    echo "Gave up: another deploy is still running in $PWD (see \"Deploy fails\" in docs/runbook.md)" >&2
     exit 1
   fi
 fi

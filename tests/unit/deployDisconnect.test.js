@@ -128,6 +128,16 @@ describe("Build & restart services", () => {
     expect(failed.status).not.toBe(0);
   });
 
+  // Only root can create the default log directory.
+  const asRoot = process.getuid && process.getuid() === 0;
+  (asRoot ? test.skip : test)("a user who can't write the log directory gets one of their own", () => {
+    fs.mkdirSync(env.DEPLOY_LOG_DIR, { mode: 0o555 });
+    const r = runStep("Build & restart services");
+    expect(r.stderr).toBe("");
+    expect(r.status).toBe(0);
+    expect(fs.readdirSync(path.join(dir, ".local/state/vaalikone-deploy"))).toHaveLength(1);
+  });
+
   test("keeps each deploy's log on the server", () => {
     runStep("Build & restart services");
     const logs = fs.readdirSync(env.DEPLOY_LOG_DIR);
@@ -158,22 +168,68 @@ describe("one deploy at a time", () => {
     }
   }, 20000);
 
+  // Holds the tree's lock (as a running deploy would) until released; its
+  // own process group, so releasing it stops the sleep too.
+  async function holdLock(seconds) {
+    const holder = spawn("flock", [tree, "sh", "-c", `echo locked; sleep ${seconds}`], {
+      stdio: ["ignore", "pipe", "ignore"],
+      detached: true,
+    });
+    await new Promise((resolve) => holder.stdout.once("data", resolve));
+    return async () => {
+      try {
+        process.kill(-holder.pid, "SIGTERM");
+      } catch {
+        // already gone
+      }
+      await exited(holder);
+    };
+  }
+
   test("deploy.sh waits for the tree's lock, and gives up with a message", async () => {
-    const holder = spawn("flock", [tree, "sh", "-c", "echo locked; sleep 5"], { stdio: ["ignore", "pipe", "ignore"] });
+    const release = await holdLock(5);
     try {
-      await new Promise((resolve) => holder.stdout.once("data", resolve));
       const r = spawnSync("sh", [path.join(tree, "scripts/deploy.sh")], {
         env: { ...env, DEPLOY_LOCK_WAIT: "1" },
         encoding: "utf8",
       });
       expect(r.status).not.toBe(0);
-      expect(r.stdout + r.stderr).toMatch(/another deploy/i);
+      expect(r.stdout).toMatch(/Waiting for another deploy/);
+      expect(r.stderr).toMatch(/Gave up: another deploy is still running/);
       expect(calls()).toEqual([]);
     } finally {
-      holder.kill();
-      await exited(holder);
+      await release();
     }
   });
+
+  // Otherwise a wait that runs out shows in the step only as rsync's
+  // "connection unexpectedly closed".
+  test("rsync's wait for the lock shows in the step's log", async () => {
+    const release = await holdLock(1);
+    try {
+      const src = path.join(dir, "checkout");
+      fs.mkdirSync(src);
+      const rsync = startStep("Rsync to server", {}, src);
+      let stderr = "";
+      rsync.stderr.on("data", (d) => (stderr += d));
+      expect(await exited(rsync)).toBe(0);
+      expect(stderr).toMatch(/Waiting for another deploy to finish/);
+    } finally {
+      await release();
+    }
+  }, 20000);
+
+  // flock would create a missing path as a regular file, and the rsync into
+  // it would then fail.
+  test("rsync still creates a tree that isn't there yet", async () => {
+    const src = path.join(dir, "checkout");
+    fs.mkdirSync(src);
+    fs.writeFileSync(path.join(src, "marker"), "first deploy\n");
+    const fresh = path.join(dir, "fresh/vaalikone");
+    const rsync = startStep("Rsync to server", { STUB_TREE: fresh }, src);
+    expect(await exited(rsync)).toBe(0);
+    expect(fs.existsSync(path.join(fresh, "marker"))).toBe(true);
+  }, 20000);
 
   // A server-side rsync whose client was black-holed holds the lock until
   // sshd notices (about 15 minutes; rsync's own --timeout doesn't fire while
@@ -181,7 +237,7 @@ describe("one deploy at a time", () => {
   // time limit of its own, and the wait for the lock outlasts it.
   test("rsync's lock wait outlasts a lost rsync still holding the lock", () => {
     const run = step("deploy", "Rsync to server").run;
-    const m = run.match(/--rsync-path="flock -w (\d+) \/opt\/vaalikone timeout (\d+) rsync"/);
+    const m = run.match(/--rsync-path="[^"]*\bflock -w (\d+) \/opt\/vaalikone timeout (\d+) rsync"/);
     expect(m).not.toBeNull();
     expect(Number(m[1])).toBeGreaterThan(Number(m[2]));
   });

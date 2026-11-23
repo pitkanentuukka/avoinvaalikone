@@ -118,7 +118,9 @@ jobs:
     runs-on: ubuntu-latest
     # Later deploys queue behind this job, so it must never wait out GitHub's
     # 6-hour limit (#178). A deploy takes about a minute; 30 leaves room for a
-    # build with a cold cache.
+    # build with a cold cache. Not always for one that first waits (up to 10
+    # minutes) for a lost deploy to finish (#205); hitting the limit then
+    # only fails the job, as the deploy carries on detached on the server.
     timeout-minutes: 30
     concurrency:
       group: deploy-production
@@ -145,12 +147,16 @@ jobs:
       # predecessor lost contact with, say) by taking deploy.sh's lock on the
       # tree (#205). The server-side rsync is time-limited: one whose client
       # is gone holds the lock until it ends, and only sshd would notice,
-      # after about 15 minutes. The lock wait outlasts that limit.
+      # after about 15 minutes. The lock wait outlasts that limit. A wait
+      # says so on stderr (not flock --verbose: it writes to stdout, which is
+      # rsync's protocol stream), and one that runs out leaves only rsync's
+      # "connection unexpectedly closed", hence the hint. mkdir: flock would
+      # create a missing tree as a file.
       - name: Rsync to server
         run: |
           rsync -az --delete \
             -e "ssh -i ~/.ssh/deploy_key" \
-            --rsync-path="flock -w 600 /opt/vaalikone timeout 300 rsync" \
+            --rsync-path="mkdir -p /opt/vaalikone && { flock -n /opt/vaalikone true || echo 'Waiting for another deploy to finish' >&2; } && flock -w 600 /opt/vaalikone timeout 300 rsync" \
             --exclude='node_modules' \
             --exclude='.git' \
             --exclude='.github' \
@@ -159,7 +165,8 @@ jobs:
             --exclude='laptop*' \
             --exclude='upcloud*' \
             --exclude='.claude' \
-            ./ root@80.69.172.220:/opt/vaalikone/
+            ./ root@80.69.172.220:/opt/vaalikone/ ||
+            { echo "::error::rsync failed. If it was waiting for another deploy, that one still holds the lock: see docs/runbook.md"; exit 1; }
 
       # Also restarts caddy when the Caddyfile changed (see deploy.sh). The
       # deploy runs detached on the server and this follows its log (#205):
