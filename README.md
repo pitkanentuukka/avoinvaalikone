@@ -2,7 +2,7 @@
 
 A Finnish *voter advisory machine* (vaalikone / election compass): voters answer a set of policy statements, candidates answer the same statements, and the app ranks candidates by how closely their answers match the voter's.
 
-**Stack:** Node.js + Express + PostgreSQL (backend) · React 19 + Vite (frontend) · Docker Compose (full stack)
+**Stack:** Node.js 24 LTS + Express + PostgreSQL (backend) · React 19 + Vite (frontend) · Docker Compose (full stack)
 
 ---
 
