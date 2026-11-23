@@ -184,11 +184,22 @@ describe("verifySmtp", () => {
     expect(Sentry.captureMessage).toHaveBeenCalledWith(expect.stringContaining("SMTP_SECURE"), "warning");
   });
 
-  test("warns about an unrecognised SMTP_SECURE value", async () => {
-    setEnv({ NODE_ENV: "development", SMTP_PORT: "587", SMTP_SECURE: "ture" });
+  // On 465 the hint mustn't suggest false, which is ignored there too.
+  test.each(["587", "465"])("warns about an unrecognised SMTP_SECURE value on port %s", async (port) => {
+    setEnv({ NODE_ENV: "development", SMTP_PORT: port, SMTP_SECURE: "ture" });
     transportMock.verify.mockResolvedValue(true);
     await verifySmtp();
-    expect(warn.mock.calls.join(" ")).toContain("SMTP_SECURE=ture");
+    const warned = warn.mock.calls.join(" ");
+    expect(warned).toContain("SMTP_SECURE=ture on tuntematon arvo");
+    expect(warned).not.toMatch(/käytä arvoa/);
+  });
+
+  // Implicit TLS against a STARTTLS port fails with "wrong version number".
+  test.each(["587", "25"])("warns about SMTP_SECURE=true on the STARTTLS port %s", async (port) => {
+    setEnv({ NODE_ENV: "development", SMTP_PORT: port, SMTP_SECURE: "true" });
+    transportMock.verify.mockResolvedValue(true);
+    await verifySmtp();
+    expect(warn.mock.calls.join(" ")).toMatch(new RegExp(`SMTP_SECURE=true portissa ${port}.*STARTTLS`));
   });
 
   test.each([

@@ -104,6 +104,17 @@ describe("SMTP transport encryption", () => {
     }
   );
 
+  // The port is parsed as a number, as nodemailer is given it.
+  test.each([" 465", "0465"])("SMTP_PORT=%p is port 465", async (port) => {
+    const options = await transportOptions({ SMTP_HOST: "smtp.example.fi", SMTP_PORT: port, SMTP_SECURE: "false" });
+    expect(options).toMatchObject({ port: 465, secure: true, requireTLS: false });
+  });
+
+  test("an unrecognised SMTP_SECURE on port 465 still uses implicit TLS", async () => {
+    const options = await transportOptions({ SMTP_HOST: "smtp.example.fi", SMTP_PORT: "465", SMTP_SECURE: "ture" });
+    expect(options).toMatchObject({ secure: true, requireTLS: false });
+  });
+
   // A typo neither enables implicit TLS nor turns off the STARTTLS requirement.
   test("an unrecognised SMTP_SECURE on port 587 still requires STARTTLS", async () => {
     const options = await transportOptions({ SMTP_HOST: "smtp.example.fi", SMTP_PORT: "587", SMTP_SECURE: "ture" });

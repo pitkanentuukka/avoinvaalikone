@@ -22,6 +22,9 @@ const smtpPort = () => parseInt(process.env.SMTP_PORT || "587");
 // Port 465 is implicit TLS (RFC 8314): nothing serves plaintext or STARTTLS
 // there, and a plaintext client just waits for a greeting until it times out.
 const IMPLICIT_TLS_PORT = 465;
+// Submission and relay ports: STARTTLS, so implicit TLS there fails the
+// handshake with an opaque "wrong version number".
+const STARTTLS_PORTS = [587, 25];
 const SECURE_ON = ["true", "1", "yes", "on"];
 const SECURE_OFF = ["false", "0", "no", "off"];
 
@@ -35,12 +38,15 @@ const SECURE_OFF = ["false", "0", "no", "off"];
 function smtpSecurity() {
   const raw = process.env.SMTP_SECURE;
   const value = (raw ?? "").trim().toLowerCase();
-  const onPort465 = smtpPort() === IMPLICIT_TLS_PORT;
+  const port = smtpPort();
+  const onPort465 = port === IMPLICIT_TLS_PORT;
   const problems = [];
   if (value && !SECURE_ON.includes(value) && !SECURE_OFF.includes(value)) {
-    problems.push(`SMTP_SECURE=${raw} on tuntematon arvo, ja se ohitetaan: käytä arvoa true tai false.`);
+    problems.push(`SMTP_SECURE=${raw} on tuntematon arvo, ja se ohitetaan: tunnetut arvot ovat true, 1, yes, on, false, 0, no ja off.`);
   } else if (onPort465 && SECURE_OFF.includes(value)) {
     problems.push(`SMTP_SECURE=${raw} ohitetaan, koska portti 465 käyttää aina suoraa TLS-yhteyttä.`);
+  } else if (STARTTLS_PORTS.includes(port) && SECURE_ON.includes(value)) {
+    problems.push(`SMTP_SECURE=${raw} portissa ${port}: portti käyttää STARTTLS-yhteyttä, joten suora TLS-yhteys epäonnistuu. Poista SMTP_SECURE tai käytä porttia 465.`);
   }
   return { secure: SECURE_ON.includes(value) || onPort465, problems };
 }

@@ -262,8 +262,10 @@ email, so production can't run without a working SMTP provider.
   the provider. Port 465 always uses implicit TLS, even with
   `SMTP_SECURE=false` (the backend warns that it ignores it); on another port,
   `SMTP_SECURE=true` (or `1`, `yes`, `on`, any case) turns it on (#199).
-  Without implicit TLS, the connection must upgrade with STARTTLS to a certificate valid for `SMTP_HOST`, or sending
-  and the startup check fail (#192). Only the local dev hosts (`localhost`,
+  It warns about `SMTP_SECURE=true` on 587 or 25, which use STARTTLS.
+  Without implicit TLS, the connection must upgrade with STARTTLS to a
+  certificate valid for `SMTP_HOST`, or sending and the startup check fail
+  (#192). Only the local dev hosts (`localhost`,
   `127.0.0.1`, `::1`, `mailpit`) are exempt, whatever `NODE_ENV` says.
 - `SMTP_FROM` must be on a domain you control (`noreply@avoinvaalikone.fi`),
   with the provider's SPF and DKIM records and a DMARC record in its DNS.
