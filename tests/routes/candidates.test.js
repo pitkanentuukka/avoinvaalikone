@@ -263,7 +263,7 @@ describe("POST /api/candidates/party/:partyToken/candidates/:id/token", () => {
     const res = await request(app).post(url).send({ expectedEmail: " Eeva@Example.FI " });
     expect(res.status).toBe(200);
     const [[sql, params]] = rotations();
-    expect(sql).toMatch(/lower\(btrim\(email\)\) = lower\(btrim\(\$3\)\)/);
+    expect(sql).toMatch(/lower\(btrim\(coalesce\(email, ''\)\)\) = lower\(btrim\(\$3\)\)/);
     expect(params).toEqual([CANDIDATE_ID, PARTY.id, " Eeva@Example.FI "]);
   });
 
@@ -483,8 +483,18 @@ describe("PUT /api/candidates/me/:candidateToken", () => {
     const res = await request(app).put(url).send({ ...PROFILE, bio: "Bio", id: "someone-else" });
     expect(res.status).toBe(200);
     expect(res.body.bio).toBe("Bio");
-    const params = db.query.mock.calls[1][1];
-    expect(params[params.length - 1]).toBe(CANDIDATE_ID);
+    const [sql, params] = db.query.mock.calls[1];
+    expect(sql).toMatch(/WHERE id = \$6 AND token = \$7/);
+    expect(params.slice(5)).toEqual([CANDIDATE_ID, CANDIDATE_TOKEN]);
+  });
+
+  // #193: a request that passed the token lookup just before the link was
+  // rotated must not write after the rotation.
+  test("link rotated since the token lookup → 404", async () => {
+    db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
+    db.query.mockResolvedValueOnce({ rows: [] });
+    const res = await request(app).put(url).send(PROFILE);
+    expect(res.status).toBe(404);
   });
 
   // #151: another candidate of the party already has this name and address.
@@ -603,7 +613,7 @@ describe("PUT /api/candidates/me/:candidateToken", () => {
       expect(profileAt).toBeGreaterThan(lockAt);
       expect(upsertAt).toBeGreaterThan(profileAt);
       const profileUpdate = client.query.mock.calls.find(isProfileUpdate);
-      expect(profileUpdate[1][profileUpdate[1].length - 1]).toBe(CANDIDATE_ID);
+      expect(profileUpdate[1].slice(5)).toEqual([CANDIDATE_ID, CANDIDATE_TOKEN]);
       const upsert = client.query.mock.calls.find(([sql]) => /INSERT INTO candidate_answers/.test(sql));
       expect(upsert[1]).toEqual([CANDIDATE_ID, QUESTION_ID, 3, "Koska"]);
       // The profile update goes through the transaction, not the pool.
@@ -996,6 +1006,9 @@ describe("PUT /api/candidates/me/:candidateToken/answers", () => {
     // routes can't deadlock against each other (#17 review round 3).
     expect(sqls[2]).toMatch(/UPDATE candidates SET updated_at/);
     expect(sqls[3]).toMatch(/INSERT INTO candidate_answers/);
+    // #193: not after the link was rotated.
+    expect(sqls[2]).toMatch(/WHERE id = \$1 AND token = \$2/);
+    expect(client.query.mock.calls[2][1]).toEqual([CANDIDATE_ID, CANDIDATE_TOKEN]);
   });
 
   test("candidate gone since the token lookup → 404, nothing written", async () => {

@@ -2,7 +2,7 @@ const { Router } = require("express");
 const crypto = require("crypto");
 const db = require("../db/pool");
 const { requireAdmin } = require("../middleware/auth");
-const { isValidLength, isValidEmail, validateUUIDParam } = require("../middleware/validation");
+const { isValidLength, isValidEmail, validateUUIDParam, expectedEmailParam } = require("../middleware/validation");
 const { sendCandidateLinkEmail } = require("../email");
 
 const router = Router();
@@ -137,17 +137,17 @@ router.get("/:id/candidates", requireAdmin, validateUUIDParam("id"), async (req,
 // working at once; profile and answers are kept. The new link is emailed when
 // the candidate has an address and SMTP is set up, and returned either way so
 // the admin can hand it over by hand. emailed says whether the send succeeded.
-// Optional { expectedEmail }: the address the admin was shown. Whoever holds a
-// leaked link can change the address to their own, so a changed one gets 409
-// and nothing is rotated.
+// Optional { expectedEmail }: the address the admin was shown ("" or null for
+// none). Whoever holds a leaked link can change or add an address of their
+// own, so a different one gets 409 and nothing is rotated.
 router.post(
   "/:id/candidates/:candidateId/token",
   requireAdmin,
   validateUUIDParam("id"),
   validateUUIDParam("candidateId"),
   async (req, res, next) => {
-    const expectedEmail = req.body?.expectedEmail ?? null;
-    if (expectedEmail !== null && typeof expectedEmail !== "string") {
+    const expectedEmail = expectedEmailParam(req.body);
+    if (expectedEmail === undefined) {
       return res.status(400).json({ error: "Virheellinen sähköpostiosoite" });
     }
     try {
@@ -155,7 +155,7 @@ router.post(
         `UPDATE candidates c SET token = DEFAULT
          FROM parties p
          WHERE c.id = $1 AND c.party_id = $2 AND p.id = c.party_id
-           AND ($3::text IS NULL OR lower(btrim(c.email)) = lower(btrim($3)))
+           AND ($3::text IS NULL OR lower(btrim(coalesce(c.email, ''))) = lower(btrim($3)))
          RETURNING c.id, c.name, c.email, c.token, p.name AS party_name`,
         [req.params.candidateId, req.params.id, expectedEmail]
       );

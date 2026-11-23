@@ -414,9 +414,23 @@ describe("POST /api/admin/parties/:id/candidates/:candidateId/token", () => {
     expect(res.status).toBe(409);
     expect(res.body.error).toMatch(/sähköpostiosoite on muuttunut/i);
     const [sql, params] = db.query.mock.calls[0];
-    expect(sql).toMatch(/lower\(btrim\(c\.email\)\) = lower\(btrim\(\$3\)\)/);
     expect(params).toEqual([CANDIDATE_ID, VALID_UUID, "maija@example.fi"]);
     expect(sendCandidateLinkEmail).not.toHaveBeenCalled();
+  });
+
+  // The admin was shown no address: one set since (e.g. by whoever holds the
+  // leaked link) must be refused too, so "" and null mean "expect none".
+  test.each([[""], [null]])("expectedEmail %p checks for no address", async (expectedEmail) => {
+    db.query
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ id: CANDIDATE_ID }] });
+
+    const res = await request(app).post(url).set("Authorization", authHeader).send({ expectedEmail });
+
+    expect(res.status).toBe(409);
+    const [sql, params] = db.query.mock.calls[0];
+    expect(sql).toMatch(/lower\(btrim\(coalesce\(c\.email, ''\)\)\) = lower\(btrim\(\$3\)\)/);
+    expect(params[2]).toBe("");
   });
 
   test("non-string expectedEmail → 400", async () => {

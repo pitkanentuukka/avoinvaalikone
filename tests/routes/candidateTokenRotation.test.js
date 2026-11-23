@@ -135,6 +135,102 @@ describeWithDb("candidate token rotation (#193)", () => {
     expect(sendCandidateLinkEmail).not.toHaveBeenCalled();
   });
 
+  test("a matching expectedEmail (any case, spaces) rotates through both routes", async () => {
+    const c = await addCandidate(partyId, "Maija");
+    const admin = await request(app)
+      .post(`/api/admin/parties/${partyId}/candidates/${c.id}/token`)
+      .set("Authorization", auth)
+      .send({ expectedEmail: " Maija@Example.FI " });
+    expect(admin.status).toBe(200);
+    await expectRotated(c.token, admin.body.token, "Maija");
+
+    const party = await request(app)
+      .post(`/api/candidates/party/${PARTY_TOKEN}/candidates/${c.id}/token`)
+      .send({ expectedEmail: " Maija@Example.FI " });
+    expect(party.status).toBe(200);
+    await expectRotated(admin.body.token, sendCandidateLinkEmail.mock.calls.at(-1)[0].token, "Maija");
+  });
+
+  // The UPDATE re-checks the address the route's SELECT already checked.
+  test("party route: address changed between its check and the UPDATE → 409, nothing rotated", async () => {
+    const c = await addCandidate(partyId, "Maija");
+    db.query.mockImplementation(async (sql, params) => {
+      if (/UPDATE candidates SET token = DEFAULT/.test(sql)) {
+        await ctx.pool.query("UPDATE candidates SET email = 'hyokkaaja@example.com' WHERE id = $1", [c.id]);
+      }
+      return ctx.pool.query(sql, params);
+    });
+
+    const res = await request(app)
+      .post(`/api/candidates/party/${PARTY_TOKEN}/candidates/${c.id}/token`)
+      .send({ expectedEmail: "maija@example.fi" });
+
+    expect(res.status).toBe(409);
+    expect((await q("SELECT token FROM candidates WHERE id = $1", [c.id]))[0].token).toBe(c.token);
+    expect(sendCandidateLinkEmail).not.toHaveBeenCalled();
+  });
+
+  test("admin route: an address set on a candidate shown without one is refused", async () => {
+    const [c] = await q(
+      `INSERT INTO candidates (party_id, name, constituency) VALUES ($1, 'Vanha', 'Helsingin vaalipiiri')
+       RETURNING id, token`,
+      [partyId]
+    );
+    await request(app)
+      .put(`/api/candidates/me/${c.token}`)
+      .send({ name: "Vanha", email: "hyokkaaja@example.com", constituency: "Helsingin vaalipiiri" })
+      .expect(200);
+
+    const res = await request(app)
+      .post(`/api/admin/parties/${partyId}/candidates/${c.id}/token`)
+      .set("Authorization", auth)
+      .send({ expectedEmail: "" });
+
+    expect(res.status).toBe(409);
+    expect((await q("SELECT token FROM candidates WHERE id = $1", [c.id]))[0].token).toBe(c.token);
+    expect(sendCandidateLinkEmail).not.toHaveBeenCalled();
+  });
+
+  // A profile save that passed the token lookup just before the rotation
+  // must not land after it.
+  test.each([
+    ["PUT /me", (token) => request(app).put(`/api/candidates/me/${token}`)
+      .send({ name: "Maija", email: "hyokkaaja@example.com", constituency: "Helsingin vaalipiiri" })],
+    ["PUT /me/answers", (token) => request(app).put(`/api/candidates/me/${token}/answers`)
+      .send({ answers: { [questionId]: { value: 0, explanation: "Muutettu" } } })],
+  ])("%s with the old link, rotated after its token lookup → 404, nothing written", async (_, send) => {
+    const c = await addCandidate(partyId, "Maija");
+    let rotated = false;
+    const rotateFirst = async () => {
+      if (!rotated) {
+        rotated = true;
+        await ctx.pool.query("UPDATE candidates SET token = DEFAULT WHERE id = $1", [c.id]);
+      }
+    };
+    db.query.mockImplementation(async (sql, params) => {
+      if (/UPDATE candidates\s+SET name/.test(sql)) await rotateFirst();
+      return ctx.pool.query(sql, params);
+    });
+    db.getClient.mockImplementation(async () => {
+      const client = await ctx.pool.connect();
+      const query = client.query.bind(client);
+      client.query = async (sql, params) => {
+        if (/UPDATE candidates SET updated_at/.test(sql)) await rotateFirst();
+        return query(sql, params);
+      };
+      return client;
+    });
+
+    const res = await send(c.token);
+
+    expect(rotated).toBe(true);
+    expect(res.status).toBe(404);
+    const [row] = await q("SELECT email FROM candidates WHERE id = $1", [c.id]);
+    expect(row.email).toBe("maija@example.fi");
+    const [answer] = await q("SELECT value FROM candidate_answers WHERE candidate_id = $1", [c.id]);
+    expect(answer.value).toBe(3);
+  });
+
   test("bulk rotation changes every link in the party and none elsewhere", async () => {
     const a = await addCandidate(partyId, "Maija");
     const b = await addCandidate(partyId, "Matti");

@@ -2,7 +2,7 @@ const { Router } = require("express");
 const db = require("../db/pool");
 const { begin, commit, rollback } = require("../db/transaction");
 const { requirePartyToken, requireCandidateToken, requireRegistrationToken } = require("../middleware/auth");
-const { isValidLength, isValidUrl, isValidEmail, validateUUIDParam, isValidUUID, quoteList } = require("../middleware/validation");
+const { isValidLength, isValidUrl, isValidEmail, validateUUIDParam, isValidUUID, quoteList, expectedEmailParam } = require("../middleware/validation");
 const { publicCache, noStore } = require("../middleware/cacheControl");
 const microCache = require("../middleware/microCache");
 const { candidateReads, listReads } = require("../middleware/publicReadLimiter");
@@ -238,8 +238,8 @@ router.post(
   requirePartyToken,
   validateUUIDParam("id"),
   async (req, res, next) => {
-    const expectedEmail = req.body?.expectedEmail ?? null;
-    if (expectedEmail !== null && typeof expectedEmail !== "string") {
+    const expectedEmail = expectedEmailParam(req.body);
+    if (expectedEmail === undefined) {
       return res.status(400).json({ error: "Virheellinen sähköpostiosoite" });
     }
     const sameEmail = (a, b) => a.trim().toLowerCase() === b.trim().toLowerCase();
@@ -264,7 +264,7 @@ router.post(
       const { rows } = await db.query(
         `UPDATE candidates SET token = DEFAULT
          WHERE id = $1 AND party_id = $2
-           AND ($3::text IS NULL OR lower(btrim(email)) = lower(btrim($3)))
+           AND ($3::text IS NULL OR lower(btrim(coalesce(email, ''))) = lower(btrim($3)))
          RETURNING id, name, email, token`,
         [req.params.id, req.party.id, expectedEmail]
       );
@@ -497,7 +497,7 @@ async function upsertAnswers(client, candidateId, toSave) {
 
 const UPDATE_PROFILE_SQL = `UPDATE candidates
        SET name = $1, photo_url = $2, bio = $3, email = $4, constituency = $5, updated_at = now()
-       WHERE id = $6
+       WHERE id = $6 AND token = $7
        RETURNING id, name, photo_url, bio, email, constituency, updated_at`;
 
 // PUT /api/candidates/me/:candidateToken — update own profile (full replace),
@@ -514,12 +514,21 @@ router.put("/me/:candidateToken", requireCandidateToken, async (req, res, next) 
   if (answers != null && (typeof answers !== "object" || Array.isArray(answers))) {
     return res.status(400).json({ error: "Vastaukset ovat virheellisessä muodossa" });
   }
-  const params = [name.trim(), photoUrl?.trim() || null, bio?.trim() || null, email.trim(), constituency.trim(), req.candidate.id];
+  // The token too, not just the id it resolved to: a save that passed the
+  // token lookup just before the link was rotated must not land after it.
+  const params = [
+    name.trim(), photoUrl?.trim() || null, bio?.trim() || null, email.trim(), constituency.trim(),
+    req.candidate.id, req.params.candidateToken,
+  ];
 
   let client;
   try {
     if (answers == null) {
       const { rows } = await db.query(UPDATE_PROFILE_SQL, params);
+      if (!rows.length) {
+        // Removed by their party, or the link rotated, since the token lookup.
+        return res.status(404).json({ error: "Virheellinen ehdokastunniste" });
+      }
       return res.json(rows[0]);
     }
 
@@ -575,11 +584,11 @@ router.put("/me/:candidateToken/answers", requireCandidateToken, async (req, res
     // Candidate row before the answers, the same order as PUT /me with
     // answers, so concurrent saves through the two routes can't deadlock.
     const { rowCount } = await client.query(
-      "UPDATE candidates SET updated_at = now() WHERE id = $1",
-      [req.candidate.id]
+      "UPDATE candidates SET updated_at = now() WHERE id = $1 AND token = $2",
+      [req.candidate.id, req.params.candidateToken]
     );
     if (!rowCount) {
-      // Removed by their party since the token lookup.
+      // Removed by their party, or the link rotated, since the token lookup.
       await rollback(client);
       return res.status(404).json({ error: "Virheellinen ehdokastunniste" });
     }

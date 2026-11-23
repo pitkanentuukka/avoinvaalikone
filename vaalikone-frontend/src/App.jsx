@@ -830,7 +830,7 @@ function AdminView() {
     try {
       let result;
       try {
-        result = await api.rotateCandidateTokenAdmin(adminSecret, partyId, c.id, c.email ?? undefined);
+        result = await api.rotateCandidateTokenAdmin(adminSecret, partyId, c.id, c.email);
       } catch (e) {
         setError(e.message);
         // The rotation may have taken effect even though its response was lost.
@@ -843,10 +843,12 @@ function AdminView() {
       const withToken = (list) => list.map((x) => (x.id === c.id ? { ...x, token } : x));
       setPartyCandidates((prev) => (prev[partyId] ? { ...prev, [partyId]: withToken(prev[partyId]) } : prev));
       setLinkRotated((prev) => ({ ...prev, [c.id]: emailed }));
-      // Refresh for the email status; the new link is already shown.
+      // Refresh for the email status. The server's list already has this
+      // rotation, or a later one (a bulk rotation meanwhile), so store it as
+      // returned; on failure keep the list as updated above.
       try {
         const candidates = await api.getPartyCandidatesAdmin(adminSecret, partyId);
-        setPartyCandidates((prev) => (prev[partyId] ? { ...prev, [partyId]: withToken(candidates) } : prev));
+        setPartyCandidates((prev) => (prev[partyId] ? { ...prev, [partyId]: candidates } : prev));
       } catch { /* keep the list as updated above */ }
     } finally { setActionLoading(null); }
   }
@@ -1518,7 +1520,8 @@ function PartyView({ partyToken }) {
   const [loadFailed, setLoadFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [error, setError] = useState(null);
-  const [busy, setBusy] = useState(null);
+  // Keys of the requests in flight, so one finishing doesn't clear another's.
+  const [busy, setBusy] = useState(() => new Set());
   const [sent, setSent] = useState({});
 
   useEffect(() => {
@@ -1547,14 +1550,18 @@ function PartyView({ partyToken }) {
   }, [partyToken, attempt]);
 
   async function run(key, fn) {
-    setBusy(key);
+    setBusy((b) => new Set(b).add(key));
     setError(null);
     try {
       await fn();
     } catch (e) {
       setError(e.message);
     } finally {
-      setBusy(null);
+      setBusy((b) => {
+        const next = new Set(b);
+        next.delete(key);
+        return next;
+      });
     }
   }
 
@@ -1608,7 +1615,7 @@ function PartyView({ partyToken }) {
         <p style={{ fontSize: "13px", color: palette.textMuted, margin: "0 0 12px", lineHeight: 1.6 }}>{t.partyRegistrationLinkDesc}</p>
         <CopyField value={registrationLink(data.party.registrationToken)} label={t.partyRegistrationLinkTitle} />
         <div style={{ marginTop: "12px" }}>
-          <Button variant="ghost" size="sm" onClick={rotate} loading={busy === "rotate"}>{t.partyRotateLink}</Button>
+          <Button variant="ghost" size="sm" onClick={rotate} loading={busy.has("rotate")}>{t.partyRotateLink}</Button>
         </div>
       </Card>
 
@@ -1629,13 +1636,13 @@ function PartyView({ partyToken }) {
             <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
               {/* One request per candidate at a time: a send still in flight
                   carries the token a rotation is about to revoke. */}
-              <Button variant="secondary" size="sm" onClick={() => sendLink(c)} disabled={!c.email || sent[c.id] || busy === `rotate-${c.id}`} loading={busy === `send-${c.id}`}>
+              <Button variant="secondary" size="sm" onClick={() => sendLink(c)} disabled={!c.email || sent[c.id] || busy.has(`rotate-${c.id}`)} loading={busy.has(`send-${c.id}`)}>
                 {sent[c.id] ? t.partyLinkSent : t.partySendLink}
               </Button>
-              <Button variant="ghost" size="sm" onClick={() => rotateLink(c)} disabled={!c.email || busy === `send-${c.id}`} loading={busy === `rotate-${c.id}`}>
+              <Button variant="ghost" size="sm" onClick={() => rotateLink(c)} disabled={!c.email || busy.has(`send-${c.id}`)} loading={busy.has(`rotate-${c.id}`)}>
                 {t.partyRotateCandidateLink}
               </Button>
-              <Button variant="danger" size="sm" onClick={() => remove(c)} loading={busy === `remove-${c.id}`}>{t.partyRemoveCandidate}</Button>
+              <Button variant="danger" size="sm" onClick={() => remove(c)} loading={busy.has(`remove-${c.id}`)}>{t.partyRemoveCandidate}</Button>
             </div>
           </div>
         </Card>

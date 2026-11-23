@@ -317,4 +317,11 @@ describe("candidate link rotation", () => {
     expect(fetch.mock.calls[0][1].method).toBe("POST");
     expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ expectedEmail: "maija@example.fi" });
   });
+
+  // JSON.stringify would drop undefined, and the server would skip the check.
+  test("rotateCandidateTokenAdmin sends a missing address as \"\"", async () => {
+    const { api, fetch } = apiWith(jsonResponse(200, {}));
+    await api.rotateCandidateTokenAdmin("secret", "p1", "c1", null);
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ expectedEmail: "" });
+  });
 });

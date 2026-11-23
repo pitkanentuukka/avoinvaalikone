@@ -159,9 +159,10 @@ The rotated link goes to the candidate's current email address. Whoever holds
 a leaked candidate link can change that address to their own, so the new link
 would reach them. With `{ "expectedEmail": "…" }` in the body, the routes
 refuse with 409 and rotate nothing when the stored address differs (compared
-trimmed and case-insensitively). Without it, they rotate and send unchecked.
+trimmed and case-insensitively; `""` or `null` expects no address). Without
+it, they rotate and send unchecked.
 
 **Why the frontend is unaffected:** it always sends the address it showed the
-user, and names that address in the confirm dialog.
+user (`""` when it showed none), and names that address in the confirm dialog.
 
 **Fix:** make `expectedEmail` required on both routes.

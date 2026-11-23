@@ -175,8 +175,14 @@ export function createApi({
       apiFetch(path`/admin/parties/${id}/candidates`, { adminSecret: secret }),
     sendPartyCandidateLinks: (secret, id) =>
       apiFetch(path`/admin/parties/${id}/send-candidate-links`, { method: "POST", adminSecret: secret }),
+    // No address is sent as "": undefined would be dropped from the JSON, and
+    // the server would then skip the check.
     rotateCandidateTokenAdmin: (secret, partyId, id, expectedEmail) =>
-      apiFetch(path`/admin/parties/${partyId}/candidates/${id}/token`, { method: "POST", body: { expectedEmail }, adminSecret: secret }),
+      apiFetch(path`/admin/parties/${partyId}/candidates/${id}/token`, {
+        method: "POST",
+        body: { expectedEmail: expectedEmail ?? "" },
+        adminSecret: secret,
+      }),
     rotatePartyCandidateTokens: (secret, id) =>
       apiFetch(path`/admin/parties/${id}/candidate-tokens`, { method: "POST", adminSecret: secret }),
     getAllQuestionSets: (secret) => apiFetch("/admin/question-sets", { adminSecret: secret }),
