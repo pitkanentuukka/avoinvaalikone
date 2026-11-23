@@ -92,7 +92,7 @@ describe("SMTP transport encryption", () => {
   );
 
   // Port 465 is implicit TLS (RFC 8314); nothing serves plaintext or STARTTLS
-  // there. The Compose default and earlier .env.example copies set
+  // there. .env files copied from .env.example before #199 set
   // SMTP_SECURE=false, so an explicit false is overridden too (verifySmtp warns).
   test.each([undefined, "", "false", "0", "no"])(
     "port 465 uses implicit TLS with SMTP_SECURE=%p",
