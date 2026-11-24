@@ -178,19 +178,22 @@ CI/CD handles this on push to `main`. If deploying manually:
 ```bash
 # The same rsync as CI's "Rsync to server" step (.github/workflows/ci-cd.yml;
 # tests/unit/manualDeployDoc.test.js keeps them in step). The filter keeps
-# files git ignores off the server; any other untracked file is uploaded, so
-# check `git status` first, and keep SSH keys outside the checkout. --delete
-# removes what the repo no longer has. --rsync-path takes the deploy lock:
-# waits for a deploy still running there.
+# files that .gitignore lists off the server. Any other untracked file is
+# uploaded, including one ignored by .git/info/exclude or your global ignore
+# file, so check `git status --ignored` first, and keep SSH keys outside the
+# checkout. --delete removes whatever else is in the server's tree, except
+# what is excluded by name. --rsync-path takes the deploy lock: waits for a
+# deploy still running there.
 rsync -avz --delete \
-  --filter=':- .gitignore' \
+  --filter=':-s .gitignore' \
   --exclude='node_modules' --exclude='.git' --exclude='.github' \
   --exclude='.env' --exclude='test-results' --exclude='.claude' \
   --rsync-path="mkdir -p /opt/vaalikone && { flock -n /opt/vaalikone true || echo 'Waiting for another deploy to finish' >&2; } && flock -w 600 /opt/vaalikone timeout 300 rsync" \
   ./ user@80.69.172.220:/opt/vaalikone/
 # Builds and restarts; also restarts caddy if the Caddyfile changed, which
 # `up -d` alone doesn't pick up. Runs detached on the server, so a dropped
-# connection doesn't cut it short; the log is in /var/log/vaalikone-deploy/.
+# connection doesn't cut it short; the log is in /var/log/vaalikone-deploy/
+# (as root; another user's is in ~/.local/state/vaalikone-deploy/).
 ssh user@80.69.172.220 "sh /opt/vaalikone/scripts/deploy-detached.sh"
 ```
 

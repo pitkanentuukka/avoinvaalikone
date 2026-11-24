@@ -31,9 +31,10 @@ echo "Deploy log on the server: $log"
 # one doesn't reach it, and nohup ignores one that does. -w: setsid forks
 # when it leads a process group, and then still ends with deploy.sh's status.
 # The log ends with the outcome, for whoever reads it after losing the
-# connection.
+# connection, and starts with the command that stops the whole deploy: the
+# inner sh leads the new session, so its $$ is the session's id.
 setsid -w nohup sh -c '
-  echo "Deploy started $(date -u)"
+  echo "Deploy started $(date -u) (to stop it: pkill -s $$)"
   status=0
   sh "$1" || status=$?
   echo "Deploy ended $(date -u) with exit status $status"

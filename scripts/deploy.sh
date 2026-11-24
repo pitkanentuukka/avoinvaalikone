@@ -20,6 +20,9 @@ if ! flock -n 9; then
     exit 1
   fi
 fi
+# Names the holder in its log (docs/runbook.md). lslocks doesn't: the lock
+# was taken by a flock process that has ended.
+echo "Got the deploy lock"
 
 dc="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
 
