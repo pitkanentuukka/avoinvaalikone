@@ -152,12 +152,16 @@ jobs:
       # rsync's protocol stream), and one that runs out leaves only rsync's
       # "connection unexpectedly closed", hence the hint. mkdir: flock would
       # create a missing tree as a file. docs/scaling.md's manual deploy
-      # repeats this command (tests/unit/manualDeployDoc.test.js).
+      # repeats this command (tests/unit/manualDeployDoc.test.js). The filter
+      # is for it: a working checkout, unlike CI's, has files git ignores.
+      # The server's .env is excluded by name too, so that keeping it doesn't
+      # depend on .gitignore (--delete would remove it).
       - name: Rsync to server
         run: |
           rsync -az --delete \
             -e "ssh -i ~/.ssh/deploy_key" \
             --rsync-path="mkdir -p /opt/vaalikone && { flock -n /opt/vaalikone true || echo 'Waiting for another deploy to finish' >&2; } && flock -w 600 /opt/vaalikone timeout 300 rsync" \
+            --filter=':- .gitignore' \
             --exclude='node_modules' \
             --exclude='.git' \
             --exclude='.github' \
