@@ -121,6 +121,29 @@ describe("Build & restart services", () => {
     expect(finished).toBe(true);
   }, 20000);
 
+  // Its first write to the closed pipe must not come before the deploy.
+  test("the deploy runs even if the connection is gone before it starts", async () => {
+    const script = path.join(tree, "scripts/deploy-detached.sh");
+    spawnSync("bash", ["-c", '{ sleep 0.5; sh "$1"; } | :', "bash", script], { env });
+    expect(await waitFor(deployDone)).toBe(true);
+  }, 20000);
+
+  test("a hangup that does reach the deploy's session doesn't stop it", async () => {
+    const child = startStep("Build & restart services", { STUB_UP_SLEEP: "3" });
+    const ended = exited(child);
+    try {
+      expect(await waitFor(upStarted)).toBe(true);
+      const [name] = fs.readdirSync(env.DEPLOY_LOG_DIR);
+      const text = fs.readFileSync(path.join(env.DEPLOY_LOG_DIR, name), "utf8");
+      const session = text.match(/pkill -s (\d+)\)/)[1];
+      expect(deployDone()).toBe(false);
+      expect(spawnSync("pkill", ["-HUP", "-s", session]).status).toBe(0);
+    } finally {
+      expect(await ended).toBe(0);
+    }
+    expect(deployDone()).toBe(true);
+  }, 20000);
+
   test("passes on the deploy's output and its exit status", () => {
     const ok = runStep("Build & restart services");
     expect(ok.stdout).toContain("Caddyfile changed");
@@ -178,11 +201,13 @@ describe("Build & restart services", () => {
   }, 30000);
 
   test("docs/runbook.md quotes what the log says", () => {
-    runStep("Build & restart services");
+    const { stdout } = runStep("Build & restart services");
     const [name] = fs.readdirSync(env.DEPLOY_LOG_DIR);
-    const text = fs.readFileSync(path.join(env.DEPLOY_LOG_DIR, name), "utf8");
+    // The step's output: the log, and where it is.
+    expect(stdout).toContain(`Deploy log on the server: ${path.join(env.DEPLOY_LOG_DIR, name)}`);
+    const text = stdout;
     const runbook = fs.readFileSync(path.join(REPO, "docs/runbook.md"), "utf8");
-    for (const line of ["Got the deploy lock", "Deploy ended", "to stop it: pkill -s"]) {
+    for (const line of ["Deploy log on the server:", "Got the deploy lock", "Deploy ended", "to stop it: pkill -s"]) {
       expect(text).toContain(line);
       expect(runbook).toContain(line);
     }
@@ -279,8 +304,24 @@ describe("one deploy at a time", () => {
   // time limit of its own, and the wait for the lock outlasts it.
   test("rsync's lock wait outlasts a lost rsync still holding the lock", () => {
     const run = step("deploy", "Rsync to server").run;
-    const m = run.match(/--rsync-path="[^"]*\bflock -w (\d+) \/opt\/vaalikone timeout (\d+) rsync"/);
+    const m = run.match(/--rsync-path="[^"]*\bflock -w (\d+) \/opt\/vaalikone timeout (?:-k (\d+) )?(\d+) rsync"/);
     expect(m).not.toBeNull();
-    expect(Number(m[1])).toBeGreaterThan(Number(m[2]));
+    expect(Number(m[1])).toBeGreaterThan(Number(m[2] ?? 0) + Number(m[3]));
   });
+
+  // rsync's SIGTERM handler can block on its full output pipe, which nobody
+  // reads any more. The workflow's own server-side command, with its time
+  // limits cut to a second and an rsync that ignores SIGTERM.
+  test("a lost rsync that ignores SIGTERM still frees the lock", () => {
+    const remote = step("deploy", "Rsync to server").run.match(/--rsync-path="([^"]*)"/)[1];
+    const quick = remote
+      .replaceAll(SERVER_TREE, tree)
+      .replace(/timeout (-k \d+ )?\d+ rsync/, (_, k) => `timeout ${k ? "-k 1 " : ""}1 rsync`);
+    expect(quick).toMatch(/timeout (-k 1 )?1 rsync$/);
+    fs.writeFileSync(path.join(dir, "bin/rsync"), "#!/bin/sh\ntrap '' TERM\nexec sleep 12\n", { mode: 0o755 });
+    const start = Date.now();
+    spawnSync("sh", ["-c", quick], { env });
+    expect(Date.now() - start).toBeLessThan(8000);
+    expect(spawnSync("flock", ["-n", tree, "true"]).status).toBe(0);
+  }, 20000);
 });
