@@ -60,6 +60,12 @@ describe("deploy job", () => {
   });
 });
 
+// Searched for with the line ssh printed, which names the host.
+test("docs/runbook.md quotes ssh's timeout message as ssh prints it", () => {
+  const runbook = fs.readFileSync(path.join(__dirname, "../../docs/runbook.md"), "utf8");
+  expect(runbook).toContain(`Timeout, server ${SERVER} not responding.`);
+});
+
 describe("Verify edge cache", () => {
   test("has a timeout, and hitting it doesn't fail the deploy", () => {
     const s = deployStep("Verify edge cache");
