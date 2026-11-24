@@ -83,9 +83,9 @@ async function waitFor(cond, ms = 10000) {
   return true;
 }
 
-// A step's command as GitHub runs it (bash -eo pipefail), in its own process
-// group, like an ssh session.
-const BASH = ["--noprofile", "--norc", "-eo", "pipefail", "-c"];
+// A step's command as GitHub runs one without `shell:` (bash -e, without
+// pipefail), in its own process group, like an ssh session.
+const BASH = ["-e", "-c"];
 function startStep(name, extraEnv = {}, cwd = REPO) {
   return spawn("bash", [...BASH, step("deploy", name).run], {
     cwd,
@@ -150,6 +150,43 @@ describe("Build & restart services", () => {
     // Read after losing the connection, it still tells how the deploy ended.
     expect(text.trim().split("\n").pop()).toMatch(/exit status 0$/);
   });
+
+  // For a stuck deploy (docs/runbook.md): nothing else names it reliably.
+  // lslocks doesn't, as the flock process that took the lock is gone.
+  test("the log says it got the lock, and how to stop the deploy", async () => {
+    const child = startStep("Build & restart services", { STUB_UP_SLEEP: "15" });
+    const ended = exited(child);
+    try {
+      expect(await waitFor(upStarted)).toBe(true);
+      const [name] = fs.readdirSync(env.DEPLOY_LOG_DIR);
+      const text = fs.readFileSync(path.join(env.DEPLOY_LOG_DIR, name), "utf8");
+      expect(text).toContain("Got the deploy lock");
+      const session = text.match(/to stop it: pkill -s (\d+)\)/)?.[1];
+      expect(session).toBeTruthy();
+
+      const lockFree = () => spawnSync("flock", ["-n", tree, "true"]).status === 0;
+      expect(lockFree()).toBe(false);
+      const running = spawnSync("pgrep", ["-as", session], { encoding: "utf8" });
+      expect(running.stdout).toContain("deploy.sh");
+      expect(spawnSync("pkill", ["-s", session]).status).toBe(0);
+      expect(await ended).not.toBe(0);
+      expect(await waitFor(lockFree)).toBe(true);
+      expect(deployDone()).toBe(false);
+    } finally {
+      await ended;
+    }
+  }, 30000);
+
+  test("docs/runbook.md quotes what the log says", () => {
+    runStep("Build & restart services");
+    const [name] = fs.readdirSync(env.DEPLOY_LOG_DIR);
+    const text = fs.readFileSync(path.join(env.DEPLOY_LOG_DIR, name), "utf8");
+    const runbook = fs.readFileSync(path.join(REPO, "docs/runbook.md"), "utf8");
+    for (const line of ["Got the deploy lock", "Deploy ended", "to stop it: pkill -s"]) {
+      expect(text).toContain(line);
+      expect(runbook).toContain(line);
+    }
+  });
 });
 
 describe("one deploy at a time", () => {
@@ -199,6 +236,7 @@ describe("one deploy at a time", () => {
       });
       expect(r.status).not.toBe(0);
       expect(r.stdout).toMatch(/Waiting for another deploy/);
+      expect(r.stdout).not.toContain("Got the deploy lock");
       expect(r.stderr).toMatch(/Gave up: another deploy is still running/);
       expect(calls()).toEqual([]);
     } finally {
