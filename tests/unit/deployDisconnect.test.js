@@ -150,8 +150,8 @@ describe("Build & restart services", () => {
     expect(ok.status).toBe(0);
     expect(deployDone()).toBe(true);
 
-    const failed = runStep("Build & restart services", { STUB_COMPOSE_EXIT: "1" });
-    expect(failed.status).not.toBe(0);
+    const failed = runStep("Build & restart services", { STUB_COMPOSE_EXIT: "7" });
+    expect(failed.status).toBe(7);
   });
 
   // Only root can create the default log directory.
@@ -267,6 +267,29 @@ describe("one deploy at a time", () => {
     } finally {
       await release();
     }
+  });
+
+  test("deploy.sh goes ahead once it gets the lock", async () => {
+    const release = await holdLock(2);
+    try {
+      const r = spawnSync("sh", [path.join(tree, "scripts/deploy.sh")], {
+        env: { ...env, DEPLOY_LOCK_WAIT: "20" },
+        encoding: "utf8",
+      });
+      expect(r.status).toBe(0);
+      expect(r.stdout).toMatch(/Waiting for another deploy[^]*Got the deploy lock/);
+      expect(deployDone()).toBe(true);
+    } finally {
+      await release();
+    }
+  }, 20000);
+
+  // The job must not go on to deploy the old, or a half-synced, tree.
+  test("the rsync step fails, with a hint, when rsync does", () => {
+    fs.writeFileSync(path.join(dir, "bin/rsync"), "#!/bin/sh\nexit 12\n", { mode: 0o755 });
+    const r = runStep("Rsync to server");
+    expect(r.status).not.toBe(0);
+    expect(r.stdout).toMatch(/^::error::rsync failed/m);
   });
 
   // Otherwise a wait that runs out shows in the step only as rsync's

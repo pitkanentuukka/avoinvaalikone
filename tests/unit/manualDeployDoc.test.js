@@ -24,12 +24,12 @@ const hasDelete = (cmd) => /\s--delete(\s|$)/.test(cmd);
 // The bundled short options right after `rsync` (-az).
 const shortFlags = (cmd) => cmd.match(/^\s*rsync\s+-([a-zA-Z]+)\s/)?.[1] ?? "";
 
-function manualRsync() {
+function manualBlock() {
   const doc = fs.readFileSync(DOC, "utf8");
   const section = doc.split("### 1. Deploy the code")[1];
-  const block = section.match(/```bash\n([\s\S]*?)```/)[1];
-  return rsyncCommand(block);
+  return section.match(/```bash\n([\s\S]*?)```/)[1];
 }
+const manualRsync = () => rsyncCommand(manualBlock());
 
 describe("docs/scaling.md manual deploy", () => {
   const ci = rsyncCommand(step("deploy", "Rsync to server").run);
@@ -51,6 +51,31 @@ describe("docs/scaling.md manual deploy", () => {
   test("takes the same deploy lock", () => {
     expect(rsyncPath(ci)).toBeTruthy();
     expect(rsyncPath(manual)).toBe(rsyncPath(ci));
+  });
+
+  // Pasted as a whole. After an rsync that gave up on the lock, or was cut
+  // short, the deploy would build the old, or a half-synced, tree.
+  test.each([
+    [0, true],
+    [12, false],
+  ])("rsync exits %i: deploys %s", (exit, deploys) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "manual-deploy-"));
+    try {
+      const log = path.join(dir, "ssh.log");
+      fs.writeFileSync(path.join(dir, "rsync"), `#!/bin/sh\nexit ${exit}\n`, { mode: 0o755 });
+      fs.writeFileSync(path.join(dir, "ssh"), `#!/bin/sh\necho "$*" >> "${log}"\n`, { mode: 0o755 });
+      const r = spawnSync("bash", [], {
+        input: manualBlock(),
+        cwd: dir,
+        env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
+        encoding: "utf8",
+      });
+      expect(r.stderr).toBe("");
+      const calls = fs.existsSync(log) ? fs.readFileSync(log, "utf8") : "";
+      expect(/deploy-detached\.sh/.test(calls)).toBe(deploys);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -107,7 +132,7 @@ describe.each([
       .replace(/\s-e "[^"]*"/, "")
       .replace(/--rsync-path="[^"]*"/, "")
       .replace(/\S+@\S+:\S+/, '"$DEST"')
-      .replace(/\s*\|\|\s*$/, "");
+      .replace(/\s*(\|\||&&)\s*$/, "");
     const res = spawnSync("bash", ["-c", local], {
       cwd: path.join(dir, from),
       env: { ...process.env, DEST: path.join(dir, "server") },
