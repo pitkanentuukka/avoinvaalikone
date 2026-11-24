@@ -34,7 +34,7 @@ while [ $# -gt 0 ]; do
   case "$1" in -i|-o|-p|-F|-l) shift 2 ;; -*) shift ;; *) break ;; esac
 done
 shift
-exec sh -c "$(printf '%s' "$*" | sed "s#${SERVER_TREE}#$STUB_TREE#g")"
+exec sh -c "$(printf '%s' "$*" | sed "s#${SERVER_TREE}#'$STUB_TREE'#g")"
 `;
 
 let dir;
@@ -57,6 +57,8 @@ beforeEach(() => {
   log = path.join(dir, "docker.log");
   env = {
     ...process.env,
+    // A locale that isn't installed makes bash warn on stderr.
+    LC_ALL: "C",
     HOME: dir,
     PATH: `${bin}:${process.env.PATH}`,
     STUB_LOG: log,
@@ -152,6 +154,17 @@ describe("Build & restart services", () => {
 
     const failed = runStep("Build & restart services", { STUB_COMPOSE_EXIT: "7" });
     expect(failed.status).toBe(7);
+  });
+
+  // With job control a background job leads its process group, and setsid
+  // then forks: without -w, it ends at once, with status 0. (`bash -m` turns
+  // job control off again without a terminal.)
+  test("passes on the exit status from a shell with job control", () => {
+    const r = spawnSync("bash", ["-c", 'set -m; . "$0"', path.join(tree, "scripts/deploy-detached.sh")], {
+      env: { ...env, STUB_COMPOSE_EXIT: "7", STUB_UP_SLEEP: "1" },
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(7);
   });
 
   // Only root can create the default log directory.
@@ -338,7 +351,7 @@ describe("one deploy at a time", () => {
   test("a lost rsync that ignores SIGTERM still frees the lock", () => {
     const remote = step("deploy", "Rsync to server").run.match(/--rsync-path="([^"]*)"/)[1];
     const quick = remote
-      .replaceAll(SERVER_TREE, tree)
+      .replaceAll(SERVER_TREE, `'${tree}'`)
       .replace(/timeout (-k \d+ )?\d+ rsync/, (_, k) => `timeout ${k ? "-k 1 " : ""}1 rsync`);
     expect(quick).toMatch(/timeout (-k 1 )?1 rsync$/);
     fs.writeFileSync(path.join(dir, "bin/rsync"), "#!/bin/sh\ntrap '' TERM\nexec sleep 12\n", { mode: 0o755 });

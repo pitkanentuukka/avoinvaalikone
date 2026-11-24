@@ -67,7 +67,7 @@ describe("docs/scaling.md manual deploy", () => {
       const r = spawnSync("bash", [], {
         input: manualBlock(),
         cwd: dir,
-        env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
+        env: { ...process.env, LC_ALL: "C", PATH: `${dir}:${process.env.PATH}` },
         encoding: "utf8",
       });
       expect(r.stderr).toBe("");
@@ -135,7 +135,7 @@ describe.each([
       .replace(/\s*(\|\||&&)\s*$/, "");
     const res = spawnSync("bash", ["-c", local], {
       cwd: path.join(dir, from),
-      env: { ...process.env, DEST: path.join(dir, "server") },
+      env: { ...process.env, LC_ALL: "C", DEST: path.join(dir, "server") },
       encoding: "utf8",
     });
     expect(res.stderr).toBe("");
