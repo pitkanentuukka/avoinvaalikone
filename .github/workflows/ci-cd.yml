@@ -147,7 +147,9 @@ jobs:
       # predecessor lost contact with, say) by taking deploy.sh's lock on the
       # tree (#205). The server-side rsync is time-limited: one whose client
       # is gone holds the lock until it ends, and only sshd would notice,
-      # after about 15 minutes. The lock wait outlasts that limit. A wait
+      # after about 15 minutes (-k: rsync can block in its SIGTERM handler).
+      # The lock wait outlasts that limit. The lock covers this step and the
+      # next one separately: a manual rsync can get in between. A wait
       # says so on stderr (not flock --verbose: it writes to stdout, which is
       # rsync's protocol stream), and one that runs out leaves only rsync's
       # "connection unexpectedly closed", hence the hint. mkdir: flock would
@@ -160,7 +162,7 @@ jobs:
         run: |
           rsync -az --delete \
             -e "ssh -i ~/.ssh/deploy_key" \
-            --rsync-path="mkdir -p /opt/vaalikone && { flock -n /opt/vaalikone true || echo 'Waiting for another deploy to finish' >&2; } && flock -w 600 /opt/vaalikone timeout 300 rsync" \
+            --rsync-path="mkdir -p /opt/vaalikone && { flock -n /opt/vaalikone true || echo 'Waiting for another deploy to finish' >&2; } && flock -w 600 /opt/vaalikone timeout -k 10 300 rsync" \
             --filter=':-s .gitignore' \
             --exclude='node_modules' \
             --exclude='.git' \

@@ -23,7 +23,6 @@ find "$logs" -name 'deploy-*.log' -mtime +30 -delete 2>/dev/null || true
 log="$logs/deploy-$(date -u +%Y%m%dT%H%M%SZ)-$$.log"
 # Before tail opens it: tail -f gives up on a file that doesn't exist yet.
 : >"$log"
-echo "Deploy log on the server: $log"
 
 # Its output goes only to the log, never to this session's pipes: they close
 # with the connection, and the next write would kill it with SIGPIPE
@@ -42,6 +41,8 @@ setsid -w nohup sh -c '
 ' sh "$here/deploy.sh" >"$log" 2>&1 </dev/null &
 pid=$!
 
+# Only now: if the connection is already gone, this write ends the script.
+echo "Deploy log on the server: $log"
 # --pid: stop following once the deploy has ended (after printing the rest).
 tail -n +1 -f --pid="$pid" "$log" || true
 status=0
