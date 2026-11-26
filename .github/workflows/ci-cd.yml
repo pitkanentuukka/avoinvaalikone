@@ -116,18 +116,30 @@ jobs:
     needs: [lint-and-unit, e2e-api]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
+    # Later deploys queue behind this job, so it must never wait out GitHub's
+    # 6-hour limit (#178). A deploy takes about a minute; 30 leaves room for a
+    # build with a cold cache.
+    timeout-minutes: 30
     concurrency:
       group: deploy-production
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v5
 
+      # The ssh options (also used by rsync) give up on a server that stops
+      # answering, rather than leaving the job to its timeout (#178).
       - name: Set up SSH
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -H 80.69.172.220 >> ~/.ssh/known_hosts
+          cat >> ~/.ssh/config <<'SSH_CONFIG'
+          Host 80.69.172.220
+            ConnectTimeout 10
+            ServerAliveInterval 15
+            ServerAliveCountMax 4
+          SSH_CONFIG
 
       - name: Rsync to server
         run: |
@@ -148,10 +160,14 @@ jobs:
         run: |
           ssh -i ~/.ssh/deploy_key root@80.69.172.220 "sh /opt/vaalikone/scripts/deploy.sh"
 
+      # Each try and the step itself are time-limited: later deploys queue
+      # behind this job, so a connection that never answers must not hold it
+      # until GitHub's 6-hour limit (#178).
       - name: Verify deployment
+        timeout-minutes: 5
         run: |
           for i in {1..15}; do
-            if curl -sf https://avoinvaalikone.fi/api/health; then
+            if curl -sSf --connect-timeout 5 --max-time 10 https://avoinvaalikone.fi/api/health; then
               echo "✓ Deployment verified"
               exit 0
             fi
@@ -163,8 +179,14 @@ jobs:
       # The Cloudflare Cache Rule is manual dashboard state; if it vanishes,
       # origin load multiplies silently. Warn (don't fail the deploy) so the
       # site stays up while someone recreates the rule per docs/scaling.md.
+      # The script time-limits each request (#178); `timeout` is a backstop
+      # that still ends in the warning, and timeout-minutes one for the step
+      # itself, with continue-on-error so hitting it doesn't fail the deploy
+      # either (the step shows as failed, the job stays green).
       - name: Verify edge cache
+        timeout-minutes: 2
+        continue-on-error: true
         run: |
-          if ! bash scripts/verify-edge-cache.sh avoinvaalikone.fi; then
+          if ! timeout 90 bash scripts/verify-edge-cache.sh avoinvaalikone.fi; then
             echo "::warning::Cloudflare edge cache check failed — see this step's log and the Cache Rule in docs/scaling.md"
           fi
