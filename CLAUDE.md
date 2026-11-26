@@ -105,6 +105,14 @@ Copy [`.env.example`](.env.example) to `.env` for the configuration reference: s
 - API behaviour that only direct API clients can hit (the frontend never triggers it) is documented in `docs/direct-api-caveats.md` rather than fixed for now; add new cases there
 - The migration runner wraps each SQL file and its `migration_history` insert in one transaction. SQL files must not contain transaction control or commands such as `CREATE INDEX CONCURRENTLY` that cannot run in a transaction. New migrations should follow the versioned pattern and update `schema_migrations`
 
+## Production Data
+
+Since 2026-11-26 avoinvaalikone.fi is in real use: the demo data has been removed and organisations are submitting real question sets. Treat the production database as irreplaceable.
+
+- Never run anything that writes to or deletes from production (SQL, admin API calls, migrations, restores, `scripts/backup` restores, load tests against the live site) without the user's explicit go for that specific action. Develop and test against the local Compose stack.
+- Load tests (`scripts/loadtest/`) must not target avoinvaalikone.fi: they would create fake voter answers in the real data bank.
+- Don't copy organisations' question sets, candidate answers or voter data into issues, PR descriptions, commit messages or personal notes. Refer to them by count or ID.
+
 ## Issue Workflow
 
 Bugs and tasks are tracked as GitHub issues (`pitkanentuukka/avoinvaalikone`). When working on an issue:
@@ -126,4 +134,5 @@ Bugs and tasks are tracked as GitHub issues (`pitkanentuukka/avoinvaalikone`). W
 6. Mark the PR ready for review and summarise what was fixed in each round.
    List the collected pre-existing bugs and ask the user which ones to file as issues.
    When describing bugs, include 1. steps to reproduce 2. expected behaviour and 3. actual behaviour. Include these in the filed issue too.
+   When filing issues, always check if they have been filed already. Do not create duplicates.
    The user reviews and merges.
