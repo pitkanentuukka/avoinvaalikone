@@ -168,7 +168,7 @@ hostname every 10 seconds. Without this, nginx pins the IPs at startup and
 ## Deployment steps
 
 These steps apply on first deploy after the scaling work. Subsequent deploys
-via CI/CD (rsync + `scripts/deploy.sh`, the same script as a manual deploy
+via CI/CD (rsync + `scripts/deploy-detached.sh`, the same as a manual deploy
 below) are automatic.
 
 ### 1. Deploy the code
@@ -176,11 +176,26 @@ below) are automatic.
 CI/CD handles this on push to `main`. If deploying manually:
 
 ```bash
-rsync -avz --exclude='.git' --exclude='node_modules' --exclude='.env' \
-  ./ user@80.69.172.220:/opt/vaalikone/
-# Builds and restarts; also restarts caddy if the Caddyfile changed, which
-# `up -d` alone doesn't pick up.
-ssh user@80.69.172.220 "sh /opt/vaalikone/scripts/deploy.sh"
+# The same rsync as CI's "Rsync to server" step (.github/workflows/ci-cd.yml;
+# tests/unit/manualDeployDoc.test.js keeps them in step). The filter keeps
+# files that .gitignore lists off the server. Any other untracked file is
+# uploaded, including one ignored by .git/info/exclude or your global ignore
+# file, so check `git status --ignored` first, and keep SSH keys outside the
+# checkout. --delete removes whatever else is in the server's tree, except
+# what is excluded by name. --rsync-path takes the deploy lock: waits for a
+# deploy still running there.
+rsync -avz --delete \
+  --filter=':-s .gitignore' \
+  --exclude='node_modules' --exclude='.git' --exclude='.github' \
+  --exclude='.env' --exclude='test-results' --exclude='.claude' \
+  --rsync-path="mkdir -p /opt/vaalikone && { flock -n /opt/vaalikone true || echo 'Waiting for another deploy to finish' >&2; } && flock -w 600 /opt/vaalikone timeout -k 10 300 rsync" \
+  ./ user@80.69.172.220:/opt/vaalikone/ &&
+# Only after a complete rsync: builds and restarts; also restarts caddy if the
+# Caddyfile changed, which `up -d` alone doesn't pick up. Runs detached on the
+# server, so a dropped connection doesn't cut it short; the log is in
+# /var/log/vaalikone-deploy/ (as root; another user's is in
+# ~/.local/state/vaalikone-deploy/).
+ssh user@80.69.172.220 "sh /opt/vaalikone/scripts/deploy-detached.sh"
 ```
 
 ### 2. Verify replicas are up

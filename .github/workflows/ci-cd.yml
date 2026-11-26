@@ -118,7 +118,9 @@ jobs:
     runs-on: ubuntu-latest
     # Later deploys queue behind this job, so it must never wait out GitHub's
     # 6-hour limit (#178). A deploy takes about a minute; 30 leaves room for a
-    # build with a cold cache.
+    # build with a cold cache. Not always for one that first waits (up to 10
+    # minutes) for a lost deploy to finish (#205); hitting the limit then
+    # only fails the job, as the deploy carries on detached on the server.
     timeout-minutes: 30
     concurrency:
       group: deploy-production
@@ -141,24 +143,42 @@ jobs:
             ServerAliveCountMax 4
           SSH_CONFIG
 
+      # Waits for a deploy still running on the server (one this job's
+      # predecessor lost contact with, say) by taking deploy.sh's lock on the
+      # tree (#205). The server-side rsync is time-limited: one whose client
+      # is gone holds the lock until it ends, and only sshd would notice,
+      # after about 15 minutes (-k: rsync can block in its SIGTERM handler).
+      # The lock wait outlasts that limit. The lock covers this step and the
+      # next one separately: a manual rsync can get in between. A wait
+      # says so on stderr (not flock --verbose: it writes to stdout, which is
+      # rsync's protocol stream), and one that runs out leaves only rsync's
+      # "connection unexpectedly closed", hence the hint. mkdir: flock would
+      # create a missing tree as a file. docs/scaling.md's manual deploy
+      # repeats this command (tests/unit/manualDeployDoc.test.js). The filter
+      # is for it: a working checkout, unlike CI's, has files git ignores.
+      # `s`: sender side only, so --delete still removes such files from the
+      # server, except those excluded by name, such as its .env.
       - name: Rsync to server
         run: |
           rsync -az --delete \
             -e "ssh -i ~/.ssh/deploy_key" \
+            --rsync-path="mkdir -p /opt/vaalikone && { flock -n /opt/vaalikone true || echo 'Waiting for another deploy to finish' >&2; } && flock -w 600 /opt/vaalikone timeout -k 10 300 rsync" \
+            --filter=':-s .gitignore' \
             --exclude='node_modules' \
             --exclude='.git' \
             --exclude='.github' \
             --exclude='.env' \
             --exclude='test-results' \
-            --exclude='laptop*' \
-            --exclude='upcloud*' \
             --exclude='.claude' \
-            ./ root@80.69.172.220:/opt/vaalikone/
+            ./ root@80.69.172.220:/opt/vaalikone/ ||
+            { echo "::error::rsync failed. If it was waiting for another deploy, that one still holds the lock: see docs/runbook.md"; exit 1; }
 
-      # Also restarts caddy when the Caddyfile changed (see the script).
+      # Also restarts caddy when the Caddyfile changed (see deploy.sh). The
+      # deploy runs detached on the server and this follows its log (#205):
+      # losing the connection fails this step, but not the deploy.
       - name: Build & restart services
         run: |
-          ssh -i ~/.ssh/deploy_key root@80.69.172.220 "sh /opt/vaalikone/scripts/deploy.sh"
+          ssh -i ~/.ssh/deploy_key root@80.69.172.220 "sh /opt/vaalikone/scripts/deploy-detached.sh"
 
       # Each try and the step itself are time-limited: later deploys queue
       # behind this job, so a connection that never answers must not hold it
