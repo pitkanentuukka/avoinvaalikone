@@ -111,7 +111,7 @@ Since 2026-11-26 avoinvaalikone.fi is in real use: the demo data has been remove
 
 - Never run anything that writes to or deletes from production (SQL, admin API calls, migrations, restores, `scripts/backup` restores, load tests against the live site) without the user's explicit go for that specific action. Develop and test against the local Compose stack.
 - Load tests (`scripts/loadtest/`) must not target avoinvaalikone.fi: they would create fake voter answers in the real data bank.
-- Don't copy organisations' question sets, candidate answers or voter data into issues, PR descriptions, commit messages or the Obsidian vault. Refer to them by count or ID.
+- Don't copy organisations' question sets, candidate answers or voter data into issues, PR descriptions, commit messages or personal notes. Refer to them by count or ID.
 
 ## Issue Workflow
 
@@ -136,17 +136,3 @@ Bugs and tasks are tracked as GitHub issues (`pitkanentuukka/avoinvaalikone`). W
    When describing bugs, include 1. steps to reproduce 2. expected behaviour and 3. actual behaviour. Include these in the filed issue too.
    When filing issues, always check if they have been filed already. Do not create duplicates.
    The user reviews and merges.
-
-## Project Notes in the Obsidian Vault
-
-The project's status lives in the user's Obsidian vault, not only in GitHub. Its conventions are in `~/Documents/Obsidian Vault/CLAUDE.md` (Finnish text, one-line log entries, a single-sentence `## Next action`, a session link on every edit).
-
-At the end of any session that changed the project's state, update the vault before finishing:
-
-- `~/Documents/Obsidian Vault/Projects/active/avoin-vaalikone/workstreams/tekninen.md`: technical work. Rewrite `## Next action`, add a `## Loki` line (`- YYYY-MM-DD: …`, mention PR/issue numbers), update the status line if it changed.
-- `~/Documents/Obsidian Vault/Projects/active/avoin-vaalikone/index.md`: update `last-touched`, add a one-line `## Loki` entry pointing to the workstream (`Ks. [[workstreams/tekninen]].`), and rewrite its `## Next action` if the project's most important next step changed.
-- Production milestones that matter outside the code, such as the first real question sets, an organisation's set approved, or a deploy that changes what voters or organisations see, also go to `workstreams/jarjestot.md` or `workstreams/moderointi.md`, by organisation name or count only (see Production Data).
-
-"State changed" means: a PR opened, merged or closed; an issue filed or closed; a deploy; a production configuration change; a decision about the platform. Pure local exploration doesn't need an update.
-
-Add the session link as `**CC-sessiot:** [Session: short description](claude-session://SESSION_ID)` at the end of the Loki line. Get the ID with `ls -lt ~/.claude/projects/-home-tuukka-vaalikone/*.jsonl | head -1 | grep -oP '[0-9a-f-]{36}'`.
