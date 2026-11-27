@@ -21,11 +21,16 @@ function hostKeyLine(dir, name, host = SERVER) {
 // `vars` gives the values of the step's `${{ vars.X }}` and `${{ secrets.X }}`
 // expressions, by name; others are blank. `ssh-keyscan` is stubbed to answer
 // with `scanned` (the key whoever answers at that address presents), and
-// records that it ran.
-function runSetupSsh({ vars = {}, scanned = "" } = {}) {
+// records that it ran. `sshConfig` is a ~/.ssh/config already there, as on a
+// runner where an earlier step or action wrote one.
+function runSetupSsh({ vars = {}, scanned = "", sshConfig } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "deploy-ssh-"));
   const bin = path.join(dir, "bin");
   fs.mkdirSync(bin);
+  if (sshConfig !== undefined) {
+    fs.mkdirSync(path.join(dir, ".ssh"));
+    fs.writeFileSync(path.join(dir, ".ssh/config"), sshConfig);
+  }
   const scanLog = path.join(dir, "keyscan-ran");
   fs.writeFileSync(
     path.join(bin, "ssh-keyscan"),

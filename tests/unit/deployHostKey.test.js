@@ -1,6 +1,7 @@
 // The deploy job must check the server's SSH host key against a pinned one,
 // not trust whatever answers at its address (issue #206): rsync sends the
 // whole tree to that host, and the next step runs deploy.sh there as root.
+const { spawnSync } = require("child_process");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -43,10 +44,29 @@ describe("Set up SSH", () => {
       expect(h.result.status).toBe(0);
       const options = sshOptions(h);
       expect(options.stricthostkeychecking).toBe("true");
-      // A key that is not in the file, or a changed one, must not slip through
-      // a fallback that skips the check.
-      expect(options.updatehostkeys).toBe("false");
-      expect(options.verifyhostkeydns).toBe("false");
+      // Exactly the pinned file: acceptedHostKeys() skips files that don't
+      // exist, and a system-wide one that is missing here may not be on the
+      // runner.
+      expect(options.userknownhostsfile).toEqual([path.join(h.dir, ".ssh/known_hosts_deploy")]);
+      expect(options.globalknownhostsfile).toEqual(["none"]);
+    } finally {
+      h.cleanup();
+    }
+  });
+
+  // ssh takes each option's first value, so a block already in the config
+  // would win over the one the step adds.
+  test("a ~/.ssh/config already on the runner can't turn the check off", () => {
+    const h = runSetupSsh({
+      vars: { SSH_KNOWN_HOSTS: real },
+      scanned: impostor,
+      sshConfig: "Host *\n  StrictHostKeyChecking no\n  UserKnownHostsFile /dev/null\n",
+    });
+    try {
+      expect(h.result.status).toBe(0);
+      const options = sshOptions(h);
+      expect(options.stricthostkeychecking).toBe("true");
+      expect(options.userknownhostsfile).toEqual([path.join(h.dir, ".ssh/known_hosts_deploy")]);
     } finally {
       h.cleanup();
     }
@@ -78,6 +98,25 @@ describe("Set up SSH", () => {
 
   test("fails, naming the variable, when it has no key for the server", () => {
     expectFailsNamingVariable(hostKeyLine(keys, "other", "192.0.2.1"));
+  });
+
+  // A bad paste names the right host, but ssh could never match its key.
+  test("fails, naming the variable, when its key for the server doesn't parse", () => {
+    expectFailsNamingVariable(`${SERVER} ssh-ed25519 notbase64`);
+  });
+
+  // The runbook compares this with the key on the server.
+  test("logs the pinned key's fingerprint", () => {
+    const h = setupWithImpostor();
+    try {
+      expect(h.result.status).toBe(0);
+      const fingerprint = spawnSync("ssh-keygen", ["-lf", "-"], { input: real, encoding: "utf8" })
+        .stdout.split(" ")[1];
+      expect(fingerprint).toMatch(/^SHA256:/);
+      expect(h.result.stdout).toContain(fingerprint);
+    } finally {
+      h.cleanup();
+    }
   });
 });
 
