@@ -22,8 +22,12 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml stop backend
 
 # 3. Restore (drops and recreates objects inside the existing database).
 #    Use /backups/vaalikone-<stamp>.dump for the local one.
+#    --single-transaction makes it all or nothing: on the first error
+#    pg_restore stops and rolls back, so a truncated or corrupt dump leaves
+#    the database as it was. If it fails, fetch another dump (step 1) and
+#    run this step again with it; the backends stay stopped meanwhile.
 docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backup \
-  sh -c 'pg_restore --clean --if-exists -d "$DATABASE_URL" /backups/restore/vaalikone-<stamp>.dump'
+  sh -c 'pg_restore --clean --if-exists --single-transaction -d "$DATABASE_URL" /backups/restore/vaalikone-<stamp>.dump'
 
 # 4. Restart backends (they re-run migrations idempotently on start)
 docker compose -f docker-compose.yml -f docker-compose.prod.yml start backend
@@ -50,8 +54,8 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backup \
 docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backup \
   sh -c 'rclone copy "upcloud:$BACKUP_BUCKET/postgres/vaalikone-<stamp>.dump" /backups/restore/'
 
-# 2. Restore it into a fresh scratch database, with step 3's flags plus
-#    --exit-on-error so a bad dump stops the drill, then restore it again:
+# 2. Restore it into a fresh scratch database with step 3's flags, so a
+#    dump that step 3 would reject fails here too, then restore it again:
 #    the second pass runs into a populated database, so its --clean drops
 #    run as they do in step 3. The DROP clears a restore_drill left over from
 #    an interrupted drill. ${DATABASE_URL%/*} is the server URL without the
@@ -61,9 +65,9 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backup \
 docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backup \
   sh -c 'psql "$DATABASE_URL" -c "CREATE DATABASE restore_drill"'
 docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backup \
-  sh -c 'pg_restore --clean --if-exists --exit-on-error -d "${DATABASE_URL%/*}/restore_drill" /backups/restore/vaalikone-<stamp>.dump'
+  sh -c 'pg_restore --clean --if-exists --single-transaction -d "${DATABASE_URL%/*}/restore_drill" /backups/restore/vaalikone-<stamp>.dump'
 docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backup \
-  sh -c 'pg_restore --clean --if-exists --exit-on-error -d "${DATABASE_URL%/*}/restore_drill" /backups/restore/vaalikone-<stamp>.dump'
+  sh -c 'pg_restore --clean --if-exists --single-transaction -d "${DATABASE_URL%/*}/restore_drill" /backups/restore/vaalikone-<stamp>.dump'
 
 # 3. Compare with the live database: the counts should match up to the day's
 #    changes since the dump.
