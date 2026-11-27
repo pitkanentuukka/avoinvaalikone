@@ -56,7 +56,7 @@ function smtpSettings() {
     port = Number(portText);
   } else if (portText) {
     port = secureFlag ? IMPLICIT_TLS_PORT : DEFAULT_PORT;
-    problems.push(`SMTP_PORT=${rawPort} ei ole kelvollinen porttinumero, ja se ohitetaan: yhteys avataan porttiin ${port}. Käytä porttia 587 tai 465.`);
+    problems.push(`SMTP_PORT="${rawPort}" ei ole kelvollinen porttinumero, ja se ohitetaan: yhteys avataan porttiin ${port}. Anna portti numerona väliltä 1–65535.`);
   }
 
   const onPort465 = port === IMPLICIT_TLS_PORT;
@@ -112,7 +112,8 @@ function productionSmtpProblems(port) {
   }
   // The parsed port, so " 1025" and "01025" count too (#214).
   if (port === MAILPIT_PORT) {
-    problems.push(`SMTP_PORT=${SMTP_PORT} on kehitysympäristön (mailpit) portti 1025: palveluntarjoajat käyttävät porttia 587 tai 465.`);
+    const shown = SMTP_PORT === "1025" ? "SMTP_PORT=1025" : `SMTP_PORT="${SMTP_PORT}" (portti 1025)`;
+    problems.push(`${shown} on kehitysympäristön (mailpit) portti: palveluntarjoajat käyttävät porttia 587 tai 465.`);
   }
   if (!SMTP_FROM) {
     problems.push("SMTP_FROM ei ole asetettu: lähettäjäksi tulee noreply@example.com, jonka vastaanottajat hylkäävät.");

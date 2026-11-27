@@ -272,9 +272,13 @@ email, so production can't run without a working SMTP provider.
   Otherwise receivers reject the mail or file it as spam.
 - At startup each backend replica logs `SMTP-yhteys toimii: <host>:<port>`,
   or `SMTP-tarkistus epäonnistui (<host>:<port>) …` with the error, which also
-  goes to Sentry. In production it also warns, to the log and Sentry, about
+  goes to Sentry. `<port>` is the port actually dialled. An `SMTP_PORT` that
+  isn't a number in 1–65535 (`abc`, `58 7`) is ignored with a warning, in any
+  environment, and the default is dialled instead: 465 with `SMTP_SECURE=true`,
+  otherwise 587. In production it also warns, to the log and Sentry, about
   settings that pass the compose checks but can't work: dev values copied from
-  `.env.example` (`SMTP_HOST` `localhost`/`mailpit`, `SMTP_PORT=1025`, an
+  `.env.example` (`SMTP_HOST` `localhost`/`mailpit`, `SMTP_PORT` 1025, also
+  written ` 1025` or `01025`, an
   `@example.com` sender or `ADMIN_EMAIL`) and a missing `SMTP_USER` (the check can't log in
   without credentials, so it would pass against a provider that requires them). Every send is recorded in
   `email_log` (`sent` / `failed` with the error).

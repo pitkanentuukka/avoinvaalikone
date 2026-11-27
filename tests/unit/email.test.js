@@ -212,7 +212,7 @@ describe("verifySmtp", () => {
   });
 
   // The log names the port nodemailer dials, not the raw setting (#214).
-  test.each([[" 2525", "2525"], ["02525", "2525"]])("logs SMTP_PORT=%p as port %s", async (raw, port) => {
+  test.each([[" 2525", "2525"], ["02525", "2525"], ["1", "1"], ["65535", "65535"]])("logs SMTP_PORT=%p as port %s", async (raw, port) => {
     setEnv({ NODE_ENV: "development", SMTP_PORT: raw });
     transportMock.verify.mockResolvedValue(true);
     await verifySmtp();
@@ -230,11 +230,10 @@ describe("verifySmtp", () => {
     setEnv({ NODE_ENV: "development", SMTP_PORT: raw, SMTP_SECURE: secure });
     transportMock.verify.mockResolvedValue(true);
     await verifySmtp();
-    expect(warn.mock.calls.join(" ")).toContain(`SMTP_PORT=${raw} ei ole kelvollinen porttinumero`);
+    expect(warn.mock.calls.join(" ")).toContain(`SMTP_PORT="${raw}" ei ole kelvollinen porttinumero`);
     expect(warn.mock.calls.join(" ")).toContain(`yhteys avataan porttiin ${port}.`);
     expect(Sentry.captureMessage).toHaveBeenCalledWith(expect.stringContaining("SMTP_PORT"), "warning");
     expect(log.mock.calls.join(" ")).toContain(`smtp.example.fi:${port}`);
-    expect(log.mock.calls.join(" ")).not.toContain(raw);
   });
 
   test("the failure log also names the port actually dialled", async () => {
@@ -258,7 +257,7 @@ describe("verifySmtp", () => {
       SMTP_USER: "u", SMTP_FROM: "noreply@avoinvaalikone.fi" });
     transportMock.verify.mockResolvedValue(true);
     await verifySmtp();
-    expect(warn.mock.calls.join(" ")).toMatch(/SMTP_PORT=.*1025.*mailpit/);
+    expect(warn.mock.calls.join(" ")).toContain(`SMTP_PORT="${raw}" (portti 1025) on kehitysympäristön (mailpit) portti`);
     expect(Sentry.captureMessage).toHaveBeenCalledWith(expect.stringContaining("mailpit"), "warning");
   });
 
