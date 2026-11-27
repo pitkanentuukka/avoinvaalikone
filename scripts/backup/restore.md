@@ -4,7 +4,11 @@ Dumps are `pg_dump -Fc` custom-format archives named `vaalikone-<UTC stamp>.dump
 The newest one is always in the `backup_data` volume (`/backups` inside the
 backup container); older ones live in the object-storage bucket under `postgres/`.
 
-Keep the restore clear of 03:00 UTC: the restore and the nightly backup wait on each other's locks, so either the restore stalls until the dump is done or the dump fails and that night has no backup.
+Keep the restore clear of 03:00 UTC: a nightly backup that starts during it may
+wait for it and then save a dump with empty tables, which replaces the local dump
+and is uploaded. After the restore, check the 03:00 backup log
+(`docker compose -f docker-compose.yml -f docker-compose.prod.yml logs backup`), or
+run backup.sh by hand (`docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backup backup.sh`).
 
 ```bash
 # BACKUP_BUCKET and DATABASE_URL are set only inside the backup container, so
@@ -24,13 +28,21 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml stop backend
 #    Use /backups/vaalikone-<stamp>.dump for the local one.
 #    --single-transaction makes it all or nothing: on the first error
 #    pg_restore stops and rolls back, and the database is left as it was.
-#    If it fails, read the first error before trying again:
-#    - The dump is unreadable or truncated ("could not read input file",
-#      "unexpected end of file"): fetch another dump (step 1) and repeat
-#      this step with it.
-#    - Anything else (a mistyped <stamp>, a full disk, or "other objects
-#      depend on it" from a table added by a migration newer than the dump)
-#      fails the same way with every dump, so trying older ones won't help.
+#    Until it commits, the old tables' files stay on disk next to the new
+#    ones, so it needs free space for a second copy of the data.
+#    If it fails, read the first "pg_restore: error:" line:
+#    - The dump is truncated or corrupt ("could not read from input file",
+#      "could not uncompress data", "possibly corrupt archive", "does not
+#      appear to be a valid archive"): fetch another dump (step 1) and
+#      repeat this step with it.
+#    - "could not open input file": the path or <stamp> is wrong; fix it
+#      and repeat.
+#    - "deadlock detected": the nightly backup was running; repeat once it
+#      has finished.
+#    - "No space left on device": free disk space (above) and repeat.
+#    - "other objects depend on it": a migration newer than the dump added
+#      a table that references the dumped ones. Every older dump fails the
+#      same way, so trying another won't help.
 #    To give up, go on to step 4: the backends restart on the unchanged data.
 docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backup \
   sh -c 'pg_restore --clean --if-exists --single-transaction -d "$DATABASE_URL" /backups/restore/vaalikone-<stamp>.dump'
