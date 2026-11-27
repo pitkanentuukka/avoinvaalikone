@@ -24,8 +24,8 @@ describe("deploy job", () => {
     expect(job["timeout-minutes"] - used).toBeGreaterThanOrEqual(20);
   });
 
-  // Runs the step's script with a throwaway HOME (ssh-keyscan stubbed, the
-  // secret replaced) and asks ssh which options it would use for the server.
+  // Runs the step's script with a throwaway HOME (ssh-keyscan stubbed, a fake
+  // key in the step's env) and asks ssh which options it would use for the server.
   // rsync's `-e ssh` reads the same config.
   test("ssh gives up on a server that stops answering", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "deploy-ssh-"));
@@ -33,8 +33,13 @@ describe("deploy job", () => {
       const bin = path.join(dir, "bin");
       fs.mkdirSync(bin);
       fs.writeFileSync(path.join(bin, "ssh-keyscan"), "#!/bin/sh\necho keyscan-stub\n", { mode: 0o755 });
-      const script = deployStep("Set up SSH").run.replace(/\$\{\{[^}]*\}\}/g, "not-a-key");
-      const env = { ...process.env, HOME: dir, PATH: `${bin}:${process.env.PATH}` };
+      const script = deployStep("Set up SSH").run;
+      const env = {
+        ...process.env,
+        SSH_PRIVATE_KEY: "not-a-key",
+        HOME: dir,
+        PATH: `${bin}:${process.env.PATH}`,
+      };
       const setup = spawnSync("bash", ["-e", "-c", script], { env, encoding: "utf8" });
       expect(setup.stderr).toBe("");
       expect(setup.status).toBe(0);

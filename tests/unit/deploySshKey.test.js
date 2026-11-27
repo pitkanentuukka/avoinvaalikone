@@ -3,12 +3,13 @@
 // script text before bash runs it, so a secret written there becomes code:
 // a `"`, `$(…)` or backtick in it would change the file or run as a command.
 // The secret must reach the script through the environment, and the file
-// must never be readable by others, even before its chmod.
+// must never be readable by others, even for a moment.
 const { spawnSync } = require("child_process");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const { workflow, step } = require("../helpers/workflow");
+const yaml = require("js-yaml");
+const { step } = require("../helpers/workflow");
 
 // What GitHub does with `${{ secrets.X }}` and `${{ vars.X }}` in a step's
 // run and env: textual substitution, before the shell sees anything.
@@ -47,7 +48,7 @@ afterEach(() => {
 });
 
 describe("Set up SSH writes the deploy key", () => {
-  test("byte for byte, without running any of it", () => {
+  test("as the secret plus a newline, without running any of it", () => {
     // Not a real key: one a mangled paste could produce.
     const secret = [
       "-----BEGIN OPENSSH PRIVATE KEY-----",
@@ -71,6 +72,7 @@ describe("Set up SSH writes the deploy key", () => {
     cleanups.push(keyDir);
     const key = path.join(keyDir, "id");
     const gen = spawnSync("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-C", "", "-f", key]);
+    expect(gen.error).toBeUndefined(); // ssh-keygen is installed
     expect(gen.status).toBe(0);
     // GitHub keeps a pasted secret's text; the editor may drop the last newline.
     const secret = fs.readFileSync(key, "utf8").replace(/\n$/, "");
@@ -86,23 +88,31 @@ describe("Set up SSH writes the deploy key", () => {
   });
 
   test("into a file only its owner can ever read", () => {
-    // Before every command, record the key file's mode if it exists.
+    // Before every command, record the key file's mode if it exists (ls,
+    // not stat: stat's flags differ between GNU and BSD).
     const prelude =
-      `trap '[ -e "$HOME/.ssh/deploy_key" ] && stat -c %a "$HOME/.ssh/deploy_key" >> "$HOME/modes" || true' DEBUG\n`;
+      `: > "$HOME/modes"\n` +
+      `trap '[ -e "$HOME/.ssh/deploy_key" ] && ls -ln "$HOME/.ssh/deploy_key" | cut -c1-10 >> "$HOME/modes" || true' DEBUG\n`;
     const { dir, result } = runSetup({ SSH_PRIVATE_KEY: "not-a-key" }, { prelude });
     cleanups.push(dir);
     expect(result.status).toBe(0);
-    const modes = fs.readFileSync(path.join(dir, "modes"), "utf8").trim().split("\n");
+    const modes = fs.readFileSync(path.join(dir, "modes"), "utf8").split("\n").filter(Boolean);
     expect(modes.length).toBeGreaterThan(0);
-    expect(new Set(modes)).toEqual(new Set(["600"]));
+    expect(new Set(modes)).toEqual(new Set(["-rw-------"]));
   });
 });
 
-test("no step puts a secret into its script text", () => {
+// Not only secrets: any expression in a script is pasted into code (a
+// branch name, an event's text). Values go through env instead.
+test("no workflow step has an expression in its script text", () => {
+  const dir = path.join(__dirname, "../../.github/workflows");
   const offenders = [];
-  for (const [jobName, job] of Object.entries(workflow().jobs)) {
-    for (const s of job.steps || []) {
-      if (/\$\{\{\s*secrets\./.test(s.run || "")) offenders.push(`${jobName}: ${s.name}`);
+  for (const file of fs.readdirSync(dir).filter((f) => /\.ya?ml$/.test(f))) {
+    const { jobs = {} } = yaml.load(fs.readFileSync(path.join(dir, file), "utf8"));
+    for (const [jobName, job] of Object.entries(jobs)) {
+      for (const s of job.steps || []) {
+        if ((s.run || "").includes("${{")) offenders.push(`${file}: ${jobName}: ${s.name}`);
+      }
     }
   }
   expect(offenders).toEqual([]);
