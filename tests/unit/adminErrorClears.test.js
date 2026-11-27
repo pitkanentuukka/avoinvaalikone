@@ -173,4 +173,39 @@ describe("admin error banner (#212)", () => {
     await click(t.adminRotatePartyToken);
     expect(banner(view())?.message).toBe("Vaihto epäonnistui");
   });
+
+  test("an action finishing doesn't hide an error from one that failed while it ran", async () => {
+    let finishDelete;
+    await login({
+      [`DELETE /api/admin/parties/${PARTY_ID}`]: [
+        () => new Promise((resolve) => { finishDelete = () => resolve(json(204)); }),
+      ],
+      [`POST /api/admin/parties/${PARTY_ID}/token`]: [() => json(500, { error: "Vaihto epäonnistui" })],
+    });
+    const deletion = button(view(), t.adminDelete)();
+    await click(t.adminRotatePartyToken);
+    expect(banner(view())?.message).toBe("Vaihto epäonnistui");
+
+    finishDelete();
+    await deletion;
+    expect(banner(view())?.message).toBe("Vaihto epäonnistui");
+  });
+
+  test("a candidate-link click refused while another is running leaves the error", async () => {
+    let finishLoad;
+    await login({
+      [`GET /api/admin/parties/${PARTY_ID}/candidates`]: [
+        () => new Promise((resolve) => { finishLoad = () => resolve(json(200, [])); }),
+      ],
+      [`POST /api/admin/parties/${PARTY_ID}/token`]: [() => json(500, { error: "Vaihto epäonnistui" })],
+    });
+    await click(t.adminShowCandidates);
+    await click(t.adminRotatePartyToken);
+    expect(banner(view())?.message).toBe("Vaihto epäonnistui");
+
+    await click(t.adminShowCandidates); // refused: the first load is still running
+    expect(banner(view())?.message).toBe("Vaihto epäonnistui");
+    finishLoad();
+    await settle();
+  });
 });

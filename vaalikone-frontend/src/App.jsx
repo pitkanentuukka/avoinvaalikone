@@ -627,15 +627,21 @@ function AdminView() {
     }
   }
 
-  // Also the error banner's retry, so it clears the error it retries.
   async function refresh() {
-    setError(null);
     try {
       setParties(await api.getParties(adminSecret));
       setQuestionSets(await api.getAllQuestionSets(adminSecret));
     } catch (e) {
       setError(e.message);
     }
+  }
+
+  // The error banner's retry clears the error it retries. Not in refresh()
+  // itself: actions call it on success, and there it would hide an error from
+  // another action that failed meanwhile.
+  function retryRefresh() {
+    setError(null);
+    return refresh();
   }
 
   // Every action clears the previous one's error when it starts, so an old
@@ -950,7 +956,7 @@ function AdminView() {
       <h2 style={{ fontSize: "28px", fontWeight: 800, letterSpacing: "-0.02em", marginBottom: "8px" }}>{t.adminPanelTitle}</h2>
       <p style={{ color: palette.textMuted, marginBottom: "16px" }}>{t.adminPanelDesc}</p>
       <MarkdownGuide content={adminGuideContent} label="Ohje kysymysten käsittelyyn" />
-      {error && <ErrorBanner message={error} onRetry={refresh} />}
+      {error && <ErrorBanner message={error} onRetry={retryRefresh} />}
 
       <section style={{ marginBottom: "40px" }}>
         <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px", display: "flex", alignItems: "center", gap: "10px" }}>
