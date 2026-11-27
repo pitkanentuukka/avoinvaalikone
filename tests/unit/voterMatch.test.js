@@ -52,8 +52,8 @@ describe("runMatch", () => {
   });
 
   // The failure step explains itself; only the app's own messages (JSON
-  // `error` on a 4xx, in Finnish) add anything. "Failed to fetch" or
-  // "HTTP 503" would be English noise in the Finnish UI.
+  // `error` on a 4xx, in Finnish) add anything. A network failure or a
+  // response without the app's own message gets only a generic placeholder.
   const htmlResponse = (status) => ({ ok: false, status, json: async () => { throw new SyntaxError("Unexpected token <"); } });
   test.each([
     ["a network error", null, [new TypeError("Failed to fetch"), new TypeError("Failed to fetch")]],

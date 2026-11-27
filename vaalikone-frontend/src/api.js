@@ -1,5 +1,7 @@
 // API client for the backend. Kept free of Vite-only syntax (import.meta.env,
 // ?raw imports) so the unit tests can import it under Node.
+import translations from "./translations.js";
+
 function snakeToCamel(str) {
   return str.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
 }
@@ -50,6 +52,29 @@ export function isTransientError(err) {
   return err?.network === true || (err?.status !== undefined && ![400, 404, 414, 431].includes(err.status));
 }
 
+// The text a view shows for a failed request, in the viewer's language `t`
+// (#211). Only the app's own messages (a JSON `error`, in Finnish) are shown
+// as they are: a network failure's would be the browser's English ("Failed to
+// fetch"), and a response without one has only a placeholder. Errors that
+// didn't come from a response keep their message.
+export function errorText(err, t) {
+  if (err?.network) return t.networkError;
+  if (err?.status !== undefined && !err.serverMessage) return t.requestFailed(err.status);
+  return err?.message;
+}
+
+// The network and placeholder messages, for anything that shows one without
+// errorText, are in Finnish like the rest of the UI.
+const fi = translations.fi;
+
+// The request never got a usable answer: fetch failed or the body couldn't be
+// read. The browser's own error stays as `cause`.
+function networkError(cause) {
+  const err = new Error(fi.networkError, { cause });
+  err.network = true;
+  return err;
+}
+
 // `fetch` and `retryDelayMs` are injectable for the unit tests.
 export function createApi({
   base,
@@ -72,8 +97,7 @@ export function createApi({
         headers,
         body: body ? JSON.stringify(body) : undefined,
       }).catch((err) => {
-        err.network = true;
-        throw err;
+        throw networkError(err);
       });
     let res;
     try {
@@ -87,12 +111,12 @@ export function createApi({
     }
     if (!res.ok) {
       const data = await res.json().catch(() => null);
-      const isObject = data !== null && typeof data === "object";
-      const err = new Error(data?.error || (isObject ? `HTTP ${res.status}` : "Server error"));
-      err.status = res.status;
       // The message is the app's own (a JSON `error`), not a placeholder for
       // a body that wasn't one (a proxy's HTML page, say).
-      err.serverMessage = typeof data?.error === "string" && data.error !== "";
+      const serverMessage = typeof data?.error === "string" && data.error !== "";
+      const err = new Error(serverMessage ? data.error : fi.requestFailed(res.status));
+      err.status = res.status;
+      err.serverMessage = serverMessage;
       throw err;
     }
     if (res.status === 204) return null;
@@ -102,8 +126,7 @@ export function createApi({
     } catch (err) {
       // The connection dropped mid-body, or something in between (a captive
       // portal) answered with a non-JSON page.
-      err.network = true;
-      throw err;
+      throw networkError(err);
     }
     return toCamel(data);
   }

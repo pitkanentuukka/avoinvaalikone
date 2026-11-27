@@ -1,8 +1,9 @@
 // The frontend is an ES module package, so it is loaded with import() (npm test
 // runs Jest with --experimental-vm-modules for this).
-let createApi, isTransientError;
+let createApi, isTransientError, errorText, translations;
 beforeAll(async () => {
-  ({ createApi, isTransientError } = await import("../../vaalikone-frontend/src/api.js"));
+  ({ createApi, isTransientError, errorText } = await import("../../vaalikone-frontend/src/api.js"));
+  ({ default: translations } = await import("../../vaalikone-frontend/src/translations.js"));
 });
 
 function jsonResponse(status, data) {
@@ -55,13 +56,13 @@ describe("apiFetch retries", () => {
 
   test("GET makes at most two attempts when the retry also fails with a network error", async () => {
     const { api, fetch } = apiWith(networkError(), networkError(), jsonResponse(200, []));
-    await expect(api.getCandidates()).rejects.toThrow("Failed to fetch");
+    await expect(api.getCandidates()).rejects.toMatchObject({ network: true });
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
   test("GET makes at most two attempts when the first fails with a status and the retry with a network error", async () => {
     const { api, fetch } = apiWith(jsonResponse(504, {}), networkError(), jsonResponse(200, []));
-    await expect(api.getCandidates()).rejects.toThrow("Failed to fetch");
+    await expect(api.getCandidates()).rejects.toMatchObject({ network: true });
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
@@ -81,14 +82,97 @@ describe("apiFetch retries", () => {
     ["deleting a party", (api) => api.deleteParty("secret", "id")],
   ])("%s is not retried on a transient upstream error", async (_, call) => {
     const { api, fetch } = apiWith(jsonResponse(504, {}), jsonResponse(200, {}));
-    await expect(call(api)).rejects.toThrow("HTTP 504");
+    await expect(call(api)).rejects.toMatchObject({ status: 504 });
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
   test("a POST is not retried on a network error", async () => {
     const { api, fetch } = apiWith(networkError(), jsonResponse(201, {}));
-    await expect(api.submitQuestionSet({ title: "T" })).rejects.toThrow("Failed to fetch");
+    await expect(api.submitQuestionSet({ title: "T" })).rejects.toMatchObject({ network: true });
     expect(fetch).toHaveBeenCalledTimes(1);
+  });
+});
+
+// #211: the browser's own text ("Failed to fetch", "NetworkError when
+// attempting to fetch resource.", a JSON parse error) is English in a Finnish
+// UI, and the views show the error's message as is.
+describe("network failure messages", () => {
+  const FI = "Yhteys palvelimeen epäonnistui. Tarkista verkkoyhteys ja yritä uudelleen.";
+  const unreadable = (status) => ({ ok: true, status, json: async () => { throw new SyntaxError("Unexpected token '<'"); } });
+
+  test.each([
+    ["a GET whose retry fails too", (api) => api.getCandidates(), [networkError(), networkError()]],
+    ["a POST, which isn't retried", (api) => api.sendCandidateLink("t", "c1"), [networkError()]],
+    ["a retryable POST whose retry fails too", (api) => api.voterMatch({}, { sessionId: "s" }), [networkError(), networkError()]],
+    ["a 200 whose body can't be read", (api) => api.getOwnProfile("t"), [unreadable(200)]],
+  ])("%s gets a Finnish message", async (_, call, outcomes) => {
+    const { api } = apiWith(...outcomes);
+    const err = await call(api).catch((e) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).toBe(FI);
+    expect(err.network).toBe(true);
+    expect(isTransientError(err)).toBe(true);
+  });
+
+  test("keeps the browser's error as the cause", async () => {
+    const original = networkError();
+    const { api } = apiWith(original);
+    const err = await api.register("t", {}).catch((e) => e);
+    expect(err.cause).toBe(original);
+  });
+
+  test("keeps the body's parse error as the cause", async () => {
+    const original = new SyntaxError("Unexpected token '<'");
+    const { api } = apiWith({ ok: true, status: 200, json: async () => { throw original; } });
+    const err = await api.getOwnProfile("t").catch((e) => e);
+    expect(err.cause).toBe(original);
+  });
+});
+
+// #211: the views show errorText(e, t), the text in the viewer's language.
+describe("errorText", () => {
+  const status = (s, message, serverMessage) => Object.assign(new Error(message), { status: s, serverMessage });
+
+  test.each(["fi", "en"])("a network failure gets the %s connection message", async (lang) => {
+    const { api } = apiWith(networkError());
+    const err = await api.register("t", {}).catch((e) => e);
+    expect(errorText(err, translations[lang])).toBe(translations[lang].networkError);
+  });
+
+  test("the English connection message is English", () => {
+    expect(translations.en.networkError).toBe("Could not connect to the server. Check your network connection and try again.");
+  });
+
+  test.each(["fi", "en"])("a response without the app's own message gets the %s placeholder with its status", (lang) => {
+    expect(errorText(status(502, "whatever", false), translations[lang])).toBe(translations[lang].requestFailed(502));
+    expect(translations[lang].requestFailed(502)).toContain("HTTP 502");
+  });
+
+  test.each([
+    [502, true], [503, true], [500, true], [429, true],
+    [403, false], [413, false], [400, false],
+  ])("the placeholder for %i advises a retry: %p", (s, retry) => {
+    expect(translations.fi.requestFailed(s).endsWith(" Yritä hetken kuluttua uudelleen.")).toBe(retry);
+    expect(translations.en.requestFailed(s).endsWith(" Please try again shortly.")).toBe(retry);
+  });
+
+  test("the app's own message is shown as it is", () => {
+    expect(errorText(status(429, "Liian monta pyyntöä.", true), translations.en)).toBe("Liian monta pyyntöä.");
+  });
+
+  test("an error that didn't come from a response keeps its message", () => {
+    expect(errorText(new Error("Virheellinen linkki"), translations.en)).toBe("Virheellinen linkki");
+  });
+
+  // Every view shows errors through errorText, so none shows a placeholder
+  // or the browser's text as is.
+  test("App.jsx shows no error's message directly", () => {
+    const fs = require("fs");
+    const path = require("path");
+    const source = fs.readFileSync(path.join(__dirname, "../../vaalikone-frontend/src/App.jsx"), "utf8");
+    expect(source).not.toMatch(/\.message\b/);
+    // Nor the error itself, stringified or interpolated.
+    expect(source).not.toMatch(/setError\(\s*(?:(?:e|err|error)\s*\)|String\(|`)/);
   });
 });
 
@@ -118,11 +202,14 @@ describe("saveOwnProfile", () => {
 
 describe("error messages", () => {
   const htmlResponse = (status) => ({ ok: false, status, json: async () => { throw new SyntaxError("Unexpected token <"); } });
+  const failed = (status) => `Palvelin ei pystynyt käsittelemään pyyntöä (HTTP ${status}).`;
+  // Without the app's own message the error gets a Finnish placeholder, not
+  // "Server error" or "HTTP 413" (#211).
   test.each([
-    ["an HTML body", htmlResponse(403), "Server error", false],
-    ["a JSON body without error", jsonResponse(413, { message: "too large" }), "HTTP 413", false],
-    ["a JSON null body", jsonResponse(400, null), "Server error", false],
-    ["an empty JSON error", jsonResponse(400, { error: "" }), "HTTP 400", false],
+    ["an HTML body", htmlResponse(403), failed(403), false],
+    ["a JSON body without error", jsonResponse(413, { message: "too large" }), failed(413), false],
+    ["a JSON null body", jsonResponse(400, null), failed(400), false],
+    ["an empty JSON error", jsonResponse(400, { error: "" }), failed(400), false],
     ["the app's JSON error", jsonResponse(429, { error: "Liian monta pyyntöä." }), "Liian monta pyyntöä.", true],
   ])("%s gives the message %p (serverMessage %p)", async (_what, response, message, serverMessage) => {
     const { api } = apiWith(response);
@@ -159,7 +246,7 @@ describe("voterMatch", () => {
     Object.defineProperty(globalThis, "crypto", { value: {}, configurable: true });
     try {
       const { api, fetch } = apiWith(jsonResponse(502, {}), jsonResponse(200, { results: [] }));
-      await expect(api.voterMatch({ answers: { q: 2 } })).rejects.toThrow("HTTP 502");
+      await expect(api.voterMatch({ answers: { q: 2 } })).rejects.toMatchObject({ status: 502 });
       expect(fetch).toHaveBeenCalledTimes(1);
       expect(sentBody(fetch, 0)).not.toHaveProperty("sessionId");
     } finally {

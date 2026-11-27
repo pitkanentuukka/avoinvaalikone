@@ -93,16 +93,31 @@ async function login(handlers) {
     "GET /api/admin/question-sets": [() => json(200, [])],
     ...handlers,
   });
-  ui.harness.mount({ lang: "fi", t, setLang: () => {} });
+  ui.harness.mount({ lang: t === ui.translations.en ? "en" : "fi", t, setLang: () => {} });
   const input = [...elements(view())].find((el) => el.props.placeholder === t.adminPasswordPlaceholder);
   input.props.onChange("salasana");
   await click(t.adminLogin);
   expect(text(view())).toContain(t.adminPanelTitle);
 }
 
-afterEach(() => { delete global.fetch; });
+afterEach(() => { delete global.fetch; t = ui.translations.fi; });
 
 describe("admin error banner (#212)", () => {
+  test("localizes an action failure and clears it on a later action", async () => {
+    t = ui.translations.en;
+    await login({
+      [`DELETE /api/admin/parties/${PARTY_ID}`]: [
+        () => json(500),
+        () => json(204),
+      ],
+    });
+    await click(t.adminDelete);
+    expect(banner(view())?.message).toBe(t.requestFailed(500));
+
+    await click(t.adminDelete);
+    expect(banner(view())).toBeNull();
+  });
+
   test("clears when a later action succeeds", async () => {
     await login({
       [`DELETE /api/admin/parties/${PARTY_ID}`]: [

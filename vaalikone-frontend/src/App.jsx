@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef, useId, createContext, useContext 
 import { marked } from "marked";
 import * as Sentry from "@sentry/react";
 import translations from "./translations";
-import { createApi, isTransientError } from "./api";
+import { createApi, errorText, isTransientError } from "./api";
 import { cleanToken, readInitialLink, rememberLink, tokenLinkFromParams } from "./tokenLinks";
 import { answeredCount, distinctQuestions } from "./questions";
 import { newMatchSubmission, runMatch } from "./voterMatch";
@@ -621,7 +621,7 @@ function AdminView() {
       setQuestionSets(qs);
       setAuthed(true);
     } catch (e) {
-      setError(e.message);
+      setError(errorText(e, t));
     } finally {
       setLoading(false);
     }
@@ -632,7 +632,7 @@ function AdminView() {
       setParties(await api.getParties(adminSecret));
       setQuestionSets(await api.getAllQuestionSets(adminSecret));
     } catch (e) {
-      setError(e.message);
+      setError(errorText(e, t));
     }
   }
 
@@ -652,7 +652,7 @@ function AdminView() {
     try {
       await fn();
     } catch (e) {
-      setError(e.message);
+      setError(errorText(e, t));
     } finally {
       setActionLoading(null);
     }
@@ -785,7 +785,7 @@ function AdminView() {
       try {
         const candidates = await api.getPartyCandidatesAdmin(adminSecret, id);
         setPartyCandidates((prev) => ({ ...prev, [id]: candidates }));
-      } catch (e) { setError(e.message); }
+      } catch (e) { setError(errorText(e, t)); }
     });
   }
 
@@ -822,7 +822,7 @@ function AdminView() {
           for (const c of partyCandidates[id] ?? []) delete next[c.id];
           return next;
         });
-      } catch (e) { setError(e.message); }
+      } catch (e) { setError(errorText(e, t)); }
     });
   }
 
@@ -856,7 +856,7 @@ function AdminView() {
       try {
         result = await api.rotateCandidateTokenAdmin(adminSecret, partyId, c.id, c.email);
       } catch (e) {
-        setError(e.message);
+        setError(errorText(e, t));
         // The rotation may have taken effect even though its response was lost.
         await refreshAfterRotation(partyId);
         return;
@@ -901,7 +901,7 @@ function AdminView() {
         const { rotated } = await api.rotatePartyCandidateTokens(adminSecret, id);
         setAllLinksRotated((prev) => ({ ...prev, [id]: rotated }));
       } catch (e) {
-        setError(e.message);
+        setError(errorText(e, t));
       }
       await refreshAfterRotation(id);
     });
@@ -1320,7 +1320,7 @@ function NgoView() {
       });
       setSubmitted(true);
     } catch (e) {
-      setError(e.message);
+      setError(errorText(e, t));
     } finally {
       setLoading(false);
     }
@@ -1577,7 +1577,7 @@ function PartyView({ partyToken }) {
     try {
       await fn();
     } catch (e) {
-      setError(e.message);
+      setError(errorText(e, t));
     } finally {
       setBusy((b) => {
         const next = new Set(b);
@@ -1710,7 +1710,7 @@ function RegisterView({ registrationToken, onRegistered }) {
       const created = await api.register(registrationToken, profilePayload(profile));
       onRegistered(created.token);
     } catch (e) {
-      setError(e.message);
+      setError(errorText(e, t));
       setSaving(false);
     }
   }
@@ -1874,7 +1874,7 @@ function CandidateView({ candidateToken, justRegistered, leaveGuardRef }) {
       syncUnsaved();
       setSaved(true);
     } catch (e) {
-      setError(e.answersIgnored ? t.candidateAnswersNotSaved : e.message);
+      setError(e.answersIgnored ? t.candidateAnswersNotSaved : errorText(e, t));
     } finally {
       setSaving(false);
     }
@@ -2052,11 +2052,15 @@ function VoterView() {
           setStep("consent");
         }
       } catch (e) {
-        setError(e.message);
+        setError(errorText(e, t));
         setStep("consent");
       }
     }
     load();
+    // Runs once: with `t` as a dependency, a language switch would reload the
+    // sets and reset the voter's step. The error text is chosen when the load
+    // fails, as in every other view.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const approvedSets = questionSets;

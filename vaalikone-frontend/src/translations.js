@@ -18,7 +18,10 @@ const translations = {
     copyFieldLabel: "Linkki",
     loading: "Ladataan...",
     retry: "Yritä uudelleen",
-    serverError: "Palvelinvirhe",
+    networkError: "Yhteys palvelimeen epäonnistui. Tarkista verkkoyhteys ja yritä uudelleen.",
+    // Retrying helps only after a server error or a rate limit, not e.g. a
+    // WAF's 403 or nginx's 413.
+    requestFailed: (status) => `Palvelin ei pystynyt käsittelemään pyyntöä (HTTP ${status}).${status >= 500 || status === 429 ? " Yritä hetken kuluttua uudelleen." : ""}`,
     preview: "Esikatselu",
 
     // Header / Nav
@@ -296,7 +299,8 @@ const translations = {
     copyFieldLabel: "Link",
     loading: "Loading...",
     retry: "Retry",
-    serverError: "Server error",
+    networkError: "Could not connect to the server. Check your network connection and try again.",
+    requestFailed: (status) => `The server could not handle the request (HTTP ${status}).${status >= 500 || status === 429 ? " Please try again shortly." : ""}`,
     preview: "Preview",
 
     // Header / Nav
