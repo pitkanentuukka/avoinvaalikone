@@ -154,17 +154,44 @@ jobs:
 
       # The ssh options (also used by rsync) give up on a server that stops
       # answering, rather than leaving the job to its timeout (#178).
+      # The server's host key is pinned in the SSH_KNOWN_HOSTS repository
+      # variable, and ssh accepts no other (#206): scanning it here would
+      # trust whoever answers at the address, and hand them the tree and a
+      # root session. Rotating the server's host key means updating the
+      # variable (docs/runbook.md). The step logs the pinned key's
+      # fingerprint, to compare with the server's. Only this file counts:
+      # the host's block names no other, and $HOME is spelled out because ssh
+      # expands `~` from the passwd entry. The config is overwritten, not
+      # appended to: ssh takes each option's first value, so an earlier block
+      # would win, and it sets every source of host keys, so the runner's
+      # /etc/ssh/ssh_config can't add one (tests/unit/deployHostKey.test.js).
       - name: Set up SSH
+        env:
+          SSH_KNOWN_HOSTS: ${{ vars.SSH_KNOWN_HOSTS }}
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H 80.69.172.220 >> ~/.ssh/known_hosts
-          cat >> ~/.ssh/config <<'SSH_CONFIG'
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts_deploy
+          # A line ssh can parse, without a marker (@revoked, @cert-authority:
+          # those print one after the line number).
+          if ! ssh-keygen -l -F 80.69.172.220 -f ~/.ssh/known_hosts_deploy > ~/.ssh/pinned \
+            || ! grep -qE '^# Host 80\.69\.172\.220 found: line [0-9]+ ?$' ~/.ssh/pinned; then
+            echo "::error::The SSH_KNOWN_HOSTS repository variable has no valid host key for 80.69.172.220: see docs/runbook.md"
+            exit 1
+          fi
+          cat ~/.ssh/pinned
+          cat > ~/.ssh/config <<SSH_CONFIG
           Host 80.69.172.220
             ConnectTimeout 10
             ServerAliveInterval 15
             ServerAliveCountMax 4
+            StrictHostKeyChecking yes
+            UserKnownHostsFile $HOME/.ssh/known_hosts_deploy
+            GlobalKnownHostsFile none
+            KnownHostsCommand none
+            UpdateHostKeys no
+            VerifyHostKeyDNS no
           SSH_CONFIG
 
       # Waits for a deploy still running on the server (one this job's
@@ -195,7 +222,7 @@ jobs:
             --exclude='test-results' \
             --exclude='.claude' \
             ./ root@80.69.172.220:/opt/vaalikone/ ||
-            { echo "::error::rsync failed. If it was waiting for another deploy, that one still holds the lock: see docs/runbook.md"; exit 1; }
+            { echo "::error::rsync failed. If it was waiting for another deploy, that one still holds the lock; if ssh says \"Host key verification failed\", the server's key isn't the one in SSH_KNOWN_HOSTS: see docs/runbook.md"; exit 1; }
 
       # Also restarts caddy when the Caddyfile changed (see deploy.sh). The
       # deploy runs detached on the server and this follows its log (#205):
