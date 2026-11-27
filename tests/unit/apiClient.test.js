@@ -55,13 +55,13 @@ describe("apiFetch retries", () => {
 
   test("GET makes at most two attempts when the retry also fails with a network error", async () => {
     const { api, fetch } = apiWith(networkError(), networkError(), jsonResponse(200, []));
-    await expect(api.getCandidates()).rejects.toThrow("Failed to fetch");
+    await expect(api.getCandidates()).rejects.toMatchObject({ network: true });
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
   test("GET makes at most two attempts when the first fails with a status and the retry with a network error", async () => {
     const { api, fetch } = apiWith(jsonResponse(504, {}), networkError(), jsonResponse(200, []));
-    await expect(api.getCandidates()).rejects.toThrow("Failed to fetch");
+    await expect(api.getCandidates()).rejects.toMatchObject({ network: true });
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
@@ -87,8 +87,36 @@ describe("apiFetch retries", () => {
 
   test("a POST is not retried on a network error", async () => {
     const { api, fetch } = apiWith(networkError(), jsonResponse(201, {}));
-    await expect(api.submitQuestionSet({ title: "T" })).rejects.toThrow("Failed to fetch");
+    await expect(api.submitQuestionSet({ title: "T" })).rejects.toMatchObject({ network: true });
     expect(fetch).toHaveBeenCalledTimes(1);
+  });
+});
+
+// #211: the browser's own text ("Failed to fetch", "NetworkError when
+// attempting to fetch resource.", a JSON parse error) is English in a Finnish
+// UI, and the views show the error's message as is.
+describe("network failure messages", () => {
+  const FI = "Yhteys palvelimeen epäonnistui. Tarkista verkkoyhteys ja yritä uudelleen.";
+  const unreadable = (status) => ({ ok: true, status, json: async () => { throw new SyntaxError("Unexpected token '<'"); } });
+
+  test.each([
+    ["a GET whose retry fails too", (api) => api.getCandidates(), [networkError(), networkError()]],
+    ["a POST, which isn't retried", (api) => api.sendCandidateLink("t", "c1"), [networkError()]],
+    ["a 200 whose body can't be read", (api) => api.getOwnProfile("t"), [unreadable(200)]],
+  ])("%s gets a Finnish message", async (_, call, outcomes) => {
+    const { api } = apiWith(...outcomes);
+    const err = await call(api).catch((e) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).toBe(FI);
+    expect(err.network).toBe(true);
+    expect(isTransientError(err)).toBe(true);
+  });
+
+  test("keeps the browser's error as the cause", async () => {
+    const original = networkError();
+    const { api } = apiWith(original);
+    const err = await api.register("t", {}).catch((e) => e);
+    expect(err.cause).toBe(original);
   });
 });
 
