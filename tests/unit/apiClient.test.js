@@ -1,8 +1,9 @@
 // The frontend is an ES module package, so it is loaded with import() (npm test
 // runs Jest with --experimental-vm-modules for this).
-let createApi, isTransientError;
+let createApi, isTransientError, errorText, translations;
 beforeAll(async () => {
-  ({ createApi, isTransientError } = await import("../../vaalikone-frontend/src/api.js"));
+  ({ createApi, isTransientError, errorText } = await import("../../vaalikone-frontend/src/api.js"));
+  ({ default: translations } = await import("../../vaalikone-frontend/src/translations.js"));
 });
 
 function jsonResponse(status, data) {
@@ -81,7 +82,7 @@ describe("apiFetch retries", () => {
     ["deleting a party", (api) => api.deleteParty("secret", "id")],
   ])("%s is not retried on a transient upstream error", async (_, call) => {
     const { api, fetch } = apiWith(jsonResponse(504, {}), jsonResponse(200, {}));
-    await expect(call(api)).rejects.toThrow("HTTP 504");
+    await expect(call(api)).rejects.toMatchObject({ status: 504 });
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
@@ -128,6 +129,43 @@ describe("network failure messages", () => {
   });
 });
 
+// #211: the views show errorText(e, t), the text in the viewer's language.
+describe("errorText", () => {
+  const status = (s, message, serverMessage) => Object.assign(new Error(message), { status: s, serverMessage });
+
+  test.each(["fi", "en"])("a network failure gets the %s connection message", async (lang) => {
+    const { api } = apiWith(networkError());
+    const err = await api.register("t", {}).catch((e) => e);
+    expect(errorText(err, translations[lang])).toBe(translations[lang].networkError);
+  });
+
+  test("the English connection message is English", () => {
+    expect(translations.en.networkError).toBe("Could not connect to the server. Check your network connection and try again.");
+  });
+
+  test.each(["fi", "en"])("a response without the app's own message gets the %s placeholder with its status", (lang) => {
+    expect(errorText(status(502, "whatever", false), translations[lang])).toBe(translations[lang].requestFailed(502));
+    expect(translations[lang].requestFailed(502)).toContain("HTTP 502");
+  });
+
+  test("the app's own message is shown as it is", () => {
+    expect(errorText(status(429, "Liian monta pyyntöä.", true), translations.en)).toBe("Liian monta pyyntöä.");
+  });
+
+  test("an error that didn't come from a response keeps its message", () => {
+    expect(errorText(new Error("Virheellinen linkki"), translations.en)).toBe("Virheellinen linkki");
+  });
+
+  // Every view shows errors through errorText, so none shows a placeholder
+  // or the browser's text as is.
+  test("App.jsx shows no error's message directly", () => {
+    const fs = require("fs");
+    const path = require("path");
+    const source = fs.readFileSync(path.join(__dirname, "../../vaalikone-frontend/src/App.jsx"), "utf8");
+    expect(source).not.toMatch(/\.message\b/);
+  });
+});
+
 // #17: one request, so the server can save both or neither.
 describe("saveOwnProfile", () => {
   test("sends the profile and the answers in a single PUT", async () => {
@@ -154,11 +192,14 @@ describe("saveOwnProfile", () => {
 
 describe("error messages", () => {
   const htmlResponse = (status) => ({ ok: false, status, json: async () => { throw new SyntaxError("Unexpected token <"); } });
+  const failed = (status) => `Palvelin ei pystynyt käsittelemään pyyntöä (HTTP ${status}). Yritä hetken kuluttua uudelleen.`;
+  // Without the app's own message the error gets a Finnish placeholder, not
+  // "Server error" or "HTTP 413" (#211).
   test.each([
-    ["an HTML body", htmlResponse(403), "Server error", false],
-    ["a JSON body without error", jsonResponse(413, { message: "too large" }), "HTTP 413", false],
-    ["a JSON null body", jsonResponse(400, null), "Server error", false],
-    ["an empty JSON error", jsonResponse(400, { error: "" }), "HTTP 400", false],
+    ["an HTML body", htmlResponse(403), failed(403), false],
+    ["a JSON body without error", jsonResponse(413, { message: "too large" }), failed(413), false],
+    ["a JSON null body", jsonResponse(400, null), failed(400), false],
+    ["an empty JSON error", jsonResponse(400, { error: "" }), failed(400), false],
     ["the app's JSON error", jsonResponse(429, { error: "Liian monta pyyntöä." }), "Liian monta pyyntöä.", true],
   ])("%s gives the message %p (serverMessage %p)", async (_what, response, message, serverMessage) => {
     const { api } = apiWith(response);
@@ -195,7 +236,7 @@ describe("voterMatch", () => {
     Object.defineProperty(globalThis, "crypto", { value: {}, configurable: true });
     try {
       const { api, fetch } = apiWith(jsonResponse(502, {}), jsonResponse(200, { results: [] }));
-      await expect(api.voterMatch({ answers: { q: 2 } })).rejects.toThrow("HTTP 502");
+      await expect(api.voterMatch({ answers: { q: 2 } })).rejects.toMatchObject({ status: 502 });
       expect(fetch).toHaveBeenCalledTimes(1);
       expect(sentBody(fetch, 0)).not.toHaveProperty("sessionId");
     } finally {
