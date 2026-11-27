@@ -154,6 +154,11 @@ jobs:
 
       # The ssh options (also used by rsync) give up on a server that stops
       # answering, rather than leaving the job to its timeout (#178).
+      # The key comes in through the environment, never as `${{ }}` in the
+      # script: GitHub pastes that into the text bash parses, so a `$(…)` in
+      # the secret, or whatever follows a quote in it, would run (#207). The
+      # file is created with mode 600 before the key is written to it
+      # (tests/unit/deploySshKey.test.js).
       # The server's host key is pinned in the SSH_KNOWN_HOSTS repository
       # variable, and ssh accepts no other (#206): scanning it here would
       # trust whoever answers at the address, and hand them the tree and a
@@ -167,11 +172,12 @@ jobs:
       # /etc/ssh/ssh_config can't add one (tests/unit/deployHostKey.test.js).
       - name: Set up SSH
         env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
           SSH_KNOWN_HOSTS: ${{ vars.SSH_KNOWN_HOSTS }}
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
+          install -m 600 /dev/null ~/.ssh/deploy_key
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
           printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts_deploy
           # A line ssh can parse, without a marker (@revoked, @cert-authority:
           # those print one after the line number).
