@@ -1,4 +1,5 @@
-// Child process for tests/unit/rateLimitWiring.test.js: starts the real app
+// Child process for tests/unit/rateLimitWiring.test.js and
+// tests/unit/ipv6RateLimitKey.test.js: starts the real app
 // (src/index.js, with the environment the parent passes) and sends the
 // requests it is given, reporting each status and duration over IPC.
 //
@@ -8,9 +9,13 @@
 const http = require("http");
 const app = require("../../src/index");
 
-const requests = JSON.parse(process.argv[2]);
+// The requests come as the first argument, or, when there are too many for
+// one, as the first IPC message.
+const requests = process.argv[2]
+  ? Promise.resolve(JSON.parse(process.argv[2]))
+  : new Promise((resolve) => process.once("message", resolve));
 
-function send(port, { method, path, body }) {
+function send(port, { method, path, body, headers = {} }) {
   return new Promise((resolve, reject) => {
     const data = body === undefined ? undefined : JSON.stringify(body);
     const started = Date.now();
@@ -20,7 +25,10 @@ function send(port, { method, path, body }) {
         port,
         path,
         method,
-        headers: data === undefined ? {} : { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(data) },
+        headers: {
+          ...headers,
+          ...(data === undefined ? {} : { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(data) }),
+        },
       },
       (res) => {
         res.resume();
@@ -37,7 +45,7 @@ async function main() {
     const s = app.listen(0, "127.0.0.1", () => resolve(s));
   });
   const results = [];
-  for (const r of requests) results.push(await send(server.address().port, r));
+  for (const r of await requests) results.push(await send(server.address().port, r));
   process.send({ results }, () => process.exit(0));
 }
 
