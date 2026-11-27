@@ -151,6 +151,7 @@ describe("the URI the access log records", () => {
     [`/api/candidates/me/${T}`, "/api/candidates/me/[token]"],
     [`/api/candidates/register/${T}`, "/api/candidates/register/[token]"],
     [`/api/candidates/party/${T}/candidates/${ID}/send-link`, `/api/candidates/party/[token]/candidates/${ID}/send-link`],
+    [`/api/candidates/party/${T}/candidates/${ID}/token`, `/api/candidates/party/[token]/candidates/${ID}/token`],
     [`/api/candidates/ME/${T}`, "/api/candidates/ME/[token]"],
     [`/api/candidates/me/${T}?x=1`, "/api/candidates/me/[token]?x=1"],
     // A query with a token param in it is dropped whole: one regex replaces

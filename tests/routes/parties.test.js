@@ -350,3 +350,146 @@ describe("POST /api/admin/parties/:id/send-candidate-links", () => {
     logSpy.mockRestore();
   });
 });
+
+// ─── Candidate token rotation (#193) ──────────────────────────────────────────
+
+describe("POST /api/admin/parties/:id/candidates/:candidateId/token", () => {
+  const CANDIDATE_ID = "660e8400-e29b-41d4-a716-446655440000";
+  const url = `/api/admin/parties/${VALID_UUID}/candidates/${CANDIDATE_ID}/token`;
+  const rotated = { id: CANDIDATE_ID, name: "Maija", email: "maija@example.fi", token: "n".repeat(48), party_name: "Vihreät" };
+  const originalSmtp = process.env.SMTP_HOST;
+  afterEach(() => {
+    if (originalSmtp === undefined) delete process.env.SMTP_HOST;
+    else process.env.SMTP_HOST = originalSmtp;
+  });
+
+  test("without auth → 401", async () => {
+    const res = await request(app).post(url);
+    expect(res.status).toBe(401);
+    expect(db.query).not.toHaveBeenCalled();
+  });
+
+  test("invalid candidate id → 400", async () => {
+    const res = await request(app)
+      .post(`/api/admin/parties/${VALID_UUID}/candidates/nope/token`)
+      .set("Authorization", authHeader);
+    expect(res.status).toBe(400);
+    expect(db.query).not.toHaveBeenCalled();
+  });
+
+  test("candidate not in that party → 404", async () => {
+    db.query.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [] });
+    const res = await request(app).post(url).set("Authorization", authHeader);
+    expect(res.status).toBe(404);
+    expect(sendCandidateLinkEmail).not.toHaveBeenCalled();
+  });
+
+  test("rotates within the party, returns the new token and emails it", async () => {
+    process.env.SMTP_HOST = "smtp.example.fi";
+    db.query.mockResolvedValueOnce({ rows: [rotated] });
+
+    const res = await request(app).post(url).set("Authorization", authHeader);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ id: CANDIDATE_ID, token: rotated.token, emailed: true });
+    const [sql, params] = db.query.mock.calls[0];
+    expect(sql).toMatch(/SET token = DEFAULT/);
+    expect(sql).toMatch(/party_id = \$2/);
+    expect(params).toEqual([CANDIDATE_ID, VALID_UUID, null]);
+    expect(sendCandidateLinkEmail).toHaveBeenCalledWith(
+      { id: CANDIDATE_ID, name: "Maija", email: "maija@example.fi", token: rotated.token },
+      "Vihreät",
+      expect.any(String)
+    );
+  });
+
+  test("address changed since the admin saw it → 409, nothing emailed", async () => {
+    process.env.SMTP_HOST = "smtp.example.fi";
+    db.query
+      .mockResolvedValueOnce({ rows: [] }) // the UPDATE's address check fails
+      .mockResolvedValueOnce({ rows: [{ id: CANDIDATE_ID }] }); // but the candidate exists
+
+    const res = await request(app).post(url).set("Authorization", authHeader).send({ expectedEmail: "maija@example.fi" });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/sähköpostiosoite on muuttunut/i);
+    const [, params] = db.query.mock.calls[0];
+    expect(params).toEqual([CANDIDATE_ID, VALID_UUID, "maija@example.fi"]);
+    expect(sendCandidateLinkEmail).not.toHaveBeenCalled();
+  });
+
+  // The admin was shown no address: one set since (e.g. by whoever holds the
+  // leaked link) must be refused too, so "" and null mean "expect none".
+  test.each([[""], [null]])("expectedEmail %p checks for no address", async (expectedEmail) => {
+    db.query
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ id: CANDIDATE_ID }] });
+
+    const res = await request(app).post(url).set("Authorization", authHeader).send({ expectedEmail });
+
+    expect(res.status).toBe(409);
+    const [sql, params] = db.query.mock.calls[0];
+    expect(sql).toMatch(/lower\(btrim\(coalesce\(c\.email, ''\)\)\) = lower\(btrim\(\$3\)\)/);
+    expect(params[2]).toBe("");
+  });
+
+  test("non-string expectedEmail → 400", async () => {
+    const res = await request(app).post(url).set("Authorization", authHeader).send({ expectedEmail: 5 });
+    expect(res.status).toBe(400);
+    expect(db.query).not.toHaveBeenCalled();
+  });
+
+  // The admin sees the new link and can hand it over, so a missing address,
+  // missing SMTP or a failed send doesn't undo or fail the rotation.
+  test.each([
+    ["no email address", { email: null }, "smtp.example.fi", null],
+    ["SMTP not configured", {}, undefined, null],
+    ["the send fails", {}, "smtp.example.fi", new Error("421")],
+  ])("%s → 200 with emailed: false", async (_, override, smtp, sendError) => {
+    if (smtp) process.env.SMTP_HOST = smtp;
+    else delete process.env.SMTP_HOST;
+    db.query.mockResolvedValueOnce({ rows: [{ ...rotated, ...override }] });
+    if (sendError) sendCandidateLinkEmail.mockRejectedValueOnce(sendError);
+    const errSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+
+    const res = await request(app).post(url).set("Authorization", authHeader);
+    errSpy.mockRestore();
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ id: CANDIDATE_ID, token: rotated.token, emailed: false });
+    expect(sendCandidateLinkEmail).toHaveBeenCalledTimes(sendError ? 1 : 0);
+  });
+});
+
+describe("POST /api/admin/parties/:id/candidate-tokens", () => {
+  const url = `/api/admin/parties/${VALID_UUID}/candidate-tokens`;
+
+  test("without auth → 401", async () => {
+    const res = await request(app).post(url);
+    expect(res.status).toBe(401);
+    expect(db.query).not.toHaveBeenCalled();
+  });
+
+  test("party not found → 404", async () => {
+    db.query.mockResolvedValueOnce({ rows: [] });
+    const res = await request(app).post(url).set("Authorization", authHeader);
+    expect(res.status).toBe(404);
+    expect(db.query).toHaveBeenCalledTimes(1);
+  });
+
+  // Rotating doesn't send: the admin follows up with send-candidate-links.
+  test("rotates every candidate of the party and reports how many", async () => {
+    db.query
+      .mockResolvedValueOnce({ rows: [{ id: VALID_UUID }] })
+      .mockResolvedValueOnce({ rowCount: 3, rows: [] });
+
+    const res = await request(app).post(url).set("Authorization", authHeader);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ rotated: 3 });
+    const [sql, params] = db.query.mock.calls[1];
+    expect(sql).toMatch(/UPDATE candidates SET token = DEFAULT WHERE party_id = \$1/);
+    expect(params).toEqual([VALID_UUID]);
+    expect(sendCandidateLinkEmail).not.toHaveBeenCalled();
+  });
+});

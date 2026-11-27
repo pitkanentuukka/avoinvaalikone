@@ -244,6 +244,7 @@ describe("path parameters", () => {
     ["getPartyOverview", (api, t) => api.getPartyOverview(t), "/api/candidates/party/T"],
     ["rotateRegistrationLink", (api, t) => api.rotateRegistrationLink(t), "/api/candidates/party/T/registration-token"],
     ["sendCandidateLink", (api, t) => api.sendCandidateLink(t, "c1"), "/api/candidates/party/T/candidates/c1/send-link"],
+    ["rotateCandidateLink", (api, t) => api.rotateCandidateLink(t, "c1"), "/api/candidates/party/T/candidates/c1/token"],
     ["removeCandidate", (api, t) => api.removeCandidate(t, "c1"), "/api/candidates/party/T/candidates/c1"],
     ["getRegistration", (api, t) => api.getRegistration(t), "/api/candidates/register/T"],
     ["register", (api, t) => api.register(t, {}), "/api/candidates/register/T"],
@@ -277,6 +278,9 @@ describe("path parameters", () => {
   test.each([
     ["sendCandidateLink's candidate id", (api) => api.sendCandidateLink("tok", "..")],
     ["removeCandidate's candidate id", (api) => api.removeCandidate("tok", "")],
+    ["rotateCandidateLink's candidate id", (api) => api.rotateCandidateLink("tok", "..")],
+    ["rotateCandidateTokenAdmin's candidate id", (api) => api.rotateCandidateTokenAdmin("secret", "p1", "..")],
+    ["rotatePartyCandidateTokens's party id", (api) => api.rotatePartyCandidateTokens("secret", "..")],
     ["an admin id", (api) => api.deleteParty("secret", "..")],
     ["getCandidate's id", (api) => api.getCandidate("\uD800")],
   ])("%s is checked too, as a rejection rather than a throw", async (_, call) => {
@@ -298,5 +302,26 @@ describe("path parameters", () => {
     const { api, fetch } = apiWith(jsonResponse(200, { party: { name: "P" } }));
     await api.getPartyOverview(token);
     expect(fetch.mock.calls[0][0]).toBe(`/api/candidates/party/${token}`);
+  });
+});
+
+// #193: rotation sends the address the user was shown, so the server can
+// refuse when the candidate's address has changed since.
+describe("candidate link rotation", () => {
+  test.each([
+    ["rotateCandidateLink", (api) => api.rotateCandidateLink("tok", "c1", "maija@example.fi")],
+    ["rotateCandidateTokenAdmin", (api) => api.rotateCandidateTokenAdmin("secret", "p1", "c1", "maija@example.fi")],
+  ])("%s sends expectedEmail", async (_, call) => {
+    const { api, fetch } = apiWith(jsonResponse(200, {}));
+    await call(api);
+    expect(fetch.mock.calls[0][1].method).toBe("POST");
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ expectedEmail: "maija@example.fi" });
+  });
+
+  // JSON.stringify would drop undefined, and the server would skip the check.
+  test("rotateCandidateTokenAdmin sends a missing address as \"\"", async () => {
+    const { api, fetch } = apiWith(jsonResponse(200, {}));
+    await api.rotateCandidateTokenAdmin("secret", "p1", "c1", null);
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ expectedEmail: "" });
   });
 });

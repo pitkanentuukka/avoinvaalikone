@@ -160,6 +160,140 @@ describe("POST /api/candidates/party/:partyToken/candidates/:id/send-link", () =
   });
 });
 
+// #193: a leaked candidate link can be revoked without deleting the candidate.
+// The party never sees candidate tokens, so the new link only goes by email.
+describe("POST /api/candidates/party/:partyToken/candidates/:id/token", () => {
+  const url = `/api/candidates/party/${PARTY_TOKEN}/candidates/${CANDIDATE_ID}/token`;
+  const NEW_TOKEN = "d".repeat(48);
+  const candidate = { id: CANDIDATE_ID, name: "Eeva", email: "eeva@example.fi" };
+
+  beforeEach(() => {
+    process.env.SMTP_HOST = "smtp.example.fi";
+  });
+
+  const rotations = () => db.query.mock.calls.filter(([sql]) => /token = DEFAULT/.test(sql));
+
+  test("rotates the token, emails the new link, never returns it", async () => {
+    db.query.mockResolvedValueOnce({ rows: [PARTY] });
+    db.query.mockResolvedValueOnce({ rows: [candidate] });
+    db.query.mockResolvedValueOnce({ rows: [{ ...candidate, token: NEW_TOKEN }] });
+    sendCandidateLinkEmail.mockResolvedValueOnce();
+
+    const res = await request(app).post(url);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ rotated: true, sent: true });
+    expect(JSON.stringify(res.body)).not.toContain(NEW_TOKEN);
+    const [[sql, params]] = rotations();
+    expect(sql).toMatch(/UPDATE candidates SET token = DEFAULT/);
+    expect(sql).toMatch(/party_id = \$2/);
+    expect(params).toEqual([CANDIDATE_ID, PARTY.id, null]);
+    expect(sendCandidateLinkEmail).toHaveBeenCalledWith(
+      { ...candidate, token: NEW_TOKEN }, PARTY.name, expect.any(String)
+    );
+  });
+
+  test("candidate of another party → 404, nothing rotated", async () => {
+    db.query.mockResolvedValueOnce({ rows: [PARTY] });
+    db.query.mockResolvedValueOnce({ rows: [] });
+    const res = await request(app).post(url);
+    expect(res.status).toBe(404);
+    expect(rotations()).toHaveLength(0);
+    expect(sendCandidateLinkEmail).not.toHaveBeenCalled();
+  });
+
+  // The new link could reach the candidate by no other way: the party never
+  // sees it. Rotating anyway would lock the candidate out.
+  test("candidate without email → 409, nothing rotated", async () => {
+    db.query.mockResolvedValueOnce({ rows: [PARTY] });
+    db.query.mockResolvedValueOnce({ rows: [{ ...candidate, email: null }] });
+    const res = await request(app).post(url);
+    expect(res.status).toBe(409);
+    expect(rotations()).toHaveLength(0);
+  });
+
+  test("SMTP not configured → 503, nothing rotated", async () => {
+    delete process.env.SMTP_HOST;
+    db.query.mockResolvedValueOnce({ rows: [PARTY] });
+    db.query.mockResolvedValueOnce({ rows: [candidate] });
+    const res = await request(app).post(url);
+    expect(res.status).toBe(503);
+    expect(rotations()).toHaveLength(0);
+  });
+
+  test("candidate removed between the check and the rotation → 404", async () => {
+    db.query.mockResolvedValueOnce({ rows: [PARTY] });
+    db.query.mockResolvedValueOnce({ rows: [candidate] });
+    db.query.mockResolvedValueOnce({ rows: [] });
+    const res = await request(app).post(url);
+    expect(res.status).toBe(404);
+    expect(sendCandidateLinkEmail).not.toHaveBeenCalled();
+  });
+
+  // The old link is revoked either way; "send link" then sends the new one.
+  test("email failure → 502 saying the link was still changed", async () => {
+    db.query.mockResolvedValueOnce({ rows: [PARTY] });
+    db.query.mockResolvedValueOnce({ rows: [candidate] });
+    db.query.mockResolvedValueOnce({ rows: [{ ...candidate, token: NEW_TOKEN }] });
+    sendCandidateLinkEmail.mockRejectedValueOnce(new Error("SMTP down"));
+    const errSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+    const res = await request(app).post(url);
+    errSpy.mockRestore();
+    expect(res.status).toBe(502);
+    expect(res.body.error).toMatch(/vaihdettiin/);
+    expect(JSON.stringify(res.body)).not.toContain(NEW_TOKEN);
+  });
+
+  // Whoever holds a leaked link can change the address; the secretary
+  // confirms the address they were shown, and a changed one is refused.
+  // (The real-DB suite shows the stored token really is left alone.)
+  test("address changed since the secretary saw it → 409, nothing emailed", async () => {
+    db.query.mockResolvedValueOnce({ rows: [PARTY] });
+    db.query.mockResolvedValueOnce({ rows: [{ ...candidate, email: "hyokkaaja@example.com" }] });
+    db.query.mockResolvedValueOnce({ rows: [] }); // UPDATE: address doesn't match
+    db.query.mockResolvedValueOnce({ rows: [{ id: CANDIDATE_ID }] }); // still there
+    const res = await request(app).post(url).send({ expectedEmail: "eeva@example.fi" });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/sähköpostiosoite on muuttunut/i);
+    expect(rotations()[0][1]).toEqual([CANDIDATE_ID, PARTY.id, "eeva@example.fi"]);
+    expect(sendCandidateLinkEmail).not.toHaveBeenCalled();
+  });
+
+  test("expected address matching up to case and spaces → rotates; compared in the UPDATE", async () => {
+    db.query.mockResolvedValueOnce({ rows: [PARTY] });
+    db.query.mockResolvedValueOnce({ rows: [candidate] });
+    db.query.mockResolvedValueOnce({ rows: [{ ...candidate, token: NEW_TOKEN }] });
+    const res = await request(app).post(url).send({ expectedEmail: " Eeva@Example.FI " });
+    expect(res.status).toBe(200);
+    const [[sql, params]] = rotations();
+    expect(sql).toMatch(/lower\(btrim\(coalesce\(email, ''\)\)\) = lower\(btrim\(\$3\)\)/);
+    expect(params).toEqual([CANDIDATE_ID, PARTY.id, " Eeva@Example.FI "]);
+  });
+
+  test("removed before the UPDATE, with expectedEmail → 404", async () => {
+    db.query.mockResolvedValueOnce({ rows: [PARTY] });
+    db.query.mockResolvedValueOnce({ rows: [candidate] });
+    db.query.mockResolvedValueOnce({ rows: [] }); // UPDATE
+    db.query.mockResolvedValueOnce({ rows: [] }); // gone
+    const res = await request(app).post(url).send({ expectedEmail: candidate.email });
+    expect(res.status).toBe(404);
+  });
+
+  test("non-string expectedEmail → 400", async () => {
+    db.query.mockResolvedValueOnce({ rows: [PARTY] });
+    const res = await request(app).post(url).send({ expectedEmail: ["eeva@example.fi"] });
+    expect(res.status).toBe(400);
+    expect(rotations()).toHaveLength(0);
+  });
+
+  test("invalid candidate id → 400", async () => {
+    db.query.mockResolvedValueOnce({ rows: [PARTY] });
+    const res = await request(app).post(`/api/candidates/party/${PARTY_TOKEN}/candidates/not-a-uuid/token`);
+    expect(res.status).toBe(400);
+    expect(rotations()).toHaveLength(0);
+  });
+});
+
 describe("DELETE /api/candidates/party/:partyToken/candidates/:id", () => {
   const url = `/api/candidates/party/${PARTY_TOKEN}/candidates/${CANDIDATE_ID}`;
 
@@ -352,8 +486,18 @@ describe("PUT /api/candidates/me/:candidateToken", () => {
     const res = await request(app).put(url).send({ ...PROFILE, bio: "Bio", id: "someone-else" });
     expect(res.status).toBe(200);
     expect(res.body.bio).toBe("Bio");
-    const params = db.query.mock.calls[1][1];
-    expect(params[params.length - 1]).toBe(CANDIDATE_ID);
+    const [sql, params] = db.query.mock.calls[1];
+    expect(sql).toMatch(/WHERE id = \$6 AND token = \$7/);
+    expect(params.slice(5)).toEqual([CANDIDATE_ID, CANDIDATE_TOKEN]);
+  });
+
+  // #193: a request that passed the token lookup just before the link was
+  // rotated must not write after the rotation.
+  test("link rotated since the token lookup → 404", async () => {
+    db.query.mockResolvedValueOnce({ rows: [CANDIDATE_AUTH] });
+    db.query.mockResolvedValueOnce({ rows: [] });
+    const res = await request(app).put(url).send(PROFILE);
+    expect(res.status).toBe(404);
   });
 
   // #151: another candidate of the party already has this name and address.
@@ -472,7 +616,7 @@ describe("PUT /api/candidates/me/:candidateToken", () => {
       expect(profileAt).toBeGreaterThan(lockAt);
       expect(upsertAt).toBeGreaterThan(profileAt);
       const profileUpdate = client.query.mock.calls.find(isProfileUpdate);
-      expect(profileUpdate[1][profileUpdate[1].length - 1]).toBe(CANDIDATE_ID);
+      expect(profileUpdate[1].slice(5)).toEqual([CANDIDATE_ID, CANDIDATE_TOKEN]);
       const upsert = client.query.mock.calls.find(([sql]) => /INSERT INTO candidate_answers/.test(sql));
       expect(upsert[1]).toEqual([CANDIDATE_ID, QUESTION_ID, 3, "Koska"]);
       // The profile update goes through the transaction, not the pool.
@@ -865,6 +1009,9 @@ describe("PUT /api/candidates/me/:candidateToken/answers", () => {
     // routes can't deadlock against each other (#17 review round 3).
     expect(sqls[2]).toMatch(/UPDATE candidates SET updated_at/);
     expect(sqls[3]).toMatch(/INSERT INTO candidate_answers/);
+    // #193: not after the link was rotated.
+    expect(sqls[2]).toMatch(/WHERE id = \$1 AND token = \$2/);
+    expect(client.query.mock.calls[2][1]).toEqual([CANDIDATE_ID, CANDIDATE_TOKEN]);
   });
 
   test("candidate gone since the token lookup → 404, nothing written", async () => {

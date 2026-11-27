@@ -283,7 +283,11 @@ email, so production can't run without a working SMTP provider.
   doesn't publish its ports, and `scripts/deploy.sh` removes any mailpit
   container, including one left over from before the profile existed. If one
   ever ran with published ports, treat the links it captured as leaked: rotate
-  the party and registration tokens.
+  the party and registration tokens, and each affected party's candidate links
+  (admin: "Vaihda kaikkien linkit"). Before "Lähetä kaikille henkilökohtainen
+  linkki", check the addresses in the admin's candidate list: whoever captured
+  a link may have changed that candidate's address to their own. Hand such a
+  candidate their new link yourself and have them correct the address.
 
 ## New environment variables
 

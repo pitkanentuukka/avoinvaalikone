@@ -2,7 +2,7 @@ const { Router } = require("express");
 const db = require("../db/pool");
 const { begin, commit, rollback } = require("../db/transaction");
 const { requirePartyToken, requireCandidateToken, requireRegistrationToken } = require("../middleware/auth");
-const { isValidLength, isValidUrl, isValidEmail, validateUUIDParam, isValidUUID, quoteList } = require("../middleware/validation");
+const { isValidLength, isValidUrl, isValidEmail, validateUUIDParam, isValidUUID, quoteList, expectedEmailParam } = require("../middleware/validation");
 const { publicCache, noStore } = require("../middleware/cacheControl");
 const microCache = require("../middleware/microCache");
 const { candidateReads, listReads } = require("../middleware/publicReadLimiter");
@@ -44,6 +44,8 @@ const CHECK_VIOLATION = "23514";
 const UNIQUE_VIOLATION = "23505";
 const isIdentityConflict = (err) =>
   err.code === UNIQUE_VIOLATION && err.constraint === "idx_candidates_registration_identity";
+const EMAIL_CHANGED_ERROR =
+  "Ehdokkaan sähköpostiosoite on muuttunut. Lataa sivu uudelleen ja tarkista osoite ennen kuin vaihdat linkin.";
 const IDENTITY_CONFLICT_ERROR = "Puolueessasi on jo ehdokas tällä nimellä ja sähköpostiosoitteella";
 
 /**
@@ -146,7 +148,8 @@ router.get("/:id", validateUUIDParam("id"), publicCache(300), microCache(), cand
 });
 
 // ─── Party-token gated (secretary's management access) ───
-// The party can see its candidates, re-send their links, remove sign-ups and
+// The party can see its candidates, re-send their links, rotate a candidate's
+// link (the new one goes only to the candidate's email), remove sign-ups and
 // rotate the registration link — but never sees candidate tokens, so it cannot
 // change a candidate's profile or answers.
 
@@ -216,6 +219,70 @@ router.post(
         return res.status(502).json({ error: "Sähköpostin lähetys epäonnistui" });
       }
       res.json({ sent: true });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// POST /api/candidates/party/:partyToken/candidates/:id/token — rotate the
+// candidate's personal link (e.g. it leaked) and email the new one to the
+// candidate. The old link stops working at once; profile and answers are kept.
+// The response never carries the new token. Refused before rotating when the
+// new link couldn't be emailed at all, since the party can't hand it over.
+// Optional { expectedEmail }: the address the secretary was shown. Whoever
+// holds a leaked link can change the address to their own, so a changed one
+// gets 409 and nothing is rotated.
+router.post(
+  "/party/:partyToken/candidates/:id/token",
+  requirePartyToken,
+  validateUUIDParam("id"),
+  async (req, res, next) => {
+    const expectedEmail = expectedEmailParam(req.body);
+    if (expectedEmail === undefined) {
+      return res.status(400).json({ error: "Virheellinen sähköpostiosoite" });
+    }
+    try {
+      const { rows: found } = await db.query(
+        "SELECT id, email FROM candidates WHERE id = $1 AND party_id = $2",
+        [req.params.id, req.party.id]
+      );
+      if (found.length === 0) {
+        return res.status(404).json({ error: "Ehdokasta ei löytynyt tässä puolueessa" });
+      }
+      if (!found[0].email) {
+        return res.status(409).json({ error: "Ehdokkaalla ei ole sähköpostiosoitetta" });
+      }
+      if (!process.env.SMTP_HOST) {
+        return res.status(503).json({ error: "Sähköpostin lähetys ei ole käytössä" });
+      }
+      // The address is compared here, in SQL only (one set of trim and case
+      // rules), so it can't change between the check and the rotation.
+      const { rows } = await db.query(
+        `UPDATE candidates SET token = DEFAULT
+         WHERE id = $1 AND party_id = $2
+           AND ($3::text IS NULL OR lower(btrim(coalesce(email, ''))) = lower(btrim($3)))
+         RETURNING id, name, email, token`,
+        [req.params.id, req.party.id, expectedEmail]
+      );
+      if (rows.length === 0) {
+        // Removed since the SELECT, or (with expectedEmail) its address changed.
+        const { rows: still } = expectedEmail === null
+          ? { rows: [] }
+          : await db.query("SELECT id FROM candidates WHERE id = $1 AND party_id = $2", [req.params.id, req.party.id]);
+        return still.length
+          ? res.status(409).json({ error: EMAIL_CHANGED_ERROR })
+          : res.status(404).json({ error: "Ehdokasta ei löytynyt tässä puolueessa" });
+      }
+      try {
+        await sendCandidateLinkEmail(rows[0], req.party.name, frontendBaseUrl());
+      } catch (mailErr) {
+        console.error("Ehdokaslinkin lähetys epäonnistui:", mailErr);
+        return res.status(502).json({
+          error: "Linkki vaihdettiin, mutta sähköpostin lähetys epäonnistui. Lähetä uusi linkki uudelleen.",
+        });
+      }
+      res.json({ rotated: true, sent: true });
     } catch (err) {
       next(err);
     }
@@ -431,7 +498,7 @@ async function upsertAnswers(client, candidateId, toSave) {
 
 const UPDATE_PROFILE_SQL = `UPDATE candidates
        SET name = $1, photo_url = $2, bio = $3, email = $4, constituency = $5, updated_at = now()
-       WHERE id = $6
+       WHERE id = $6 AND token = $7
        RETURNING id, name, photo_url, bio, email, constituency, updated_at`;
 
 // PUT /api/candidates/me/:candidateToken — update own profile (full replace),
@@ -448,12 +515,21 @@ router.put("/me/:candidateToken", requireCandidateToken, async (req, res, next) 
   if (answers != null && (typeof answers !== "object" || Array.isArray(answers))) {
     return res.status(400).json({ error: "Vastaukset ovat virheellisessä muodossa" });
   }
-  const params = [name.trim(), photoUrl?.trim() || null, bio?.trim() || null, email.trim(), constituency.trim(), req.candidate.id];
+  // The token too, not just the id it resolved to: a save that passed the
+  // token lookup just before the link was rotated must not land after it.
+  const params = [
+    name.trim(), photoUrl?.trim() || null, bio?.trim() || null, email.trim(), constituency.trim(),
+    req.candidate.id, req.params.candidateToken,
+  ];
 
   let client;
   try {
     if (answers == null) {
       const { rows } = await db.query(UPDATE_PROFILE_SQL, params);
+      if (!rows.length) {
+        // Removed by their party, or the link rotated, since the token lookup.
+        return res.status(404).json({ error: "Virheellinen ehdokastunniste" });
+      }
       return res.json(rows[0]);
     }
 
@@ -509,11 +585,11 @@ router.put("/me/:candidateToken/answers", requireCandidateToken, async (req, res
     // Candidate row before the answers, the same order as PUT /me with
     // answers, so concurrent saves through the two routes can't deadlock.
     const { rowCount } = await client.query(
-      "UPDATE candidates SET updated_at = now() WHERE id = $1",
-      [req.candidate.id]
+      "UPDATE candidates SET updated_at = now() WHERE id = $1 AND token = $2",
+      [req.candidate.id, req.params.candidateToken]
     );
     if (!rowCount) {
-      // Removed by their party since the token lookup.
+      // Removed by their party, or the link rotated, since the token lookup.
       await rollback(client);
       return res.status(404).json({ error: "Virheellinen ehdokastunniste" });
     }

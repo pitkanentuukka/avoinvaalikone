@@ -98,7 +98,21 @@ function validateBodyField(fieldName, maxLength = 500, required = true) {
   };
 }
 
+/**
+ * The optional `expectedEmail` of a candidate link rotation (#193): the
+ * address the user was shown. Returns null when the body has none (no check),
+ * "" for an expected missing address ("" or null), the string otherwise, and
+ * undefined when it is not a string (the caller answers 400).
+ */
+function expectedEmailParam(body) {
+  if (body == null || !Object.hasOwn(body, "expectedEmail")) return null;
+  const value = body.expectedEmail;
+  if (value === null) return "";
+  return typeof value === "string" ? value : undefined;
+}
+
 module.exports = {
+  expectedEmailParam,
   isValidUUID,
   isValidLength,
   isValidRange,
