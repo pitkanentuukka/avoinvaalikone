@@ -102,6 +102,7 @@ describe("network failure messages", () => {
   test.each([
     ["a GET whose retry fails too", (api) => api.getCandidates(), [networkError(), networkError()]],
     ["a POST, which isn't retried", (api) => api.sendCandidateLink("t", "c1"), [networkError()]],
+    ["a retryable POST whose retry fails too", (api) => api.voterMatch({}, { sessionId: "s" }), [networkError(), networkError()]],
     ["a 200 whose body can't be read", (api) => api.getOwnProfile("t"), [unreadable(200)]],
   ])("%s gets a Finnish message", async (_, call, outcomes) => {
     const { api } = apiWith(...outcomes);
@@ -116,6 +117,13 @@ describe("network failure messages", () => {
     const original = networkError();
     const { api } = apiWith(original);
     const err = await api.register("t", {}).catch((e) => e);
+    expect(err.cause).toBe(original);
+  });
+
+  test("keeps the body's parse error as the cause", async () => {
+    const original = new SyntaxError("Unexpected token '<'");
+    const { api } = apiWith({ ok: true, status: 200, json: async () => { throw original; } });
+    const err = await api.getOwnProfile("t").catch((e) => e);
     expect(err.cause).toBe(original);
   });
 });
