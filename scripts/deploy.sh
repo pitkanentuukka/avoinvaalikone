@@ -46,19 +46,50 @@ remove_mailpit() {
 }
 
 remove_mailpit
-$dc up --build -d
+
+# Compose's default pull policy is `missing`: without these the server kept
+# the digest it first pulled of every tag (the service images and the build
+# stages' bases), and never got their Alpine, OpenSSL, Node, nginx,
+# PostgreSQL or Caddy patches (#216). Neither stops a running container.
+# A failed pull (Docker Hub down, or rate-limiting the server) only warns:
+# the images already here keep serving, and a fix shouldn't wait on Docker
+# Hub. The warnings start with `::warning::` so that CI, which follows this
+# log, shows them on the run's summary.
+if ! $dc pull --ignore-buildable; then
+  echo "::warning::Pulling the service images failed: deploying with the copies already on the server (see \"Deploy warns\" in docs/runbook.md)"
+fi
+# No way to pull the bases but carry on without them, so on a failure build
+# again with the bases already here. A build that fails for its own reasons
+# fails that way too, and stops the deploy before `up`.
+if ! $dc build --pull; then
+  echo "::warning::Building on freshly pulled base images failed: building on the base images already on the server (see \"Deploy warns\" in docs/runbook.md)"
+  $dc build
+fi
+
+# Validate the deployed Caddyfile on the Caddy image `up` is about to run,
+# in a fresh container that mounts the new file (and publishes no ports).
+# Either can be new: rsync replaced the file, and the pull may have brought a
+# newer Caddy. A Caddyfile that Caddy rejects would otherwise crash-loop it
+# and take the whole site down, while failing here leaves the old caddy, and
+# the rest of the old deploy, serving.
+$dc run --rm --no-deps -T caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+
+$dc up -d
 remove_mailpit
 
 # `up -d` leaves caddy running when only the Caddyfile changed, and
 # `caddy reload` wouldn't help: rsync replaces the file, and the single-file
 # bind mount keeps the old one. So restart caddy (a second or so offline)
 # whenever the Caddyfile it runs differs from the deployed one; a container
-# that isn't running counts as different. Validate first, in a fresh
-# container that mounts the new file: a Caddyfile the running Caddy version
-# rejects would otherwise crash-loop it and take the whole site down, while
-# failing here leaves the old config serving.
+# that isn't running counts as different.
 if ! $dc exec -T caddy cat /etc/caddy/Caddyfile 2>/dev/null | cmp -s - Caddyfile; then
-  echo "Caddyfile changed: validating, then restarting caddy"
-  $dc run --rm --no-deps -T caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+  echo "Caddyfile changed: restarting caddy"
   $dc restart caddy
+fi
+
+# Each refresh, and each rebuild, leaves the previous image untagged; nothing
+# else removes them. Dangling only, and never one a container still uses.
+# Housekeeping: the deploy has already happened.
+if ! docker image prune -f >/dev/null; then
+  echo "::warning::\`docker image prune\` failed, so the replaced images stay on disk (the deploy itself succeeded)"
 fi

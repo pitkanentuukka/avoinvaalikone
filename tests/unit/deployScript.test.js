@@ -143,3 +143,33 @@ describe("scripts/deploy.sh image refresh", () => {
     expect(output).toMatch(/::warning::.*prune/i);
   });
 });
+
+// Pulling means `up` can recreate caddy on a newer Caddy than the one that
+// last accepted the Caddyfile. Validating only afterwards, and only when the
+// file changed, would let a Caddyfile the new version rejects crash-loop it
+// and take the site down (#216).
+describe("scripts/deploy.sh Caddyfile validation", () => {
+  const isValidate = (c) => c.startsWith(`${COMPOSE} run --rm --no-deps -T caddy caddy validate `);
+
+  test("validates the Caddyfile on the pulled image before `up`, every deploy", () => {
+    const { status, calls } = runDeploy();
+    expect(status).toBe(0);
+    const pull = calls.indexOf(`${COMPOSE} pull --ignore-buildable`);
+    const validate = calls.findIndex(isValidate);
+    expect(validate).toBeGreaterThan(pull);
+    expect(validate).toBeLessThan(calls.findIndex(isUp));
+  });
+
+  test("a Caddyfile the new Caddy rejects stops the deploy before `up`", () => {
+    const { status, calls } = runDeploy({ STUB_FAIL: "caddy validate" });
+    expect(status).not.toBe(0);
+    expect(calls.some(isUp)).toBe(false);
+  });
+});
+
+// The only floating major version among the images the deploy pulls: a new
+// major Caddy would otherwise arrive with a routine deploy.
+test("docker-compose.prod.yml pins Caddy's major version", () => {
+  const prod = fs.readFileSync(path.join(__dirname, "../../docker-compose.prod.yml"), "utf8");
+  expect(prod).toMatch(/^\s*image: caddy:2-alpine$/m);
+});

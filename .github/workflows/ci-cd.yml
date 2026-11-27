@@ -115,7 +115,7 @@ jobs:
           path: test-results/
           retention-days: 7
 
-  # The images scripts/deploy.sh builds with `docker compose up --build`, at
+  # The images scripts/deploy.sh builds with `docker compose build`, at
   # the contexts docker-compose.yml and docker-compose.prod.yml give them.
   # Built only, never pushed: a Dockerfile that no longer builds (a base image
   # bump, a failing RUN) otherwise fails first on the server, after the merge.

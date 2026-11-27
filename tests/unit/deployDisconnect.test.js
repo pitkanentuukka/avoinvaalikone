@@ -72,7 +72,7 @@ beforeEach(() => {
 afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
 
 const calls = () => (fs.existsSync(log) ? fs.readFileSync(log, "utf8").trim().split("\n") : []);
-const upStarted = () => calls().some((c) => / up --build -d$/.test(c));
+const upStarted = () => calls().some((c) => / up -d$/.test(c));
 // The last thing deploy.sh does here: the stub's Caddyfile never matches.
 const deployDone = () => calls().some((c) => / restart caddy$/.test(c));
 

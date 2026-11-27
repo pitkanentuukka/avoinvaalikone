@@ -75,7 +75,9 @@ services:
         max-file: "3"
 
   caddy:
-    image: caddy:alpine
+    # Major version pinned: scripts/deploy.sh pulls on every deploy (#216),
+    # and a new major shouldn't arrive with a routine one.
+    image: caddy:2-alpine
     container_name: vaalikone-caddy
     restart: unless-stopped
     ports:
