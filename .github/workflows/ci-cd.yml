@@ -154,11 +154,17 @@ jobs:
 
       # The ssh options (also used by rsync) give up on a server that stops
       # answering, rather than leaving the job to its timeout (#178).
+      # The key comes in through the environment, never as `${{ }}` in the
+      # script: GitHub pastes that into the text bash parses, so a quote or
+      # `$(…)` in the secret would run (#207). The file is created with mode
+      # 600 before the key is written to it (tests/unit/deploySshKey.test.js).
       - name: Set up SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
+          install -m 600 /dev/null ~/.ssh/deploy_key
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
           ssh-keyscan -H 80.69.172.220 >> ~/.ssh/known_hosts
           cat >> ~/.ssh/config <<'SSH_CONFIG'
           Host 80.69.172.220
