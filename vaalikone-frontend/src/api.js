@@ -50,6 +50,17 @@ export function isTransientError(err) {
   return err?.network === true || (err?.status !== undefined && ![400, 404, 414, 431].includes(err.status));
 }
 
+// The request never got a usable answer: fetch failed or the body couldn't be
+// read. The browser's own message ("Failed to fetch", "NetworkError when
+// attempting to fetch resource.", a JSON parse error) would be English in the
+// Finnish UI, which shows the error's message as is (#211); the original stays
+// as `cause`.
+function networkError(cause) {
+  const err = new Error("Yhteys palvelimeen epäonnistui. Tarkista verkkoyhteys ja yritä uudelleen.", { cause });
+  err.network = true;
+  return err;
+}
+
 // `fetch` and `retryDelayMs` are injectable for the unit tests.
 export function createApi({
   base,
@@ -72,8 +83,7 @@ export function createApi({
         headers,
         body: body ? JSON.stringify(body) : undefined,
       }).catch((err) => {
-        err.network = true;
-        throw err;
+        throw networkError(err);
       });
     let res;
     try {
@@ -102,8 +112,7 @@ export function createApi({
     } catch (err) {
       // The connection dropped mid-body, or something in between (a captive
       // portal) answered with a non-JSON page.
-      err.network = true;
-      throw err;
+      throw networkError(err);
     }
     return toCamel(data);
   }
