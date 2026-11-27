@@ -231,7 +231,7 @@ describe("verifySmtp", () => {
     transportMock.verify.mockResolvedValue(true);
     await verifySmtp();
     expect(warn.mock.calls.join(" ")).toContain(`SMTP_PORT=${raw} ei ole kelvollinen porttinumero`);
-    expect(warn.mock.calls.join(" ")).toContain(`porttia ${port}`);
+    expect(warn.mock.calls.join(" ")).toContain(`yhteys avataan porttiin ${port}.`);
     expect(Sentry.captureMessage).toHaveBeenCalledWith(expect.stringContaining("SMTP_PORT"), "warning");
     expect(log.mock.calls.join(" ")).toContain(`smtp.example.fi:${port}`);
     expect(log.mock.calls.join(" ")).not.toContain(raw);
