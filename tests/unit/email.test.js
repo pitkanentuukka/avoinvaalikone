@@ -211,6 +211,72 @@ describe("verifySmtp", () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
+  // The log names the port nodemailer dials, not the raw setting (#214).
+  test.each([[" 2525", "2525"], ["02525", "2525"], ["1", "1"], ["65535", "65535"]])("logs SMTP_PORT=%p as port %s", async (raw, port) => {
+    setEnv({ NODE_ENV: "development", SMTP_PORT: raw });
+    transportMock.verify.mockResolvedValue(true);
+    await verifySmtp();
+    expect(log.mock.calls.join(" ")).toContain(`smtp.example.fi:${port}`);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  // An invalid port is ignored: nodemailer dials 587 (465 with implicit TLS)
+  // instead. Say so, and log the port actually used (#214).
+  test.each([
+    ["abc", undefined, "587"], ["58 7", undefined, "587"], ["587abc", undefined, "587"],
+    ["0x1d1", undefined, "587"], ["1.5", undefined, "587"], ["0", undefined, "587"],
+    ["65536", undefined, "587"], ["-25", undefined, "587"], ["abc", "true", "465"],
+  ])("warns that SMTP_PORT=%p is ignored (SMTP_SECURE=%p) and logs port %s", async (raw, secure, port) => {
+    setEnv({ NODE_ENV: "development", SMTP_PORT: raw, SMTP_SECURE: secure });
+    transportMock.verify.mockResolvedValue(true);
+    await verifySmtp();
+    expect(warn.mock.calls.join(" ")).toContain(`SMTP_PORT="${raw}" ei ole kelvollinen porttinumero`);
+    expect(warn.mock.calls.join(" ")).toContain(`yhteys avataan porttiin ${port}.`);
+    expect(Sentry.captureMessage).toHaveBeenCalledWith(expect.stringContaining("SMTP_PORT"), "warning");
+    expect(log.mock.calls.join(" ")).toContain(`smtp.example.fi:${port}`);
+  });
+
+  test("the failure log also names the port actually dialled", async () => {
+    setEnv({ NODE_ENV: "development", SMTP_PORT: "abc" });
+    transportMock.verify.mockRejectedValue(new Error("ETIMEDOUT"));
+    await verifySmtp();
+    expect(error.mock.calls.join(" ")).toContain("(smtp.example.fi:587)");
+  });
+
+  test.each(["", "  "])("treats SMTP_PORT=%p as unset (port 587, no warning)", async (raw) => {
+    setEnv({ NODE_ENV: "development", SMTP_PORT: raw });
+    transportMock.verify.mockResolvedValue(true);
+    await verifySmtp();
+    expect(log.mock.calls.join(" ")).toContain("smtp.example.fi:587");
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  // The transport parses these as 1025, mailpit's port (#214).
+  test.each([" 1025", "01025", "1025 "])("warns in production about SMTP_PORT=%p as mailpit's port", async (raw) => {
+    setEnv({ NODE_ENV: "production", SMTP_HOST: "smtp.example.fi", SMTP_PORT: raw,
+      SMTP_USER: "u", SMTP_FROM: "noreply@avoinvaalikone.fi" });
+    transportMock.verify.mockResolvedValue(true);
+    await verifySmtp();
+    expect(warn.mock.calls.join(" ")).toContain(`SMTP_PORT="${raw}" (portti 1025) on kehitysympäristön (mailpit) portti`);
+    expect(Sentry.captureMessage).toHaveBeenCalledWith(expect.stringContaining("mailpit"), "warning");
+  });
+
+  test.each(["abc", "0", "-1", "2.5"])("warns that SMTP_MAX_CONNECTIONS=%p is ignored", async (raw) => {
+    setEnv({ NODE_ENV: "development", SMTP_PORT: "587", SMTP_MAX_CONNECTIONS: raw });
+    transportMock.verify.mockResolvedValue(true);
+    await verifySmtp();
+    expect(warn.mock.calls.join(" ")).toContain(`SMTP_MAX_CONNECTIONS="${raw}" ei ole kelvollinen`);
+    expect(warn.mock.calls.join(" ")).toContain("käytetään oletusarvoa 3");
+    expect(Sentry.captureMessage).toHaveBeenCalledWith(expect.stringContaining("SMTP_MAX_CONNECTIONS"), "warning");
+  });
+
+  test.each(["", "  ", "1", "10"])("doesn't warn about SMTP_MAX_CONNECTIONS=%p", async (raw) => {
+    setEnv({ NODE_ENV: "development", SMTP_PORT: "587", SMTP_MAX_CONNECTIONS: raw });
+    transportMock.verify.mockResolvedValue(true);
+    await verifySmtp();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
   test("doesn't warn about dev values outside production", async () => {
     setEnv({ NODE_ENV: "development", SMTP_HOST: "localhost", SMTP_PORT: "1025", SMTP_FROM: "noreply@example.com" });
     transportMock.verify.mockResolvedValue(true);

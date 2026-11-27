@@ -17,48 +17,81 @@ let transport = null;
 const DEV_SMTP_HOSTS = ["localhost", "127.0.0.1", "::1", "mailpit"];
 const isDevSmtpHost = (host) => DEV_SMTP_HOSTS.includes(String(host).toLowerCase());
 
-const smtpPort = () => parseInt(process.env.SMTP_PORT || "587");
-
 // Port 465 is implicit TLS (RFC 8314): nothing serves plaintext or STARTTLS
 // there, and a plaintext client just waits for a greeting until it times out.
 const IMPLICIT_TLS_PORT = 465;
+const DEFAULT_PORT = 587;
 // Submission and relay ports: STARTTLS, so implicit TLS there fails the
 // handshake with an opaque "wrong version number".
 const STARTTLS_PORTS = [587, 25];
+const MAILPIT_PORT = 1025;
+const DEFAULT_MAX_CONNECTIONS = 3;
 const SECURE_ON = ["true", "1", "yes", "on"];
 const SECURE_OFF = ["false", "0", "no", "off"];
 
 /**
- * Whether to use implicit TLS, from SMTP_SECURE and SMTP_PORT, with warnings
- * for settings it doesn't follow (#199). Port 465 always gets implicit TLS,
- * even with SMTP_SECURE=false: .env files copied from .env.example before
- * #199 set false, and honouring it there only ever timed out. Unset, empty
- * or unrecognised SMTP_SECURE leaves it to the port.
+ * The port, implicit-TLS flag, pool size and warnings, from SMTP_PORT,
+ * SMTP_SECURE and SMTP_MAX_CONNECTIONS.
+ * Everything that reports the port uses this, so the logs name the port the
+ * transport dials (#214).
+ *
+ * SMTP_PORT must be digits (surrounding spaces and leading zeros allowed) in
+ * 1–65535; unset or blank means 587. Anything else is ignored with a warning,
+ * and the port is what nodemailer itself falls back to: 465 with implicit TLS,
+ * otherwise 587. parseInt would have read "58 7" as 58 and "0x1d1" as 465.
+ *
+ * Port 465 always gets implicit TLS, even with SMTP_SECURE=false: .env files
+ * copied from .env.example before #199 set false, and honouring it there only
+ * ever timed out. Unset, empty or unrecognised SMTP_SECURE leaves it to the
+ * port (#199).
  */
-function smtpSecurity() {
-  const raw = process.env.SMTP_SECURE;
-  const value = (raw ?? "").trim().toLowerCase();
-  const port = smtpPort();
-  const onPort465 = port === IMPLICIT_TLS_PORT;
+function smtpSettings() {
   const problems = [];
-  if (value && !SECURE_ON.includes(value) && !SECURE_OFF.includes(value)) {
-    problems.push(`SMTP_SECURE=${raw} on tuntematon arvo, ja se ohitetaan: tunnetut arvot ovat true, 1, yes, on, false, 0, no ja off.`);
-  } else if (onPort465 && SECURE_OFF.includes(value)) {
-    problems.push(`SMTP_SECURE=${raw} ohitetaan, koska portti 465 käyttää aina suoraa TLS-yhteyttä.`);
-  } else if (STARTTLS_PORTS.includes(port) && SECURE_ON.includes(value)) {
-    problems.push(`SMTP_SECURE=${raw} portissa ${port}: portti käyttää STARTTLS-yhteyttä, joten suora TLS-yhteys epäonnistuu. Poista SMTP_SECURE tai käytä porttia 465.`);
+  const rawSecure = process.env.SMTP_SECURE;
+  const value = (rawSecure ?? "").trim().toLowerCase();
+  const secureFlag = SECURE_ON.includes(value);
+
+  const rawPort = process.env.SMTP_PORT;
+  const portText = (rawPort ?? "").trim();
+  let port = DEFAULT_PORT;
+  if (/^\d+$/.test(portText) && Number(portText) >= 1 && Number(portText) <= 65535) {
+    port = Number(portText);
+  } else if (portText) {
+    port = secureFlag ? IMPLICIT_TLS_PORT : DEFAULT_PORT;
+    problems.push(`SMTP_PORT="${rawPort}" ei ole kelvollinen porttinumero, ja se ohitetaan: yhteys avataan porttiin ${port}. Anna portti numerona väliltä 1–65535.`);
   }
-  return { secure: SECURE_ON.includes(value) || onPort465, problems };
+
+  const onPort465 = port === IMPLICIT_TLS_PORT;
+  if (value && !secureFlag && !SECURE_OFF.includes(value)) {
+    problems.push(`SMTP_SECURE=${rawSecure} on tuntematon arvo, ja se ohitetaan: tunnetut arvot ovat true, 1, yes, on, false, 0, no ja off.`);
+  } else if (onPort465 && SECURE_OFF.includes(value)) {
+    problems.push(`SMTP_SECURE=${rawSecure} ohitetaan, koska portti 465 käyttää aina suoraa TLS-yhteyttä.`);
+  } else if (STARTTLS_PORTS.includes(port) && secureFlag) {
+    problems.push(`SMTP_SECURE=${rawSecure} portissa ${port}: portti käyttää STARTTLS-yhteyttä, joten suora TLS-yhteys epäonnistuu. Poista SMTP_SECURE tai käytä porttia 465.`);
+  }
+
+  // nodemailer's pool turns a falsy maxConnections into 5 and never opens a
+  // connection for a negative one, so every send would wait forever without
+  // a trace in email_log. Anything but a positive integer gets the default.
+  const rawMax = process.env.SMTP_MAX_CONNECTIONS;
+  const maxText = (rawMax ?? "").trim();
+  let maxConnections = DEFAULT_MAX_CONNECTIONS;
+  if (/^\d+$/.test(maxText) && Number(maxText) >= 1) {
+    maxConnections = Number(maxText);
+  } else if (maxText) {
+    problems.push(`SMTP_MAX_CONNECTIONS="${rawMax}" ei ole kelvollinen yhteysmäärä, ja se ohitetaan: käytetään oletusarvoa ${DEFAULT_MAX_CONNECTIONS}. Anna positiivinen kokonaisluku.`);
+  }
+  return { port, secure: secureFlag || onPort465, maxConnections, problems };
 }
 
 function getTransport() {
   if (!transport) {
-    const { secure } = smtpSecurity();
+    const { port, secure, maxConnections } = smtpSettings();
     transport = nodemailer.createTransport({
       pool: true,
-      maxConnections: parseInt(process.env.SMTP_MAX_CONNECTIONS || "3"),
+      maxConnections,
       host: process.env.SMTP_HOST,
-      port: smtpPort(),
+      port,
       secure,
       // Without implicit TLS, nodemailer uses STARTTLS only if the server
       // offers it, so a server that doesn't (or an attacker stripping it)
@@ -85,14 +118,16 @@ const PLACEHOLDER_ADDRESS = /@example\.(com|org|net)>?\s*$/i;
  * without them it passes against a provider that requires auth, and every
  * send then fails.
  */
-function productionSmtpProblems() {
+function productionSmtpProblems(port) {
   const { SMTP_HOST, SMTP_PORT, SMTP_FROM, SMTP_USER } = process.env;
   const problems = [];
   if (isDevSmtpHost(SMTP_HOST)) {
     problems.push(`SMTP_HOST=${SMTP_HOST} on kehitysympäristön arvo: sähköpostit eivät lähde.`);
   }
-  if (SMTP_PORT === "1025") {
-    problems.push("SMTP_PORT=1025 on kehitysympäristön (mailpit) portti: palveluntarjoajat käyttävät porttia 587 tai 465.");
+  // The parsed port, so " 1025" and "01025" count too (#214).
+  if (port === MAILPIT_PORT) {
+    const shown = SMTP_PORT === "1025" ? "SMTP_PORT=1025" : `SMTP_PORT="${SMTP_PORT}" (portti 1025)`;
+    problems.push(`${shown} on kehitysympäristön (mailpit) portti: palveluntarjoajat käyttävät porttia 587 tai 465.`);
   }
   if (!SMTP_FROM) {
     problems.push("SMTP_FROM ei ole asetettu: lähettäjäksi tulee noreply@example.com, jonka vastaanottajat hylkäävät.");
@@ -119,13 +154,13 @@ async function verifySmtp() {
     console.warn("SMTP_HOST ei ole asetettu: sähköpostit (ehdokaslinkit, ilmoitukset) eivät lähde.");
     return;
   }
-  const problems = smtpSecurity().problems;
-  if (process.env.NODE_ENV === "production") problems.push(...productionSmtpProblems());
+  const { port, problems } = smtpSettings();
+  if (process.env.NODE_ENV === "production") problems.push(...productionSmtpProblems(port));
   for (const problem of problems) {
     console.warn(problem);
     Sentry.captureMessage(problem, "warning");
   }
-  const server = `${process.env.SMTP_HOST}:${process.env.SMTP_PORT || "587"}`;
+  const server = `${process.env.SMTP_HOST}:${port}`;
   try {
     await getTransport().verify();
     console.log(`SMTP-yhteys toimii: ${server}`);

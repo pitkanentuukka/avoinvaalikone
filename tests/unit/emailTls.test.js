@@ -8,7 +8,7 @@
 jest.mock("../../src/db/pool");
 jest.mock("nodemailer");
 
-const KEYS = ["SMTP_HOST", "SMTP_PORT", "SMTP_SECURE", "NODE_ENV"];
+const KEYS = ["SMTP_HOST", "SMTP_PORT", "SMTP_SECURE", "SMTP_MAX_CONNECTIONS", "NODE_ENV"];
 
 // The transport is created once per process, so each case loads a fresh copy
 // of src/email.js (and of the nodemailer mock it calls), sends one message and
@@ -108,6 +108,31 @@ describe("SMTP transport encryption", () => {
   test.each([" 465", "0465"])("SMTP_PORT=%p is port 465", async (port) => {
     const options = await transportOptions({ SMTP_HOST: "smtp.example.fi", SMTP_PORT: port, SMTP_SECURE: "false" });
     expect(options).toMatchObject({ port: 465, secure: true, requireTLS: false });
+  });
+
+  // An invalid port is replaced by the default, as nodemailer itself would,
+  // rather than parsed to its leading digits ("58 7" used to dial 58) (#214).
+  test.each([
+    ["abc", undefined, 587, false], ["58 7", undefined, 587, false], ["0x1d1", undefined, 587, false],
+    ["65536", undefined, 587, false], ["abc", "true", 465, true], ["", undefined, 587, false],
+  ])("SMTP_PORT=%p (SMTP_SECURE=%p) dials port %p", async (port, secure, expected, implicitTls) => {
+    const env = { SMTP_HOST: "smtp.example.fi", SMTP_PORT: port };
+    if (secure !== undefined) env.SMTP_SECURE = secure;
+    const options = await transportOptions(env);
+    expect(options).toMatchObject({ port: expected, secure: implicitTls, requireTLS: !implicitTls });
+  });
+
+  // nodemailer's pool replaces a falsy maxConnections with 5 and never opens a
+  // connection for a negative one, so every send would wait forever. An
+  // invalid value gets the documented default of 3 instead.
+  test.each([
+    [undefined, 3], ["", 3], ["  ", 3], ["1", 1], [" 10 ", 10],
+    ["abc", 3], ["0", 3], ["-1", 3], ["2.5", 3], ["5x", 3],
+  ])("SMTP_MAX_CONNECTIONS=%p gives a pool of %p", async (value, expected) => {
+    const env = { SMTP_HOST: "smtp.example.fi", SMTP_PORT: "587" };
+    if (value !== undefined) env.SMTP_MAX_CONNECTIONS = value;
+    const options = await transportOptions(env);
+    expect(options.maxConnections).toBe(expected);
   });
 
   test("an unrecognised SMTP_SECURE on port 465 still uses implicit TLS", async () => {
