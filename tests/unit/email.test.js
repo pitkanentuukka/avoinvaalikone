@@ -261,6 +261,22 @@ describe("verifySmtp", () => {
     expect(Sentry.captureMessage).toHaveBeenCalledWith(expect.stringContaining("mailpit"), "warning");
   });
 
+  test.each(["abc", "0", "-1", "2.5"])("warns that SMTP_MAX_CONNECTIONS=%p is ignored", async (raw) => {
+    setEnv({ NODE_ENV: "development", SMTP_PORT: "587", SMTP_MAX_CONNECTIONS: raw });
+    transportMock.verify.mockResolvedValue(true);
+    await verifySmtp();
+    expect(warn.mock.calls.join(" ")).toContain(`SMTP_MAX_CONNECTIONS="${raw}" ei ole kelvollinen`);
+    expect(warn.mock.calls.join(" ")).toContain("käytetään oletusarvoa 3");
+    expect(Sentry.captureMessage).toHaveBeenCalledWith(expect.stringContaining("SMTP_MAX_CONNECTIONS"), "warning");
+  });
+
+  test.each(["", "1", "10"])("doesn't warn about SMTP_MAX_CONNECTIONS=%p", async (raw) => {
+    setEnv({ NODE_ENV: "development", SMTP_PORT: "587", SMTP_MAX_CONNECTIONS: raw });
+    transportMock.verify.mockResolvedValue(true);
+    await verifySmtp();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
   test("doesn't warn about dev values outside production", async () => {
     setEnv({ NODE_ENV: "development", SMTP_HOST: "localhost", SMTP_PORT: "1025", SMTP_FROM: "noreply@example.com" });
     transportMock.verify.mockResolvedValue(true);

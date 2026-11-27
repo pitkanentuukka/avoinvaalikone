@@ -25,11 +25,13 @@ const DEFAULT_PORT = 587;
 // handshake with an opaque "wrong version number".
 const STARTTLS_PORTS = [587, 25];
 const MAILPIT_PORT = 1025;
+const DEFAULT_MAX_CONNECTIONS = 3;
 const SECURE_ON = ["true", "1", "yes", "on"];
 const SECURE_OFF = ["false", "0", "no", "off"];
 
 /**
- * The port, implicit-TLS flag and warnings, from SMTP_PORT and SMTP_SECURE.
+ * The port, implicit-TLS flag, pool size and warnings, from SMTP_PORT,
+ * SMTP_SECURE and SMTP_MAX_CONNECTIONS.
  * Everything that reports the port uses this, so the logs name the port the
  * transport dials (#214).
  *
@@ -67,15 +69,27 @@ function smtpSettings() {
   } else if (STARTTLS_PORTS.includes(port) && secureFlag) {
     problems.push(`SMTP_SECURE=${rawSecure} portissa ${port}: portti käyttää STARTTLS-yhteyttä, joten suora TLS-yhteys epäonnistuu. Poista SMTP_SECURE tai käytä porttia 465.`);
   }
-  return { port, secure: secureFlag || onPort465, problems };
+
+  // nodemailer's pool turns a falsy maxConnections into 5 and never opens a
+  // connection for a negative one, so every send would wait forever without
+  // a trace in email_log. Anything but a positive integer gets the default.
+  const rawMax = process.env.SMTP_MAX_CONNECTIONS;
+  const maxText = (rawMax ?? "").trim();
+  let maxConnections = DEFAULT_MAX_CONNECTIONS;
+  if (/^\d+$/.test(maxText) && Number(maxText) >= 1) {
+    maxConnections = Number(maxText);
+  } else if (maxText) {
+    problems.push(`SMTP_MAX_CONNECTIONS="${rawMax}" ei ole kelvollinen yhteysmäärä, ja se ohitetaan: käytetään oletusarvoa ${DEFAULT_MAX_CONNECTIONS}. Anna positiivinen kokonaisluku.`);
+  }
+  return { port, secure: secureFlag || onPort465, maxConnections, problems };
 }
 
 function getTransport() {
   if (!transport) {
-    const { port, secure } = smtpSettings();
+    const { port, secure, maxConnections } = smtpSettings();
     transport = nodemailer.createTransport({
       pool: true,
-      maxConnections: parseInt(process.env.SMTP_MAX_CONNECTIONS || "3"),
+      maxConnections,
       host: process.env.SMTP_HOST,
       port,
       secure,
