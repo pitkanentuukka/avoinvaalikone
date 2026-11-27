@@ -29,17 +29,26 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml stop backend
 #    --single-transaction makes it all or nothing: on the first error
 #    pg_restore stops and rolls back, and the database is left as it was.
 #    Until it commits, the old tables' files stay on disk next to the new
-#    ones, so it needs free space for a second copy of the data.
+#    ones and the new data also goes to the WAL, so it needs free space for
+#    a second copy of the data plus up to 1 GB (max_wal_size).
 #    If it fails, read the first "pg_restore: error:" line:
 #    - The dump is truncated or corrupt ("could not read from input file",
 #      "could not uncompress data", "possibly corrupt archive", "does not
-#      appear to be a valid archive"): fetch another dump (step 1) and
-#      repeat this step with it.
-#    - "could not open input file": the path or <stamp> is wrong; fix it
-#      and repeat.
-#    - "deadlock detected": the nightly backup was running; repeat once it
-#      has finished.
+#      appear to be a valid archive", "input file is too short"): fetch
+#      another dump (step 1) and repeat this step with it.
+#    - "could not open input file", or "directory ... does not appear to be
+#      a valid archive": the path or <stamp> is wrong. Fix it and repeat,
+#      fetching the right dump first (step 1) if the stamp was wrong there.
+#    - "deadlock detected": the nightly backup was running. Once it has
+#      finished, fetch the dump from the bucket (step 1) and repeat with
+#      /backups/restore/: the backup has replaced the local dump with one
+#      of the current data.
 #    - "No space left on device": free disk space (above) and repeat.
+#    - "server closed the connection unexpectedly": Postgres crashed, most
+#      likely on a full disk while writing WAL (look for PANIC in
+#      `docker compose -f docker-compose.yml -f docker-compose.prod.yml logs db`).
+#      It recovers to the unchanged data, but the aborted restore's files
+#      can stay on disk, so free more space than before and repeat.
 #    - "other objects depend on it": a migration newer than the dump added
 #      a table that references the dumped ones. Every older dump fails the
 #      same way, so trying another won't help.
