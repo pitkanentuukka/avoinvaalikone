@@ -13,8 +13,13 @@ const SCRIPT = path.join(__dirname, "../../scripts/deploy.sh");
 // `docker ps` lists one mailpit container, or fails with STUB_PS=fail;
 // `docker compose …` exits with STUB_COMPOSE_EXIT, as it does when the prod
 // file's required variables (SMTP_HOST, SMTP_FROM) are missing from .env.
+// Any call containing STUB_FAIL (e.g. " pull ", "build --pull") fails, as a
+// pull does when Docker Hub is down or rate-limits the server.
 const DOCKER_STUB = `#!/bin/sh
 echo "$*" >> "$STUB_LOG"
+if [ -n "\${STUB_FAIL:-}" ]; then
+  case "$*" in *"$STUB_FAIL"*) echo "stub: $* failed" >&2; exit 1 ;; esac
+fi
 case "$1" in
   ps) [ "\${STUB_PS:-}" = fail ] && { echo "permission denied" >&2; exit 1; }; echo mailpit123 ;;
   compose) exit "\${STUB_COMPOSE_EXIT:-0}" ;;
@@ -31,10 +36,12 @@ function runDeploy(env = {}) {
   });
   const calls = fs.existsSync(log) ? fs.readFileSync(log, "utf8").trim().split("\n") : [];
   fs.rmSync(dir, { recursive: true, force: true });
-  return { status: result.status, calls };
+  return { status: result.status, calls, output: result.stdout + result.stderr };
 }
 
 const isMailpitRemoval = (call) => call === "rm -f mailpit123";
+const COMPOSE = "compose -f docker-compose.yml -f docker-compose.prod.yml";
+const isUp = (call) => call.startsWith(`${COMPOSE} up `) && / -d( |$)/.test(call);
 
 describe("scripts/deploy.sh mailpit removal", () => {
   // The project is named after the directory (no top-level `name:`), so
@@ -73,8 +80,66 @@ describe("scripts/deploy.sh mailpit removal", () => {
   test("removes it again after `up`", () => {
     const { status, calls } = runDeploy();
     expect(status).toBe(0);
-    const up = calls.findIndex((c) => / up --build -d$/.test(c));
+    const up = calls.findIndex(isUp);
     expect(up).toBeGreaterThan(-1);
     expect(calls.slice(up + 1).some(isMailpitRemoval)).toBe(true);
+  });
+});
+
+// Compose's default pull policy is `missing`: without these the server kept
+// the digest it first pulled of every tag, base images and service images
+// alike, and never got their security patches (#216).
+describe("scripts/deploy.sh image refresh", () => {
+  test("pulls the service images before `up`, skipping the ones it builds", () => {
+    const { status, calls } = runDeploy();
+    expect(status).toBe(0);
+    const pull = calls.indexOf(`${COMPOSE} pull --ignore-buildable`);
+    expect(pull).toBeGreaterThan(-1);
+    expect(pull).toBeLessThan(calls.findIndex(isUp));
+  });
+
+  test("builds on freshly pulled base images before `up`", () => {
+    const { status, calls } = runDeploy();
+    expect(status).toBe(0);
+    const build = calls.indexOf(`${COMPOSE} build --pull`);
+    expect(build).toBeGreaterThan(-1);
+    expect(build).toBeLessThan(calls.findIndex(isUp));
+  });
+
+  // The old images keep serving; Docker Hub being down mustn't block a fix.
+  test("a failed service pull warns and deploys with the images it has", () => {
+    const { status, calls, output } = runDeploy({ STUB_FAIL: " pull --ignore-buildable" });
+    expect(status).toBe(0);
+    expect(calls.some(isUp)).toBe(true);
+    expect(output).toMatch(/::warning::.*pull/i);
+  });
+
+  test("a failed base pull warns and builds on the base images it has", () => {
+    const { status, calls, output } = runDeploy({ STUB_FAIL: "build --pull" });
+    expect(status).toBe(0);
+    const fallback = calls.indexOf(`${COMPOSE} build`);
+    expect(fallback).toBeGreaterThan(calls.indexOf(`${COMPOSE} build --pull`));
+    expect(fallback).toBeLessThan(calls.findIndex(isUp));
+    expect(output).toMatch(/::warning::.*base image/i);
+  });
+
+  test("a build that fails on its own still fails the deploy, before `up`", () => {
+    const { status, calls } = runDeploy({ STUB_FAIL: " build" });
+    expect(status).not.toBe(0);
+    expect(calls.some(isUp)).toBe(false);
+  });
+
+  // Each refresh, and each rebuild, leaves the previous image untagged.
+  test("prunes dangling images after `up`", () => {
+    const { status, calls } = runDeploy();
+    expect(status).toBe(0);
+    const prune = calls.indexOf("image prune -f");
+    expect(prune).toBeGreaterThan(calls.findIndex(isUp));
+  });
+
+  test("a failed prune doesn't fail a deploy that has happened", () => {
+    const { status, output } = runDeploy({ STUB_FAIL: "image prune" });
+    expect(status).toBe(0);
+    expect(output).toMatch(/::warning::.*prune/i);
   });
 });
