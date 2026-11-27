@@ -141,7 +141,8 @@ jobs:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     # Later deploys queue behind this job, so it must never wait out GitHub's
-    # 6-hour limit (#178). A deploy takes about a minute; 30 leaves room for a
+    # 6-hour limit (#178). A deploy takes about a minute, more when upstream
+    # images have moved (deploy.sh pulls them, #216); 30 leaves room for a
     # build with a cold cache. Not always for one that first waits (up to 10
     # minutes) for a lost deploy to finish (#205); hitting the limit then
     # only fails the job, as the deploy carries on detached on the server.

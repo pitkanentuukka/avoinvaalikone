@@ -14,23 +14,36 @@ const SCRIPT = path.join(__dirname, "../../scripts/deploy.sh");
 // `docker compose …` exits with STUB_COMPOSE_EXIT, as it does when the prod
 // file's required variables (SMTP_HOST, SMTP_FROM) are missing from .env.
 // Any call containing STUB_FAIL (e.g. " pull ", "build --pull") fails, as a
-// pull does when Docker Hub is down or rate-limits the server.
+// pull does when Docker Hub is down or rate-limits the server. With
+// STUB_PULL_HANG set, `compose … pull` hangs, as a stalled transfer does.
 const DOCKER_STUB = `#!/bin/sh
 echo "$*" >> "$STUB_LOG"
 if [ -n "\${STUB_FAIL:-}" ]; then
   case "$*" in *"$STUB_FAIL"*) echo "stub: $* failed" >&2; exit 1 ;; esac
 fi
+case "$* " in *" pull "*) [ -n "\${STUB_PULL_HANG:-}" ] && exec sleep 30 ;; esac
 case "$1" in
   ps) [ "\${STUB_PS:-}" = fail ] && { echo "permission denied" >&2; exit 1; }; echo mailpit123 ;;
   compose) exit "\${STUB_COMPOSE_EXIT:-0}" ;;
 esac
 `;
 
-function runDeploy(env = {}) {
+// With `dotenv`, the script runs from a copy of the tree with that .env (it
+// reads .env from the tree it is in); otherwise from this checkout.
+function runDeploy(env = {}, dotenv) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "deploy-test-"));
   fs.writeFileSync(path.join(dir, "docker"), DOCKER_STUB, { mode: 0o755 });
   const log = path.join(dir, "calls.log");
-  const result = spawnSync("sh", [SCRIPT], {
+  let script = SCRIPT;
+  if (dotenv !== undefined) {
+    const tree = path.join(dir, "tree");
+    fs.mkdirSync(path.join(tree, "scripts"), { recursive: true });
+    script = path.join(tree, "scripts", "deploy.sh");
+    fs.copyFileSync(SCRIPT, script);
+    fs.copyFileSync(path.join(__dirname, "../../Caddyfile"), path.join(tree, "Caddyfile"));
+    fs.writeFileSync(path.join(tree, ".env"), dotenv);
+  }
+  const result = spawnSync("sh", [script], {
     env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, STUB_LOG: log, ...env },
     encoding: "utf8",
   });
@@ -121,12 +134,58 @@ describe("scripts/deploy.sh image refresh", () => {
     expect(fallback).toBeGreaterThan(calls.indexOf(`${COMPOSE} build --pull`));
     expect(fallback).toBeLessThan(calls.findIndex(isUp));
     expect(output).toMatch(/::warning::.*base image/i);
+    // It may as well be the newer bases that break the build.
+    expect(output).toMatch(/::warning::.*output above/i);
   });
 
   test("a build that fails on its own still fails the deploy, before `up`", () => {
     const { status, calls } = runDeploy({ STUB_FAIL: " build" });
     expect(status).not.toBe(0);
     expect(calls.some(isUp)).toBe(false);
+  });
+
+    test("`up` neither rebuilds nor pulls again", () => {
+    const { calls } = runDeploy();
+    const up = calls.find(isUp);
+    expect(up).not.toMatch(/--build|--pull/);
+  });
+
+  // A config Compose refuses (a .env without SMTP_HOST) is not Docker Hub's
+  // fault: it must fail with Compose's message, not warnings blaming the pull.
+  test("a config Compose refuses fails before any pull warning", () => {
+    const { status, calls, output } = runDeploy({ STUB_COMPOSE_EXIT: "1" });
+    expect(status).not.toBe(0);
+    expect(calls.filter((c) => c.startsWith("compose"))).toEqual([`${COMPOSE} config -q`]);
+    expect(output).not.toMatch(/::warning::/);
+  });
+
+  test("a pull that hangs is given up on, and the deploy carries on", () => {
+    const { status, calls, output } = runDeploy({ STUB_PULL_HANG: "1", DEPLOY_PULL_TIMEOUT: "1" });
+    expect(status).toBe(0);
+    expect(calls.some(isUp)).toBe(true);
+    expect(output).toMatch(/::warning::.*pull/i);
+  });
+
+  // The prune deletes the replaced images, so the log is where the digests
+  // that last worked can still be found (docs/runbook.md, Rollback).
+  test("logs the image digests it starts from, before pulling", () => {
+    const { calls } = runDeploy();
+    const list = calls.findIndex((c) => c.startsWith("image ls --digests"));
+    expect(list).toBeGreaterThan(-1);
+    expect(list).toBeLessThan(calls.indexOf(`${COMPOSE} pull --ignore-buildable`));
+  });
+
+  // A freeze (election night): a hotfix shouldn't also restart the database
+  // because upstream rebuilt postgres:16-alpine that day.
+  test.each([
+    ["the environment", { DEPLOY_PULL: "0" }, ""],
+    [".env", {}, "SMTP_HOST=x\nDEPLOY_PULL=0\n"],
+  ])("DEPLOY_PULL=0 in %s skips the refresh", (_where, env, dotenv) => {
+    const { status, calls } = runDeploy(env, dotenv);
+    expect(status).toBe(0);
+    expect(calls.some((c) => / pull( |$)/.test(c) || /--pull/.test(c))).toBe(false);
+    expect(calls.indexOf(`${COMPOSE} build`)).toBeLessThan(calls.findIndex(isUp));
+    expect(calls.indexOf(`${COMPOSE} build`)).toBeGreaterThan(-1);
   });
 
   // Each refresh, and each rebuild, leaves the previous image untagged.
@@ -156,6 +215,7 @@ describe("scripts/deploy.sh Caddyfile validation", () => {
     expect(status).toBe(0);
     const pull = calls.indexOf(`${COMPOSE} pull --ignore-buildable`);
     const validate = calls.findIndex(isValidate);
+    expect(pull).toBeGreaterThan(-1);
     expect(validate).toBeGreaterThan(pull);
     expect(validate).toBeLessThan(calls.findIndex(isUp));
   });
@@ -167,9 +227,32 @@ describe("scripts/deploy.sh Caddyfile validation", () => {
   });
 });
 
-// The only floating major version among the images the deploy pulls: a new
-// major Caddy would otherwise arrive with a routine deploy.
-test("docker-compose.prod.yml pins Caddy's major version", () => {
+// Patch releases arrive with every deploy, minor ones only deliberately: the
+// Caddyfile's token redaction (#36) depends on how Caddy lays out its logs,
+// which `caddy validate` can't check. A digest may follow, as docs/runbook.md
+// says to pin one when a pulled image breaks the site.
+test("docker-compose.prod.yml pins Caddy's minor version", () => {
   const prod = fs.readFileSync(path.join(__dirname, "../../docker-compose.prod.yml"), "utf8");
-  expect(prod).toMatch(/^\s*image: caddy:2-alpine$/m);
+  expect(prod).toMatch(/^\s*image: caddy:2\.\d+-alpine(@sha256:[0-9a-f]{64})?\s*$/m);
+});
+
+// The pulled nginx gets no `caddy validate` of its own: a config it rejects
+// must fail the build (and so the deploy, before `up`), not crash-loop the
+// frontend.
+test("the frontend image checks its nginx config at build time", () => {
+  const dockerfile = fs.readFileSync(path.join(__dirname, "../../vaalikone-frontend/Dockerfile"), "utf8");
+  const copy = dockerfile.indexOf("COPY nginx.conf");
+  const check = dockerfile.search(/^RUN nginx -t\b/m);
+  expect(copy).toBeGreaterThan(-1);
+  expect(check).toBeGreaterThan(copy);
+});
+
+// Compose's default stop timeout (10 s) can SIGKILL Postgres mid-checkpoint,
+// and a pulled postgres image now recreates db on a routine deploy.
+test("db gets time to shut down cleanly", () => {
+  const base = fs.readFileSync(path.join(__dirname, "../../docker-compose.yml"), "utf8");
+  const db = base.slice(base.indexOf("\n  db:\n"), base.indexOf("\n  redis:\n"));
+  const grace = db.match(/^\s*stop_grace_period: (\d+)s$/m);
+  expect(grace).not.toBeNull();
+  expect(Number(grace[1])).toBeGreaterThanOrEqual(30);
 });

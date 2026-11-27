@@ -47,23 +47,45 @@ remove_mailpit() {
 
 remove_mailpit
 
+# Stop on a config Compose refuses (a .env without SMTP_HOST, a YAML error)
+# with Compose's own message, before the pulls below could blame Docker Hub
+# for it.
+$dc config -q
+
 # Compose's default pull policy is `missing`: without these the server kept
 # the digest it first pulled of every tag (the service images and the build
 # stages' bases), and never got their Alpine, OpenSSL, Node, nginx,
-# PostgreSQL or Caddy patches (#216). Neither stops a running container.
-# A failed pull (Docker Hub down, or rate-limiting the server) only warns:
-# the images already here keep serving, and a fix shouldn't wait on Docker
-# Hub. The warnings start with `::warning::` so that CI, which follows this
-# log, shows them on the run's summary.
-if ! $dc pull --ignore-buildable; then
-  echo "::warning::Pulling the service images failed: deploying with the copies already on the server (see \"Deploy warns\" in docs/runbook.md)"
-fi
-# No way to pull the bases but carry on without them, so on a failure build
-# again with the bases already here. A build that fails for its own reasons
-# fails that way too, and stops the deploy before `up`.
-if ! $dc build --pull; then
-  echo "::warning::Building on freshly pulled base images failed: building on the base images already on the server (see \"Deploy warns\" in docs/runbook.md)"
+# PostgreSQL or Caddy patches (#216). Neither stops a running container, but
+# `up` then recreates each service whose image moved: db, redis and caddy
+# too, for a few seconds each. DEPLOY_PULL=0, in the environment or in .env,
+# skips the refresh, for a freeze such as election night (docs/runbook.md).
+#
+# A failed or stalled pull (Docker Hub down, or rate-limiting the server)
+# only warns: the images already here keep serving, and a fix shouldn't wait
+# on Docker Hub. The warnings start with `::warning::` so that CI, which
+# follows this log, shows them on the run's summary.
+pull=${DEPLOY_PULL-$(sed -n "s/^DEPLOY_PULL=[\"']\{0,1\}\([^\"']*\)[\"']\{0,1\}[[:space:]]*$/\1/p" .env 2>/dev/null | tail -n 1)}
+if [ "$pull" = 0 ]; then
+  echo "DEPLOY_PULL=0: building and running on the images already on the server"
   $dc build
+else
+  # What this deploy starts from: the prune below deletes the images it
+  # replaces, so this is where the digests that last worked are recorded
+  # (docs/runbook.md, Rollback). The build's own output names the base
+  # images' digests (`FROM …@sha256:`).
+  echo "Images before this deploy:"
+  docker image ls --digests --format '{{.Repository}}:{{.Tag}} {{.Digest}}' || true
+  if ! timeout -k 10 "${DEPLOY_PULL_TIMEOUT:-300}" $dc pull --ignore-buildable; then
+    echo "::warning::Pulling the service images failed or timed out (see the output above): deploying with the copies already on the server (see \"Deploy warns\" in docs/runbook.md)"
+  fi
+  # No way to pull the bases but carry on without them, so on a failure build
+  # again with the bases already here. A build that fails for its own reasons
+  # fails that way too, and stops the deploy before `up`; one that fails only
+  # on the newer bases succeeds on the old ones, with the same warning.
+  if ! timeout -k 10 "${DEPLOY_BUILD_TIMEOUT:-900}" $dc build --pull; then
+    echo "::warning::Building on freshly pulled base images failed or timed out: Docker Hub couldn't be reached, or the build fails on the newer base images (see the output above). Building on the base images already on the server (see \"Deploy warns\" in docs/runbook.md)"
+    $dc build
+  fi
 fi
 
 # Validate the deployed Caddyfile on the Caddy image `up` is about to run,

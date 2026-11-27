@@ -34,6 +34,12 @@ COPY --from=build /app/dist /usr/share/nginx/html
 # Copy nginx configuration
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
+# Fails the build, and so the deploy before `up`, on a config this nginx
+# rejects, rather than crash-looping the frontend: the deploy pulls the
+# newest nginx each time (#216). No DNS needed: the backend is resolved at
+# request time (proxy_pass with a variable).
+RUN nginx -t
+
 EXPOSE 8080
 
 CMD ["nginx", "-g", "daemon off;"]
