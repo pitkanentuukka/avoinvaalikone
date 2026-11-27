@@ -148,6 +148,14 @@ describe("errorText", () => {
     expect(translations[lang].requestFailed(502)).toContain("HTTP 502");
   });
 
+  test.each([
+    [502, true], [503, true], [500, true], [429, true],
+    [403, false], [413, false], [400, false],
+  ])("the placeholder for %i advises a retry: %p", (s, retry) => {
+    expect(translations.fi.requestFailed(s).endsWith(" Yritä hetken kuluttua uudelleen.")).toBe(retry);
+    expect(translations.en.requestFailed(s).endsWith(" Please try again shortly.")).toBe(retry);
+  });
+
   test("the app's own message is shown as it is", () => {
     expect(errorText(status(429, "Liian monta pyyntöä.", true), translations.en)).toBe("Liian monta pyyntöä.");
   });
@@ -163,6 +171,8 @@ describe("errorText", () => {
     const path = require("path");
     const source = fs.readFileSync(path.join(__dirname, "../../vaalikone-frontend/src/App.jsx"), "utf8");
     expect(source).not.toMatch(/\.message\b/);
+    // Nor the error itself, stringified or interpolated.
+    expect(source).not.toMatch(/setError\(\s*(?:(?:e|err|error)\s*\)|String\(|`)/);
   });
 });
 
@@ -192,7 +202,7 @@ describe("saveOwnProfile", () => {
 
 describe("error messages", () => {
   const htmlResponse = (status) => ({ ok: false, status, json: async () => { throw new SyntaxError("Unexpected token <"); } });
-  const failed = (status) => `Palvelin ei pystynyt käsittelemään pyyntöä (HTTP ${status}). Yritä hetken kuluttua uudelleen.`;
+  const failed = (status) => `Palvelin ei pystynyt käsittelemään pyyntöä (HTTP ${status}).`;
   // Without the app's own message the error gets a Finnish placeholder, not
   // "Server error" or "HTTP 413" (#211).
   test.each([

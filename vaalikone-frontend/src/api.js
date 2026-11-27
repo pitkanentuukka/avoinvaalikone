@@ -63,8 +63,8 @@ export function errorText(err, t) {
   return err?.message;
 }
 
-// The errors' own messages, for anything that shows one without errorText,
-// are in Finnish like the rest of the UI.
+// The network and placeholder messages, for anything that shows one without
+// errorText, are in Finnish like the rest of the UI.
 const fi = translations.fi;
 
 // The request never got a usable answer: fetch failed or the body couldn't be
