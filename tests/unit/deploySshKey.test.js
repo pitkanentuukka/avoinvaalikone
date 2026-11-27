@@ -27,7 +27,13 @@ function runSetup(secrets, { prelude = "" } = {}) {
   const bin = path.join(dir, "bin");
   fs.mkdirSync(bin);
   fs.writeFileSync(path.join(bin, "ssh-keyscan"), "#!/bin/sh\necho keyscan-stub\n", { mode: 0o755 });
-  const context = { secrets, vars: {} };
+  const context = {
+    secrets,
+    vars: {
+      SSH_KNOWN_HOSTS:
+        "80.69.172.220 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl",
+    },
+  };
   const s = step("deploy", "Set up SSH");
   const stepEnv = Object.fromEntries(
     Object.entries(s.env || {}).map(([k, v]) => [k, interpolate(v, context)])
