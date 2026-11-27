@@ -59,9 +59,15 @@ describe("docker-compose.yml backend environment", () => {
   // a throttling provider, was always the default 3 under Compose (#214).
   test("forwards every SMTP_* variable src/email.js reads", () => {
     const text = fs.readFileSync(path.join(__dirname, "../../src/email.js"), "utf8");
-    const names = new Set([...text.matchAll(/process\.env\.(SMTP_[A-Z_]+)/g)].map(([, name]) => name));
-    for (const [, list] of text.matchAll(/const \{([^}]+)\} = process\.env/g)) {
-      for (const name of list.split(",").map((n) => n.trim())) if (name.startsWith("SMTP_")) names.add(name);
+    const names = new Set(
+      [...text.matchAll(/process\.env(?:\.|\[["'])(SMTP_[A-Z_]+)/g)].map(([, name]) => name)
+    );
+    // const { SMTP_HOST, SMTP_PORT: port, SMTP_FROM = "x" } = process.env
+    for (const [, list] of text.matchAll(/(?:const|let|var)\s*\{([^}]+)\}\s*=\s*process\.env\b/g)) {
+      for (const item of list.split(",")) {
+        const name = item.split(/[:=]/)[0].trim();
+        if (name.startsWith("SMTP_")) names.add(name);
+      }
     }
     expect(names).toContain("SMTP_MAX_CONNECTIONS");
     expect(backendEnvironmentKeys()).toEqual(expect.arrayContaining([...names]));

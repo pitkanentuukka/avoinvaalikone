@@ -86,7 +86,7 @@ services:
       SMTP_FROM: ${SMTP_FROM:-noreply@example.com}
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASS: ${SMTP_PASS:-}
-      # Per replica: production opens up to replicas × this (default 3).
+      # Pool size per replica (default 3); production opens up to 3 replicas × this.
       SMTP_MAX_CONNECTIONS: ${SMTP_MAX_CONNECTIONS:-}
     ports:
       - "3000:3000"
