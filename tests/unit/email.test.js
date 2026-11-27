@@ -270,7 +270,7 @@ describe("verifySmtp", () => {
     expect(Sentry.captureMessage).toHaveBeenCalledWith(expect.stringContaining("SMTP_MAX_CONNECTIONS"), "warning");
   });
 
-  test.each(["", "1", "10"])("doesn't warn about SMTP_MAX_CONNECTIONS=%p", async (raw) => {
+  test.each(["", "  ", "1", "10"])("doesn't warn about SMTP_MAX_CONNECTIONS=%p", async (raw) => {
     setEnv({ NODE_ENV: "development", SMTP_PORT: "587", SMTP_MAX_CONNECTIONS: raw });
     transportMock.verify.mockResolvedValue(true);
     await verifySmtp();

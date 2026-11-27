@@ -126,7 +126,7 @@ describe("SMTP transport encryption", () => {
   // connection for a negative one, so every send would wait forever. An
   // invalid value gets the documented default of 3 instead.
   test.each([
-    [undefined, 3], ["", 3], ["1", 1], [" 10 ", 10],
+    [undefined, 3], ["", 3], ["  ", 3], ["1", 1], [" 10 ", 10],
     ["abc", 3], ["0", 3], ["-1", 3], ["2.5", 3], ["5x", 3],
   ])("SMTP_MAX_CONNECTIONS=%p gives a pool of %p", async (value, expected) => {
     const env = { SMTP_HOST: "smtp.example.fi", SMTP_PORT: "587" };
