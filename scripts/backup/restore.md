@@ -4,7 +4,7 @@ Dumps are `pg_dump -Fc` custom-format archives named `vaalikone-<UTC stamp>.dump
 The newest one is always in the `backup_data` volume (`/backups` inside the
 backup container); older ones live in the object-storage bucket under `postgres/`.
 
-Keep the restore clear of 03:00 UTC: the nightly backup would dump a half-restored database, keep it as the only local dump and upload it.
+Keep the restore clear of 03:00 UTC: the restore and the nightly backup wait on each other's locks, so either the restore stalls until the dump is done or the dump fails and that night has no backup.
 
 ```bash
 # BACKUP_BUCKET and DATABASE_URL are set only inside the backup container, so
@@ -23,9 +23,15 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml stop backend
 # 3. Restore (drops and recreates objects inside the existing database).
 #    Use /backups/vaalikone-<stamp>.dump for the local one.
 #    --single-transaction makes it all or nothing: on the first error
-#    pg_restore stops and rolls back, so a truncated or corrupt dump leaves
-#    the database as it was. If it fails, fetch another dump (step 1) and
-#    run this step again with it; the backends stay stopped meanwhile.
+#    pg_restore stops and rolls back, and the database is left as it was.
+#    If it fails, read the first error before trying again:
+#    - The dump is unreadable or truncated ("could not read input file",
+#      "unexpected end of file"): fetch another dump (step 1) and repeat
+#      this step with it.
+#    - Anything else (a mistyped <stamp>, a full disk, or "other objects
+#      depend on it" from a table added by a migration newer than the dump)
+#      fails the same way with every dump, so trying older ones won't help.
+#    To give up, go on to step 4: the backends restart on the unchanged data.
 docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backup \
   sh -c 'pg_restore --clean --if-exists --single-transaction -d "$DATABASE_URL" /backups/restore/vaalikone-<stamp>.dump'
 
