@@ -110,6 +110,18 @@ describe("SMTP transport encryption", () => {
     expect(options).toMatchObject({ port: 465, secure: true, requireTLS: false });
   });
 
+  // An invalid port is replaced by the default, as nodemailer itself would,
+  // rather than parsed to its leading digits ("58 7" used to dial 58) (#214).
+  test.each([
+    ["abc", undefined, 587, false], ["58 7", undefined, 587, false], ["0x1d1", undefined, 587, false],
+    ["65536", undefined, 587, false], ["abc", "true", 465, true], ["", undefined, 587, false],
+  ])("SMTP_PORT=%p (SMTP_SECURE=%p) dials port %p", async (port, secure, expected, implicitTls) => {
+    const env = { SMTP_HOST: "smtp.example.fi", SMTP_PORT: port };
+    if (secure !== undefined) env.SMTP_SECURE = secure;
+    const options = await transportOptions(env);
+    expect(options).toMatchObject({ port: expected, secure: implicitTls, requireTLS: !implicitTls });
+  });
+
   test("an unrecognised SMTP_SECURE on port 465 still uses implicit TLS", async () => {
     const options = await transportOptions({ SMTP_HOST: "smtp.example.fi", SMTP_PORT: "465", SMTP_SECURE: "ture" });
     expect(options).toMatchObject({ secure: true, requireTLS: false });
