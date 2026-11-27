@@ -134,7 +134,6 @@ describe("POST /api/candidates/party/:partyToken/candidates/:id/send-link", () =
     delete process.env.SMTP_HOST;
     db.query.mockResolvedValueOnce({ rows: [PARTY] });
     db.query.mockResolvedValueOnce({ rows: [{ id: CANDIDATE_ID, name: "Eeva", email: "eeva@example.fi", token: CANDIDATE_TOKEN }] });
-    sendCandidateLinkEmail.mockRejectedValueOnce(new Error("SMTP is not configured"));
     const res = await request(app).post(url);
     expect(res.status).toBe(503);
     expect(res.body).toEqual({ error: "Sähköpostin lähetys ei ole käytössä" });
