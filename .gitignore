@@ -4,11 +4,7 @@ node_modules/
 .env.local
 *.log
 
-# SSH keys — never commit
-laptop
-laptop.pub
-upcloud
-upcloud.pub
+# Keep SSH keys outside the repo (~/.ssh); never commit one
 *.pem
 
 # Test artifacts

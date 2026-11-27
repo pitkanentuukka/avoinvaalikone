@@ -15,9 +15,20 @@ git push origin main         # CI redeploys the reverted tree
 
 Migrations are **forward-only** (`migration_history` table): never delete or edit
 an applied migration — write a new compensating migration instead. If a deploy is
-stuck and CI is unavailable, rsync an earlier checkout to the box (as the
-workflow's "Rsync to server" step does) and run `sh /opt/vaalikone/scripts/deploy.sh`
-there. Not a bare `compose up`: it doesn't pick up a changed Caddyfile.
+stuck and CI is unavailable, rsync an earlier checkout to the box with the
+rsync command in docs/scaling.md, "Deploy the code" (its `--rsync-path` waits for
+a deploy still running there), and once that has succeeded run
+`sh /opt/vaalikone/scripts/deploy-detached.sh` there: it runs `scripts/deploy.sh`
+detached, so a dropped connection doesn't cut the deploy short, and logs it in
+`/var/log/vaalikone-deploy/` (as root; another user's go to
+`~/.local/state/vaalikone-deploy/`). Not a bare `compose up`: it doesn't pick up
+a changed Caddyfile. A checkout from before
+`deploy-detached.sh` was added (#205) doesn't have it, and its `deploy.sh` doesn't
+take the lock itself: run
+`setsid -w nohup sh -c 'flock -w 600 /opt/vaalikone sh /opt/vaalikone/scripts/deploy.sh; echo "Deploy ended with exit status $?"' > ~/deploy.log 2>&1 </dev/null &`
+there instead (then `tail -f ~/deploy.log`; only that last line, with exit status
+1, means the lock wait ran out). Not with a newer `deploy.sh`: it
+would wait for that lock in vain.
 
 ## Incident quick reference
 
@@ -31,7 +42,8 @@ there. Not a bare `compose up`: it doesn't pick up a changed Caddyfile.
 | `statement timeout` errors | A query hit `PG_STATEMENT_TIMEOUT_MS` (10 s) | Find and fix the query; the timeout is protective, don't just raise it |
 | `SMTP-tarkistus epäonnistui` in backend logs or Sentry, or `failed` rows in `email_log` | Email isn't going out (candidate links, notifications) | Check `SMTP_*` in `/opt/vaalikone/.env` and the provider's status; after fixing, `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d backend`. Re-send missed candidate links from the admin's per-party "send candidate links" |
 | Deploy fails with `required variable SMTP_HOST` (or `SMTP_FROM`) `is missing a value` | `.env` has no SMTP settings | Add them (docs/production-readiness.md, Email) and deploy again. The old containers keep running meanwhile, but every `docker compose -f docker-compose.yml -f docker-compose.prod.yml …` command (`logs`, `ps`, `exec`) fails the same way until `.env` has them |
-| Deploy job timed out, or ssh says `Timeout, server 80.69.172.220 not responding.` | CI lost the server mid-deploy (#178); `deploy.sh` may have stopped partway (some services recreated, some not), or still be running there | On the server, check nothing is still deploying (`pgrep -af 'deploy.sh\|docker compose'`), then re-run the **latest** deploy job or push again (re-running an older one deploys its older tree) |
+| Deploy job timed out, or ssh says `Timeout, server 80.69.172.220 not responding.` | CI lost the server (#178), during the rsync or the deploy. A deploy that had started carries on there, detached (#205) | The job's log names the deploy's log (`Deploy log on the server: …`); if it doesn't, look in `/var/log/vaalikone-deploy/` for one from this run's time (the names are in UTC). None from then: the deploy never started, and the tree may be half-synced, so re-run as below. The log ends with the deploy's outcome (`Deploy ended … with exit status N`) once it has finished. Without that line it is still running if `pgrep -as <id>` lists any of its processes (`deploy.sh`, `docker`; after a reboot the id can belong to something else). The id is in the log's first line: `to stop it: pkill -s <id>`. No such processes means it was killed (or the server rebooted) partway. If it never started, failed or was killed, or the site looks wrong, re-run the **latest** deploy job or push again (re-running an older one deploys its older tree); it waits for a deploy that is still running |
+| Deploy fails with `Waiting for another deploy to finish` followed by rsync's `connection unexpectedly closed`, or with `Gave up: another deploy is still running` | A deploy, or several deploys or rsyncs in a row, has held the tree's lock for 10 minutes (#205) | `flock -n /opt/vaalikone true && echo free` tells whether the lock is still held. The holder's log, in `/var/log/vaalikone-deploy/` (or a non-root deployer's `~/.local/state/vaalikone-deploy/`), says `Got the deploy lock`; a deploy waiting behind it doesn't. `pgrep -as <id>`, with the id from the log's first line, lists the holder's processes (`deploy.sh`, `docker`); if it lists neither, that deploy has ended, and after a reboot the id can belong to something else, so don't kill it. Ctrl-C in the ssh session only stops following the log; if the deploy is stuck, stop all of it with the command in the log's first line (`to stop it: pkill -s <id>`), which can leave some services recreated and some not. If `pgrep -as <id>` still lists something, such as a hung `docker compose`, it keeps the lock: `pkill -KILL -s <id>`. No such log: someone ran `deploy.sh` or rsync directly (as root, `fuser -v /opt/vaalikone` lists the processes, holder and waiters alike). Then deploy again |
 | Backend restart loops | Migration failure (runs on every start) | `docker compose -f docker-compose.yml -f docker-compose.prod.yml logs backend`, fix the migration, redeploy |
 | 502/504 from the site | A proxy can't reach the next hop | Caddy and nginx don't log upstream errors (they'd log tokens, #36). `docker compose -f docker-compose.yml -f docker-compose.prod.yml ps` for a down container; `docker compose -f docker-compose.yml -f docker-compose.prod.yml logs frontend`: `upstream=-` = the backend name didn't resolve (no replica running), `upstream_status=502` with `uct=-` = no connection (a backend refused or is gone), 504 / a high `urt` = hung. No line there = Caddy couldn't reach the frontend |
 
