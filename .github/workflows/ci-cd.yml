@@ -154,17 +154,35 @@ jobs:
 
       # The ssh options (also used by rsync) give up on a server that stops
       # answering, rather than leaving the job to its timeout (#178).
+      # The server's host key is pinned in the SSH_KNOWN_HOSTS repository
+      # variable, and ssh accepts no other (#206): scanning it here would
+      # trust whoever answers at the address, and hand them the tree and a
+      # root session. Rotating the server's host key means updating the
+      # variable (docs/runbook.md). Only this file counts: the host's block
+      # names no other, and $HOME is spelled out because ssh expands `~` from
+      # the passwd entry (tests/unit/deployHostKey.test.js).
       - name: Set up SSH
+        env:
+          SSH_KNOWN_HOSTS: ${{ vars.SSH_KNOWN_HOSTS }}
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H 80.69.172.220 >> ~/.ssh/known_hosts
-          cat >> ~/.ssh/config <<'SSH_CONFIG'
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts_deploy
+          if ! ssh-keygen -F 80.69.172.220 -f ~/.ssh/known_hosts_deploy > /dev/null; then
+            echo "::error::The SSH_KNOWN_HOSTS repository variable has no host key for 80.69.172.220: see docs/runbook.md"
+            exit 1
+          fi
+          cat >> ~/.ssh/config <<SSH_CONFIG
           Host 80.69.172.220
             ConnectTimeout 10
             ServerAliveInterval 15
             ServerAliveCountMax 4
+            StrictHostKeyChecking yes
+            UserKnownHostsFile $HOME/.ssh/known_hosts_deploy
+            GlobalKnownHostsFile none
+            UpdateHostKeys no
+            VerifyHostKeyDNS no
           SSH_CONFIG
 
       # Waits for a deploy still running on the server (one this job's
