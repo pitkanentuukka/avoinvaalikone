@@ -118,12 +118,53 @@ describe("Set up SSH", () => {
       h.cleanup();
     }
   });
+
+  // A known-hosts entry with a marker never vouches for the server's key.
+  test.each(["@revoked", "@cert-authority"])("fails, naming the variable, when its only line is %s", (marker) => {
+    expectFailsNamingVariable(`${marker} ${real}`);
+  });
+
+  // ssh reads /etc/ssh/ssh_config after the step's config. It can't override
+  // what the step sets, but it could supply what the step leaves unset.
+  test("the runner's system config can't add a source of host keys", () => {
+    const h = setupWithImpostor();
+    try {
+      expect(h.result.status).toBe(0);
+      const options = sshOptions(h, {
+        after: "Host *\n  KnownHostsCommand /bin/echo %H ssh-ed25519 AAAA\n  StrictHostKeyChecking no\n  GlobalKnownHostsFile /etc/ssh/ssh_known_hosts\n",
+      });
+      expect(options.knownhostscommand).toBeUndefined();
+      expect(options.stricthostkeychecking).toBe("true");
+      expect(options.globalknownhostsfile).toEqual(["none"]);
+    } finally {
+      h.cleanup();
+    }
+  });
 });
 
-test("the steps that use ssh connect to the host the pinned key is for", () => {
-  for (const name of ["Rsync to server", "Build & restart services"]) {
-    expect(step("deploy", name).run).toContain(`root@${SERVER}`);
-  }
+// Options on the command line beat the config, so the commands that connect
+// must not loosen the check either.
+describe("the steps that connect", () => {
+  const sshArgs = {
+    "Rsync to server": (run) => run.match(/-e "ssh\b([^"]*)"[\s\S]*\broot@80\.69\.172\.220:/)?.[1],
+    "Build & restart services": (run) => run.match(/\bssh\b(.*?)\broot@80\.69\.172\.220\b/)?.[1],
+  };
+
+  test.each(Object.keys(sshArgs))("%s checks the pinned key", (name) => {
+    const args = sshArgs[name](step("deploy", name).run);
+    expect(args).toBeDefined();
+    const h = runSetupSsh({ vars: { SSH_KNOWN_HOSTS: real } });
+    try {
+      expect(h.result.status).toBe(0);
+      const options = sshOptions(h, { args: args.trim().split(/\s+/).filter(Boolean) });
+      expect(options.stricthostkeychecking).toBe("true");
+      expect(options.userknownhostsfile).toEqual([path.join(h.dir, ".ssh/known_hosts_deploy")]);
+      expect(options.globalknownhostsfile).toEqual(["none"]);
+      expect(options.knownhostscommand).toBeUndefined();
+    } finally {
+      h.cleanup();
+    }
+  });
 });
 
 // Rotating the server's host key breaks deploys until the variable is

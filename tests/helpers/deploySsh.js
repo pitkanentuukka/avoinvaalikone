@@ -53,11 +53,19 @@ function runSetupSsh({ vars = {}, scanned = "", sshConfig } = {}) {
   };
 }
 
-// ssh's effective options for the server, under the config the step wrote.
-// Options ssh lists several times (known-hosts files) come back as arrays.
-function sshOptions({ dir, env }) {
-  const config = path.join(dir, ".ssh/config");
-  const ssh = spawnSync("ssh", ["-G", "-F", config, `root@${SERVER}`], { env, encoding: "utf8" });
+// ssh's effective options for the server, under the config the step wrote,
+// given the command-line `args` a step passes (they beat the config). `after`
+// is config ssh reads after the step's, as it reads /etc/ssh/ssh_config,
+// which `-F` otherwise skips. Options ssh lists several times (known-hosts
+// files) come back as arrays.
+function sshOptions({ dir, env }, { args = [], after = "" } = {}) {
+  let config = path.join(dir, ".ssh/config");
+  if (after) {
+    const combined = path.join(dir, "config-with-system");
+    fs.writeFileSync(combined, `${fs.readFileSync(config, "utf8")}\n${after}`);
+    config = combined;
+  }
+  const ssh = spawnSync("ssh", ["-G", "-F", config, ...args, `root@${SERVER}`], { env, encoding: "utf8" });
   if (ssh.status !== 0) throw new Error(`ssh -G failed: ${ssh.stderr}`);
   const options = {};
   for (const line of ssh.stdout.split("\n").filter(Boolean)) {

@@ -24,7 +24,8 @@ describe("deploy job", () => {
     expect(job["timeout-minutes"] - used).toBeGreaterThanOrEqual(20);
   });
 
-  // rsync's `-e ssh` reads the same config.
+  // The helper runs the step and reads the config it wrote, which rsync's
+  // `-e ssh` reads too.
   test("ssh gives up on a server that stops answering", () => {
     const h = runSetupSsh({ vars: { SSH_KNOWN_HOSTS: `${SERVER} ssh-ed25519 ${PINNED_KEY}` } });
     try {
