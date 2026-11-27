@@ -212,6 +212,10 @@ router.post(
       if (!rows[0].email) {
         return res.status(409).json({ error: "Ehdokkaalla ei ole sähköpostiosoitetta" });
       }
+      // Without SMTP nothing can be sent: not a transient failure (502).
+      if (!process.env.SMTP_HOST) {
+        return res.status(503).json({ error: "Sähköpostin lähetys ei ole käytössä" });
+      }
       try {
         await sendCandidateLinkEmail(rows[0], req.party.name, frontendBaseUrl());
       } catch (mailErr) {
