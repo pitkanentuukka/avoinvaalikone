@@ -18,7 +18,8 @@ const translations = {
     copyFieldLabel: "Linkki",
     loading: "Ladataan...",
     retry: "Yritä uudelleen",
-    serverError: "Palvelinvirhe",
+    networkError: "Yhteys palvelimeen epäonnistui. Tarkista verkkoyhteys ja yritä uudelleen.",
+    requestFailed: (status) => `Palvelin ei pystynyt käsittelemään pyyntöä (HTTP ${status}). Yritä hetken kuluttua uudelleen.`,
     preview: "Esikatselu",
 
     // Header / Nav
@@ -296,7 +297,8 @@ const translations = {
     copyFieldLabel: "Link",
     loading: "Loading...",
     retry: "Retry",
-    serverError: "Server error",
+    networkError: "Could not connect to the server. Check your network connection and try again.",
+    requestFailed: (status) => `The server could not handle the request (HTTP ${status}). Please try again shortly.`,
     preview: "Preview",
 
     // Header / Nav

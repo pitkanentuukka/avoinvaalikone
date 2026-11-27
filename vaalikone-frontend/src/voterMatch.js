@@ -35,9 +35,9 @@ export function newMatchSubmission(payload, previous = null) {
 //
 // The failure step explains itself; the error is shown only when it is the
 // app's own message (a JSON `error` on a 4xx, e.g. the rate limit's). A
-// network failure's generic "check your connection" adds nothing to the
-// step's own text, and a 5xx ("HTTP 503") or a proxy's HTML error page
-// ("Server error") would be technical English in the Finnish UI.
+// network failure, a 5xx or a proxy's HTML error page gets only a generic
+// placeholder ("check your connection", "HTTP 503"), which adds nothing to
+// the step's own text; the app's own 5xx outside production is raw internals.
 export async function runMatch(api, { payload, sessionId }) {
   try {
     const { results, questionCount } = await api.voterMatch(payload, { sessionId });
