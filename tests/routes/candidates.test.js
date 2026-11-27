@@ -124,6 +124,22 @@ describe("POST /api/candidates/party/:partyToken/registration-token", () => {
 describe("POST /api/candidates/party/:partyToken/candidates/:id/send-link", () => {
   const url = `/api/candidates/party/${PARTY_TOKEN}/candidates/${CANDIDATE_ID}/send-link`;
 
+  beforeEach(() => {
+    process.env.SMTP_HOST = "smtp.example.fi";
+  });
+
+  // #210: without SMTP nothing can be sent, which isn't a transient failure
+  // worth retrying (502), so answer like the other email routes.
+  test("SMTP not configured → 503, nothing sent", async () => {
+    delete process.env.SMTP_HOST;
+    db.query.mockResolvedValueOnce({ rows: [PARTY] });
+    db.query.mockResolvedValueOnce({ rows: [{ id: CANDIDATE_ID, name: "Eeva", email: "eeva@example.fi", token: CANDIDATE_TOKEN }] });
+    const res = await request(app).post(url);
+    expect(res.status).toBe(503);
+    expect(res.body).toEqual({ error: "Sähköpostin lähetys ei ole käytössä" });
+    expect(sendCandidateLinkEmail).not.toHaveBeenCalled();
+  });
+
   test("candidate not in party → 404", async () => {
     db.query.mockResolvedValueOnce({ rows: [PARTY] });
     db.query.mockResolvedValueOnce({ rows: [] });

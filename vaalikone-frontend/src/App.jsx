@@ -636,9 +636,30 @@ function AdminView() {
     }
   }
 
-  async function finalizeReview(setId, questions) {
-    setActionLoading(setId);
+  // The error banner's retry clears the error it retries. Not in refresh()
+  // itself: actions call it on success, and there it would hide an error from
+  // another action that failed meanwhile.
+  function retryRefresh() {
+    setError(null);
+    return refresh();
+  }
+
+  // Every action clears the previous one's error when it starts, so an old
+  // error never sits next to a later success (#212).
+  async function adminAction(key, fn) {
+    setActionLoading(key);
+    setError(null);
     try {
+      await fn();
+    } catch (e) {
+      setError(errorText(e, t));
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  async function finalizeReview(setId, questions) {
+    await adminAction(setId, async () => {
       const reviews = questions.map((q) => {
         const state = reviewState[setId]?.[q.id] ?? {};
         const editedStatement = state.editedStatement?.trim();
@@ -654,38 +675,31 @@ function AdminView() {
       await api.reviewQuestionSet(adminSecret, setId, { reviews });
       setReviewState((prev) => { const next = { ...prev }; delete next[setId]; return next; });
       await refresh();
-    } catch (e) { setError(errorText(e, t)); }
-    finally { setActionLoading(null); }
+    });
   }
 
   async function publishSet(id) {
-    setActionLoading(id);
-    try {
+    await adminAction(id, async () => {
       await api.unhideQuestionSet(adminSecret, id);
       await refresh();
-    } catch (e) { setError(errorText(e, t)); }
-    finally { setActionLoading(null); }
+    });
   }
 
   async function addQuestion(setId) {
     const text = newQuestionText[setId]?.trim();
     if (!text) return;
-    setActionLoading(`add-${setId}`);
-    try {
+    await adminAction(`add-${setId}`, async () => {
       await api.addQuestion(adminSecret, setId, text);
       setNewQuestionText((prev) => ({ ...prev, [setId]: "" }));
       await refresh();
-    } catch (e) { setError(errorText(e, t)); }
-    finally { setActionLoading(null); }
+    });
   }
 
   async function removeQuestion(setId, questionId) {
-    setActionLoading(`q-${questionId}`);
-    try {
+    await adminAction(`q-${questionId}`, async () => {
       await api.removeQuestion(adminSecret, setId, questionId);
       await refresh();
-    } catch (e) { setError(errorText(e, t)); }
-    finally { setActionLoading(null); }
+    });
   }
 
   function toggleMergeSelect(questionId) {
@@ -699,62 +713,50 @@ function AdminView() {
   async function doMerge() {
     if (mergeSelection.length < 2 || !mergeKeepId) return;
     const dropIds = mergeSelection.filter((id) => id !== mergeKeepId);
-    setActionLoading("merge");
-    try {
+    await adminAction("merge", async () => {
       await api.mergeQuestions(adminSecret, mergeKeepId, dropIds);
       setMergeSelection([]);
       setMergeKeepId(null);
       await refresh();
-    } catch (e) { setError(errorText(e, t)); }
-    finally { setActionLoading(null); }
+    });
   }
 
   async function _hideSet(id) {
-    setActionLoading(id);
-    try {
+    await adminAction(id, async () => {
       await api.hideQuestionSet(adminSecret, id);
       await refresh();
-    } catch (e) { setError(errorText(e, t)); }
-    finally { setActionLoading(null); }
+    });
   }
 
   async function _unhideSet(id) {
-    setActionLoading(id);
-    try {
+    await adminAction(id, async () => {
       await api.unhideQuestionSet(adminSecret, id);
       await refresh();
-    } catch (e) { setError(errorText(e, t)); }
-    finally { setActionLoading(null); }
+    });
   }
 
   async function deleteSet(id) {
     if (import.meta.env.VITE_NODE_ENV !== "development" && !window.confirm(t.adminDeleteConfirm)) return;
-    setActionLoading(id);
-    try {
+    await adminAction(id, async () => {
       await api.deleteQuestionSet(adminSecret, id);
       await refresh();
-    } catch (e) { setError(errorText(e, t)); }
-    finally { setActionLoading(null); }
+    });
   }
 
   async function removeParty(id) {
     if (import.meta.env.VITE_NODE_ENV !== "development" && !window.confirm(t.adminDeletePartyConfirm)) return;
-    setActionLoading(id);
-    try {
+    await adminAction(id, async () => {
       await api.deleteParty(adminSecret, id);
       await refresh();
-    } catch (e) { setError(errorText(e, t)); }
-    finally { setActionLoading(null); }
+    });
   }
 
   async function rotatePartyToken(id) {
     if (import.meta.env.VITE_NODE_ENV !== "development" && !window.confirm(t.adminRotatePartyTokenConfirm)) return;
-    setActionLoading(`rotate-${id}`);
-    try {
+    await adminAction(`rotate-${id}`, async () => {
       await api.rotatePartyToken(adminSecret, id);
       await refresh();
-    } catch (e) { setError(errorText(e, t)); }
-    finally { setActionLoading(null); }
+    });
   }
 
   // One candidate-link action per party at a time (loading the list, sending
@@ -768,6 +770,7 @@ function AdminView() {
   async function linkAction(partyId, key, fn) {
     if (linkBusyRef.current.has(partyId)) return;
     linkBusyRef.current.set(partyId, key);
+    setError(null);
     setLinkBusy(Object.fromEntries(linkBusyRef.current));
     try {
       await fn();
@@ -906,13 +909,11 @@ function AdminView() {
 
   async function addParty() {
     if (!newPartyName.trim()) return;
-    setActionLoading("new-party");
-    try {
+    await adminAction("new-party", async () => {
       await api.createParty(adminSecret, { name: newPartyName.trim(), email: newPartyEmail.trim() || null });
       setNewPartyName(""); setNewPartyEmail("");
       await refresh();
-    } catch (e) { setError(errorText(e, t)); }
-    finally { setActionLoading(null); }
+    });
   }
 
   if (!authed) {
@@ -955,7 +956,7 @@ function AdminView() {
       <h2 style={{ fontSize: "28px", fontWeight: 800, letterSpacing: "-0.02em", marginBottom: "8px" }}>{t.adminPanelTitle}</h2>
       <p style={{ color: palette.textMuted, marginBottom: "16px" }}>{t.adminPanelDesc}</p>
       <MarkdownGuide content={adminGuideContent} label="Ohje kysymysten käsittelyyn" />
-      {error && <ErrorBanner message={error} onRetry={refresh} />}
+      {error && <ErrorBanner message={error} onRetry={retryRefresh} />}
 
       <section style={{ marginBottom: "40px" }}>
         <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px", display: "flex", alignItems: "center", gap: "10px" }}>
