@@ -195,16 +195,25 @@ test("the restore goes into the database the backup container points at", () => 
   expect(dbTarget(pgRestore("restore"))).toBe(LIVE);
 });
 
+// #172: without --single-transaction a truncated or corrupt dump drops the
+// live objects, fails partway, and leaves the database partly emptied.
+// --single-transaction (which implies --exit-on-error) makes the drops and
+// recreates one transaction, so a failed restore leaves the data intact.
+test("the live restore is all or nothing", () => {
+  expect(pgRestore("restore").args).toContain("--single-transaction");
+});
+
 describe("drill", () => {
   test("restores into the scratch database, never the live one", () => {
     expect(dbTarget(pgRestore("drill"))).toBe(DRILL);
   });
 
-  test("uses the restore's pg_restore flags, and stops on the first error", () => {
+  // Same flags as step 3, so a dump that the live restore would reject
+  // (with --single-transaction, any error aborts it) fails the drill too.
+  test("uses exactly the restore's pg_restore flags", () => {
     const flags = (c) => c.args.filter((a) => a.startsWith("--"));
-    expect(flags(pgRestore("drill"))).toEqual([
-      ...flags(pgRestore("restore")),
-      "--exit-on-error",
-    ]);
+    for (const c of runs.drill.calls.filter((c) => c.name === "pg_restore")) {
+      expect(flags(c)).toEqual(flags(pgRestore("restore")));
+    }
   });
 });
