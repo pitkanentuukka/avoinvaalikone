@@ -64,29 +64,58 @@ $dc config -q
 # only warns: the images already here keep serving, and a fix shouldn't wait
 # on Docker Hub. The warnings start with `::warning::` so that CI, which
 # follows this log, shows them on the run's summary.
-pull=${DEPLOY_PULL-$(sed -n "s/^DEPLOY_PULL=[\"']\{0,1\}\([^\"']*\)[\"']\{0,1\}[[:space:]]*$/\1/p" .env 2>/dev/null | tail -n 1)}
-if [ "$pull" = 0 ]; then
-  echo "DEPLOY_PULL=0: building and running on the images already on the server"
-  $dc build
-else
-  # What this deploy starts from: the prune below deletes the images it
-  # replaces, so this is where the digests that last worked are recorded
-  # (docs/runbook.md, Rollback). The build's own output names the base
-  # images' digests (`FROM …@sha256:`).
-  echo "Images before this deploy:"
-  docker image ls --digests --format '{{.Repository}}:{{.Tag}} {{.Digest}}' || true
-  if ! timeout -k 10 "${DEPLOY_PULL_TIMEOUT:-300}" $dc pull --ignore-buildable; then
-    echo "::warning::Pulling the service images failed or timed out (see the output above): deploying with the copies already on the server (see \"Deploy warns\" in docs/runbook.md)"
-  fi
-  # No way to pull the bases but carry on without them, so on a failure build
-  # again with the bases already here. A build that fails for its own reasons
-  # fails that way too, and stops the deploy before `up`; one that fails only
-  # on the newer bases succeeds on the old ones, with the same warning.
-  if ! timeout -k 10 "${DEPLOY_BUILD_TIMEOUT:-900}" $dc build --pull; then
-    echo "::warning::Building on freshly pulled base images failed or timed out: Docker Hub couldn't be reached, or the build fails on the newer base images (see the output above). Building on the base images already on the server (see \"Deploy warns\" in docs/runbook.md)"
-    $dc build
-  fi
-fi
+#
+# The build stages' bases are pulled with `docker pull`, not `build --pull`:
+# BuildKit doesn't tag the images it pulls itself, so after a failed
+# `build --pull` there would be no local copy to build on, and the build
+# would go to Docker Hub again. Tagged here, a plain build uses them as they
+# are. These are the Dockerfiles of the images Compose builds (the build
+# contexts in docker-compose*.yml).
+dockerfiles="Dockerfile vaalikone-frontend/Dockerfile scripts/backup/Dockerfile"
+# Each FROM's image, skipping its options (--platform=…) and earlier stages
+# of the same file (FROM … AS build, then FROM build).
+base_images() {
+  awk '
+    FNR == 1 { split("", stage) }
+    toupper($1) == "FROM" {
+      i = 2
+      while (i <= NF && $i ~ /^--/) i++
+      if (i <= NF && !($i in stage)) print $i
+      if (toupper($(i + 1)) == "AS") stage[$(i + 2)] = 1
+    }
+  ' $dockerfiles | sort -u
+}
+pull_timeout() {
+  timeout -k 10 "${DEPLOY_PULL_TIMEOUT:-300}" "$@"
+}
+
+# Unquoted, and without what may follow it: spaces, a comment, a CR.
+pull=${DEPLOY_PULL-$(sed -n "s/^[[:space:]]*\(export[[:space:]]\{1,\}\)\{0,1\}DEPLOY_PULL[[:space:]]*=[[:space:]]*[\"']\{0,1\}\([^\"'[:space:]#]*\).*/\2/p" .env 2>/dev/null | tail -n 1)}
+case "$pull" in
+  0 | false | no | off)
+    echo "::warning::DEPLOY_PULL=$pull: building and running on the images already on the server, without their upstream patches (remove it when the freeze is over, docs/runbook.md)"
+    ;;
+  *)
+    case "$pull" in
+      "" | 1 | true | yes | on) ;;
+      *) echo "::warning::DEPLOY_PULL=$pull is neither 0 nor 1: pulling as usual" ;;
+    esac
+    # What this deploy starts from: the prune below deletes the images it
+    # replaces, so this is where the digests that last worked are recorded
+    # (docs/runbook.md, Rollback).
+    echo "Images before this deploy:"
+    docker image ls --digests --format '{{.Repository}}:{{.Tag}} {{.Digest}}' || true
+    if ! pull_timeout $dc pull --ignore-buildable; then
+      echo "::warning::Pulling the service images failed or timed out (see the output above): deploying with the copies already on the server (see \"Deploy warns\" in docs/runbook.md)"
+    fi
+    for image in $(base_images); do
+      if ! pull_timeout docker pull "$image"; then
+        echo "::warning::Pulling the base image $image failed or timed out (see the output above): building on the copy already on the server (see \"Deploy warns\" in docs/runbook.md)"
+      fi
+    done
+    ;;
+esac
+timeout -k 10 "${DEPLOY_BUILD_TIMEOUT:-900}" $dc build
 
 # Validate the deployed Caddyfile on the Caddy image `up` is about to run,
 # in a fresh container that mounts the new file (and publishes no ports).
