@@ -15,9 +15,12 @@ run backup.sh by hand (`docker compose -f docker-compose.yml -f docker-compose.p
 # the commands that use them run under sh -c '…': the single quotes stop the
 # host shell from expanding them (to nothing) first.
 
-# 1. Fetch a dump from the bucket if the local one isn't the version you need.
-#    Into /backups/restore/, not /backups/: backup.sh deletes every
-#    /backups/vaalikone-*.dump but one at the start of each run.
+# 1. Put the dump to restore in /backups/restore/, not /backups/: backup.sh
+#    deletes every /backups/vaalikone-*.dump but one at the start of each
+#    run. For the local dump, copy it there instead of fetching it:
+#      docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backup \
+#        sh -c 'mkdir -p /backups/restore && cp /backups/vaalikone-<stamp>.dump /backups/restore/'
+#    Otherwise fetch it from the bucket:
 docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backup \
   sh -c 'rclone copy "upcloud:$BACKUP_BUCKET/postgres/vaalikone-<stamp>.dump" /backups/restore/'
 
@@ -25,30 +28,30 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backup \
 docker compose -f docker-compose.yml -f docker-compose.prod.yml stop backend
 
 # 3. Restore (drops and recreates objects inside the existing database).
-#    Use /backups/vaalikone-<stamp>.dump for the local one.
 #    --single-transaction makes it all or nothing: on the first error
 #    pg_restore stops and rolls back, and the database is left as it was.
 #    Until it commits, the old tables' files stay on disk next to the new
 #    ones and the new data also goes to the WAL, so it needs free space for
 #    a second copy of the data plus up to 1 GB (max_wal_size).
 #    If it fails, read the first "pg_restore: error:" line:
+#    - "PANIC", "crash of another server process" or "server closed the
+#      connection unexpectedly": Postgres crashed, most likely on a full
+#      disk while writing WAL (look for PANIC in
+#      `docker compose -f docker-compose.yml -f docker-compose.prod.yml logs db`).
+#      It recovers to the unchanged data, but the aborted restore's files
+#      can stay on disk, so free more space than the estimate above and
+#      repeat.
 #    - The dump is truncated or corrupt ("could not read from input file",
-#      "could not uncompress data", "possibly corrupt archive", "does not
-#      appear to be a valid archive", "input file is too short"): fetch
-#      another dump (step 1) and repeat this step with it.
+#      "could not uncompress data", "possibly corrupt archive", "input file
+#      does not appear to be a valid archive", "input file is too short"):
+#      fetch another dump (step 1) and repeat this step with it.
 #    - "could not open input file", or "directory ... does not appear to be
 #      a valid archive": the path or <stamp> is wrong. Fix it and repeat,
 #      fetching the right dump first (step 1) if the stamp was wrong there.
-#    - "deadlock detected": the nightly backup was running. Once it has
-#      finished, fetch the dump from the bucket (step 1) and repeat with
-#      /backups/restore/: the backup has replaced the local dump with one
-#      of the current data.
-#    - "No space left on device": free disk space (above) and repeat.
-#    - "server closed the connection unexpectedly": Postgres crashed, most
-#      likely on a full disk while writing WAL (look for PANIC in
-#      `docker compose -f docker-compose.yml -f docker-compose.prod.yml logs db`).
-#      It recovers to the unchanged data, but the aborted restore's files
-#      can stay on disk, so free more space than before and repeat.
+#    - "deadlock detected": the nightly backup was running; repeat once it
+#      has finished.
+#    - "No space left on device": free at least the space estimated above
+#      and repeat.
 #    - "other objects depend on it": a migration newer than the dump added
 #      a table that references the dumped ones. Every older dump fails the
 #      same way, so trying another won't help.
