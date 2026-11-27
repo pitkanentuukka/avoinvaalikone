@@ -17,14 +17,48 @@ let transport = null;
 const DEV_SMTP_HOSTS = ["localhost", "127.0.0.1", "::1", "mailpit"];
 const isDevSmtpHost = (host) => DEV_SMTP_HOSTS.includes(String(host).toLowerCase());
 
+const smtpPort = () => parseInt(process.env.SMTP_PORT || "587");
+
+// Port 465 is implicit TLS (RFC 8314): nothing serves plaintext or STARTTLS
+// there, and a plaintext client just waits for a greeting until it times out.
+const IMPLICIT_TLS_PORT = 465;
+// Submission and relay ports: STARTTLS, so implicit TLS there fails the
+// handshake with an opaque "wrong version number".
+const STARTTLS_PORTS = [587, 25];
+const SECURE_ON = ["true", "1", "yes", "on"];
+const SECURE_OFF = ["false", "0", "no", "off"];
+
+/**
+ * Whether to use implicit TLS, from SMTP_SECURE and SMTP_PORT, with warnings
+ * for settings it doesn't follow (#199). Port 465 always gets implicit TLS,
+ * even with SMTP_SECURE=false: .env files copied from .env.example before
+ * #199 set false, and honouring it there only ever timed out. Unset, empty
+ * or unrecognised SMTP_SECURE leaves it to the port.
+ */
+function smtpSecurity() {
+  const raw = process.env.SMTP_SECURE;
+  const value = (raw ?? "").trim().toLowerCase();
+  const port = smtpPort();
+  const onPort465 = port === IMPLICIT_TLS_PORT;
+  const problems = [];
+  if (value && !SECURE_ON.includes(value) && !SECURE_OFF.includes(value)) {
+    problems.push(`SMTP_SECURE=${raw} on tuntematon arvo, ja se ohitetaan: tunnetut arvot ovat true, 1, yes, on, false, 0, no ja off.`);
+  } else if (onPort465 && SECURE_OFF.includes(value)) {
+    problems.push(`SMTP_SECURE=${raw} ohitetaan, koska portti 465 käyttää aina suoraa TLS-yhteyttä.`);
+  } else if (STARTTLS_PORTS.includes(port) && SECURE_ON.includes(value)) {
+    problems.push(`SMTP_SECURE=${raw} portissa ${port}: portti käyttää STARTTLS-yhteyttä, joten suora TLS-yhteys epäonnistuu. Poista SMTP_SECURE tai käytä porttia 465.`);
+  }
+  return { secure: SECURE_ON.includes(value) || onPort465, problems };
+}
+
 function getTransport() {
   if (!transport) {
-    const secure = process.env.SMTP_SECURE === "true";
+    const { secure } = smtpSecurity();
     transport = nodemailer.createTransport({
       pool: true,
       maxConnections: parseInt(process.env.SMTP_MAX_CONNECTIONS || "3"),
       host: process.env.SMTP_HOST,
-      port: parseInt(process.env.SMTP_PORT || "587"),
+      port: smtpPort(),
       secure,
       // Without implicit TLS, nodemailer uses STARTTLS only if the server
       // offers it, so a server that doesn't (or an attacker stripping it)
@@ -85,11 +119,11 @@ async function verifySmtp() {
     console.warn("SMTP_HOST ei ole asetettu: sähköpostit (ehdokaslinkit, ilmoitukset) eivät lähde.");
     return;
   }
-  if (process.env.NODE_ENV === "production") {
-    for (const problem of productionSmtpProblems()) {
-      console.warn(problem);
-      Sentry.captureMessage(problem, "warning");
-    }
+  const problems = smtpSecurity().problems;
+  if (process.env.NODE_ENV === "production") problems.push(...productionSmtpProblems());
+  for (const problem of problems) {
+    console.warn(problem);
+    Sentry.captureMessage(problem, "warning");
   }
   const server = `${process.env.SMTP_HOST}:${process.env.SMTP_PORT || "587"}`;
   try {

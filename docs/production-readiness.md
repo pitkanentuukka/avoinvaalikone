@@ -257,11 +257,15 @@ email, so production can't run without a working SMTP provider.
   `exec`, and so does `scripts/deploy.sh`; the running containers are left as
   they are, apart from mailpit, which deploy.sh removes first. The base file's `SMTP_HOST=mailpit` and `SMTP_PORT=1025` defaults
   are for local dev only; the prod file defaults the port to 587.
-- Use a transactional email provider on port 587 (STARTTLS, `SMTP_SECURE=false`)
-  or 465 (`SMTP_PORT=465`, `SMTP_SECURE=true`), not 25. Set `SMTP_USER` /
-  `SMTP_PASS` from the provider. Unless `SMTP_SECURE=true`, the connection
-  must upgrade with STARTTLS to a certificate valid for `SMTP_HOST`, or sending
-  and the startup check fail (#192). Only the local dev hosts (`localhost`,
+- Use a transactional email provider on port 587 (STARTTLS) or 465
+  (`SMTP_PORT=465`, implicit TLS), not 25. Set `SMTP_USER` / `SMTP_PASS` from
+  the provider. Port 465 always uses implicit TLS, even with
+  `SMTP_SECURE=false` (the backend warns that it ignores it); on another port,
+  `SMTP_SECURE=true` (or `1`, `yes`, `on`, any case) turns it on (#199).
+  It warns about `SMTP_SECURE=true` on 587 or 25, which use STARTTLS.
+  Without implicit TLS, the connection must upgrade with STARTTLS to a
+  certificate valid for `SMTP_HOST`, or sending and the startup check fail
+  (#192). Only the local dev hosts (`localhost`,
   `127.0.0.1`, `::1`, `mailpit`) are exempt, whatever `NODE_ENV` says.
 - `SMTP_FROM` must be on a domain you control (`noreply@avoinvaalikone.fi`),
   with the provider's SPF and DKIM records and a DMARC record in its DNS.
@@ -297,7 +301,7 @@ Optional unless marked required; defaults keep local dev working unchanged. See 
 | `BACKUP_BUCKET` | unset | S3 bucket for nightly dumps; unset → local-only |
 | `BACKUP_S3_ENDPOINT` / `BACKUP_S3_ACCESS_KEY` / `BACKUP_S3_SECRET_KEY` | unset | UpCloud Object Storage credentials |
 | `SMTP_HOST` / `SMTP_FROM` | **required in production** | SMTP provider and sender address (see Email) |
-| `SMTP_PORT` / `SMTP_SECURE` | 587 / false in production | 465 / true for implicit TLS |
+| `SMTP_PORT` / `SMTP_SECURE` | 587 / unset in production | 465 for implicit TLS (`SMTP_SECURE=true` only for another implicit-TLS port) |
 
 ## New dependencies
 

@@ -69,4 +69,55 @@ describe("SMTP transport encryption", () => {
       expect(options.requireTLS).toBe(true);
     }
   );
+
+  // SMTP_SECURE used to count only the exact string "true", and port 465 never
+  // implied it, so a provider's implicit-TLS port was dialled in plaintext and
+  // every send timed out waiting for a greeting (issue #199).
+  test.each(["true", "TRUE", "True", "1", "yes", "YES", "on", " true "])(
+    "SMTP_SECURE=%p enables implicit TLS, also on a port other than 465",
+    async (value) => {
+      const options = await transportOptions({ SMTP_HOST: "smtp.example.fi", SMTP_PORT: "2465", SMTP_SECURE: value });
+      expect(options).toMatchObject({ secure: true, requireTLS: false });
+    }
+  );
+
+  test.each(["false", "FALSE", "0", "no", "off", "", undefined])(
+    "SMTP_SECURE=%p on port 587 uses STARTTLS",
+    async (value) => {
+      const env = { SMTP_HOST: "smtp.example.fi", SMTP_PORT: "587" };
+      if (value !== undefined) env.SMTP_SECURE = value;
+      const options = await transportOptions(env);
+      expect(options).toMatchObject({ secure: false, requireTLS: true });
+    }
+  );
+
+  // Port 465 is implicit TLS (RFC 8314); nothing serves plaintext or STARTTLS
+  // there. .env files copied from .env.example before #199 set
+  // SMTP_SECURE=false, so an explicit false is overridden too (verifySmtp warns).
+  test.each([undefined, "", "false", "0", "no"])(
+    "port 465 uses implicit TLS with SMTP_SECURE=%p",
+    async (value) => {
+      const env = { SMTP_HOST: "smtp.example.fi", SMTP_PORT: "465" };
+      if (value !== undefined) env.SMTP_SECURE = value;
+      const options = await transportOptions(env);
+      expect(options).toMatchObject({ secure: true, requireTLS: false });
+    }
+  );
+
+  // The port is parsed as a number, as nodemailer is given it.
+  test.each([" 465", "0465"])("SMTP_PORT=%p is port 465", async (port) => {
+    const options = await transportOptions({ SMTP_HOST: "smtp.example.fi", SMTP_PORT: port, SMTP_SECURE: "false" });
+    expect(options).toMatchObject({ port: 465, secure: true, requireTLS: false });
+  });
+
+  test("an unrecognised SMTP_SECURE on port 465 still uses implicit TLS", async () => {
+    const options = await transportOptions({ SMTP_HOST: "smtp.example.fi", SMTP_PORT: "465", SMTP_SECURE: "ture" });
+    expect(options).toMatchObject({ secure: true, requireTLS: false });
+  });
+
+  // A typo neither enables implicit TLS nor turns off the STARTTLS requirement.
+  test("an unrecognised SMTP_SECURE on port 587 still requires STARTTLS", async () => {
+    const options = await transportOptions({ SMTP_HOST: "smtp.example.fi", SMTP_PORT: "587", SMTP_SECURE: "ture" });
+    expect(options).toMatchObject({ secure: false, requireTLS: true });
+  });
 });
