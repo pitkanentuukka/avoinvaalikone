@@ -48,10 +48,14 @@ function text(node) {
   if (Array.isArray(node)) return node.map(text).join("");
   return node?.props ? text(node.props.children) : "";
 }
-function button(tree, label) {
+// Child components aren't rendered, so a disabled or loading Button's handler
+// would still run: refuse that unless a test means to click it anyway.
+function button(tree, label, { evenIfDisabled = false } = {}) {
   const found = [...elements(tree)].filter((el) => el.props.onClick && text(el) === label);
   if (found.length !== 1) throw new Error(`expected one "${label}" button, found ${found.length}`);
-  return found[0].props.onClick;
+  const { onClick, disabled, loading } = found[0].props;
+  if ((disabled || loading) && !evenIfDisabled) throw new Error(`"${label}" button is disabled`);
+  return onClick;
 }
 // Some handlers don't return their promise (togglePartyCandidates), so let
 // the mocked requests finish before looking at the result.
@@ -152,15 +156,51 @@ describe("admin error banner (#212)", () => {
     expect(banner(view())).toBeNull();
   });
 
-  test("the banner's retry clears it once the reload succeeds", async () => {
+  test("the banner's retry clears it as the reload starts", async () => {
+    let finishReload;
     await login({
+      "GET /api/admin/parties": [
+        () => json(200, [party]),
+        () => new Promise((resolve) => { finishReload = () => resolve(json(200, [party])); }),
+      ],
       [`DELETE /api/admin/parties/${PARTY_ID}`]: [() => json(500, { error: "Poisto epäonnistui" })],
     });
     await click(t.adminDelete);
     const { message, onRetry } = banner(view());
     expect(message).toBe("Poisto epäonnistui");
 
-    await onRetry();
+    const reload = onRetry();
+    expect(banner(view())).toBeNull();
+    finishReload();
+    await reload;
+    expect(banner(view())).toBeNull();
+  });
+
+  test("a retry whose reload fails shows that failure", async () => {
+    await login({
+      "GET /api/admin/parties": [() => json(200, [party]), () => json(500, { error: "Lataus epäonnistui" })],
+      [`DELETE /api/admin/parties/${PARTY_ID}`]: [() => json(500, { error: "Poisto epäonnistui" })],
+    });
+    await click(t.adminDelete);
+    await banner(view()).onRetry();
+    expect(banner(view())?.message).toBe("Lataus epäonnistui");
+  });
+
+  test("a candidate-link action clears the error as it starts", async () => {
+    let finishLoad;
+    await login({
+      [`DELETE /api/admin/parties/${PARTY_ID}`]: [() => json(500, { error: "Poisto epäonnistui" })],
+      [`GET /api/admin/parties/${PARTY_ID}/candidates`]: [
+        () => new Promise((resolve) => { finishLoad = () => resolve(json(200, [])); }),
+      ],
+    });
+    await click(t.adminDelete);
+    expect(banner(view())?.message).toBe("Poisto epäonnistui");
+
+    button(view(), t.adminShowCandidates)();
+    expect(banner(view())).toBeNull();
+    finishLoad();
+    await settle();
     expect(banner(view())).toBeNull();
   });
 
@@ -203,7 +243,10 @@ describe("admin error banner (#212)", () => {
     await click(t.adminRotatePartyToken);
     expect(banner(view())?.message).toBe("Vaihto epäonnistui");
 
-    await click(t.adminShowCandidates); // refused: the first load is still running
+    // The UI disables the button meanwhile, but a second click can land before
+    // that render: linkAction's busy guard refuses it.
+    button(view(), t.adminShowCandidates, { evenIfDisabled: true })();
+    await settle();
     expect(banner(view())?.message).toBe("Vaihto epäonnistui");
     finishLoad();
     await settle();
