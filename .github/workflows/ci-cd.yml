@@ -31,6 +31,10 @@ jobs:
         run: npm run lint
         working-directory: vaalikone-frontend
 
+      - name: Build frontend
+        run: npm run build
+        working-directory: vaalikone-frontend
+
       - name: Unit + route tests
         run: npm test
 
@@ -111,9 +115,29 @@ jobs:
           path: test-results/
           retention-days: 7
 
+  # The images scripts/deploy.sh builds with `docker compose up --build`, at
+  # the contexts docker-compose.yml and docker-compose.prod.yml give them.
+  # Built only, never pushed: a Dockerfile that no longer builds (a base image
+  # bump, a failing RUN) otherwise fails first on the server, after the merge.
+  docker-build:
+    name: Build Docker images
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build backend image
+        run: docker build .
+
+      - name: Build frontend image
+        run: docker build vaalikone-frontend
+
+      - name: Build backup image
+        run: docker build scripts/backup
+
   deploy:
     name: Deploy to UpCloud
-    needs: [lint-and-unit, e2e-api]
+    needs: [lint-and-unit, e2e-api, docker-build]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     # Later deploys queue behind this job, so it must never wait out GitHub's
