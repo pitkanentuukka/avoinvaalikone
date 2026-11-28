@@ -363,7 +363,7 @@ All limits apply only in production (`NODE_ENV=production`).
 ### CC-4: Error Handling
 
 - Non-existent routes -> 404 with `"Reittiä ei löytynyt"`
-- Unhandled errors -> 500 with `"Palvelinvirhe"` (production) or error message (development)
+- Unhandled errors -> a Finnish `error` by status in every environment: 413 `"Pyyntö on liian suuri"`, other 4xx `"Virheellinen pyyntö"`, otherwise 500 `"Palvelinvirhe"`. Outside production the raw message is also sent as `detail`
 - All error messages are in Finnish
 
 ### CC-5: CORS & Security

@@ -177,8 +177,16 @@ app.use((req, res) => {
   res.status(404).json({ error: "Reittiä ei löytynyt" });
 });
 
+function publicErrorMessage(status) {
+  if (status === 413) return "Pyyntö on liian suuri";
+  if (status >= 400 && status < 500) return "Virheellinen pyyntö";
+  return "Palvelinvirhe";
+}
+
 app.use((err, req, res, next) => {
-  const status = err.status || 500;
+  // Only an error status is passed on; anything else is a server error, as in
+  // Express's own final handler.
+  const status = err.status >= 400 && err.status < 600 ? err.status : 500;
   // Express decode errors include the raw param (a bearer token) without
   // its route prefix, so URL-based redactTokens cannot mask that message.
   if (status >= 400 && status < 500) {
@@ -186,12 +194,13 @@ app.use((err, req, res, next) => {
   } else {
     console.error("Unhandled error:", err);
   }
-  res.status(status).json({
-    error:
-      process.env.NODE_ENV === "production"
-        ? "Palvelinvirhe"
-        : err.message || "Palvelinvirhe",
-  });
+  // Errors that reach here come from libraries (body-parser, Express's param
+  // decoding) or are unexpected, so their messages are internal English. The
+  // frontend shows any JSON `error` as the app's own text, so it is always
+  // Finnish; outside production the raw message goes to `detail` (#229).
+  const body = { error: publicErrorMessage(status) };
+  if (process.env.NODE_ENV !== "production" && err.message) body.detail = err.message;
+  res.status(status).json(body);
 });
 
 // ─── Start ───
