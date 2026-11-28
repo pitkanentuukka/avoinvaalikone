@@ -88,3 +88,23 @@ ehdokkaat* stays enabled while the list is open, even during a reload.
   it is still open, as `refreshAfterRotation()` does; or disable *Piilota
   ehdokkaat* while the list is loading.
 - **Found:** review of PR #239 (#227).
+
+## Backend: the error handler doesn't check `res.headersSent`
+
+**Where:** the catch-all error handler in `src/index.js`
+
+If an error reaches the handler after a response has started, it still sets a
+status and sends JSON, instead of passing the error on to Express's default
+handler, which closes the connection.
+
+1. **Steps:** a route that starts or sends a response and then calls
+   `next(err)`. None does today, so this is theoretical.
+2. **Expected:** the error is logged and the connection closed.
+3. **Actual:** a second error, `ERR_HTTP_HEADERS_SENT`, is thrown from the handler.
+
+- **Likelihood:** very low. No current route does this.
+- **Severity:** low. One extra logged error for a response that was already
+  broken.
+- **Possible fix:** `if (res.headersSent) return next(err);` at the top of the
+  handler.
+- **Found:** review of PR #240 (#229).
