@@ -67,6 +67,12 @@ async function click(label) {
 function banner(tree) {
   return [...elements(tree)].find((el) => el.type?.name === "ErrorBanner")?.props ?? null;
 }
+// The messages the error banner shows, in order; [] when there is none.
+function shownErrors(tree = view()) {
+  const props = banner(tree);
+  if (!props) return [];
+  return props.messages ?? [props.message];
+}
 
 // ── Mocked backend ──
 function json(status, body) {
@@ -112,10 +118,10 @@ describe("admin error banner (#212)", () => {
       ],
     });
     await click(t.adminDelete);
-    expect(banner(view())?.message).toBe(t.requestFailed(500));
+    expect(shownErrors()).toEqual([t.requestFailed(500)]);
 
     await click(t.adminDelete);
-    expect(banner(view())).toBeNull();
+    expect(shownErrors()).toEqual([]);
   });
 
   test("clears when a later action succeeds", async () => {
@@ -126,10 +132,10 @@ describe("admin error banner (#212)", () => {
       ],
     });
     await click(t.adminDelete);
-    expect(banner(view())?.message).toBe("Poisto epäonnistui");
+    expect(shownErrors()).toEqual(["Poisto epäonnistui"]);
 
     await click(t.adminDelete);
-    expect(banner(view())).toBeNull();
+    expect(shownErrors()).toEqual([]);
   });
 
   test("clears as soon as the next action starts", async () => {
@@ -141,13 +147,13 @@ describe("admin error banner (#212)", () => {
       ],
     });
     await click(t.adminDelete);
-    expect(banner(view())?.message).toBe("Poisto epäonnistui");
+    expect(shownErrors()).toEqual(["Poisto epäonnistui"]);
 
     const rotation = button(view(), t.adminRotatePartyToken)();
-    expect(banner(view())).toBeNull();
+    expect(shownErrors()).toEqual([]);
     finishRotation();
     await rotation;
-    expect(banner(view())).toBeNull();
+    expect(shownErrors()).toEqual([]);
   });
 
   test("a candidate link rotation refused with 409 is cleared by a successful retry", async () => {
@@ -164,11 +170,11 @@ describe("admin error banner (#212)", () => {
     });
     await click(t.adminShowCandidates);
     await click(t.adminRotateCandidateLink);
-    expect(banner(view())?.message).toBe("Ehdokkaan sähköpostiosoite on muuttunut");
+    expect(shownErrors()).toEqual(["Ehdokkaan sähköpostiosoite on muuttunut"]);
 
     await click(t.adminRotateCandidateLink);
     expect(text(view())).toContain(t.adminCandidateLinkRotated(true));
-    expect(banner(view())).toBeNull();
+    expect(shownErrors()).toEqual([]);
   });
 
   test("the banner's retry clears it as the reload starts", async () => {
@@ -181,14 +187,14 @@ describe("admin error banner (#212)", () => {
       [`DELETE /api/admin/parties/${PARTY_ID}`]: [() => json(500, { error: "Poisto epäonnistui" })],
     });
     await click(t.adminDelete);
-    const { message, onRetry } = banner(view());
-    expect(message).toBe("Poisto epäonnistui");
+    expect(shownErrors()).toEqual(["Poisto epäonnistui"]);
+    const { onRetry } = banner(view());
 
     const reload = onRetry();
-    expect(banner(view())).toBeNull();
+    expect(shownErrors()).toEqual([]);
     finishReload();
     await reload;
-    expect(banner(view())).toBeNull();
+    expect(shownErrors()).toEqual([]);
   });
 
   test("a retry whose reload fails shows that failure", async () => {
@@ -198,7 +204,7 @@ describe("admin error banner (#212)", () => {
     });
     await click(t.adminDelete);
     await banner(view()).onRetry();
-    expect(banner(view())?.message).toBe("Lataus epäonnistui");
+    expect(shownErrors()).toEqual(["Lataus epäonnistui"]);
   });
 
   test("a candidate-link action clears the error as it starts", async () => {
@@ -210,13 +216,13 @@ describe("admin error banner (#212)", () => {
       ],
     });
     await click(t.adminDelete);
-    expect(banner(view())?.message).toBe("Poisto epäonnistui");
+    expect(shownErrors()).toEqual(["Poisto epäonnistui"]);
 
     button(view(), t.adminShowCandidates)();
-    expect(banner(view())).toBeNull();
+    expect(shownErrors()).toEqual([]);
     finishLoad();
     await settle();
-    expect(banner(view())).toBeNull();
+    expect(shownErrors()).toEqual([]);
   });
 
   test("a later action's own failure still shows", async () => {
@@ -226,7 +232,7 @@ describe("admin error banner (#212)", () => {
     });
     await click(t.adminDelete);
     await click(t.adminRotatePartyToken);
-    expect(banner(view())?.message).toBe("Vaihto epäonnistui");
+    expect(shownErrors()).toEqual(["Vaihto epäonnistui"]);
   });
 
   test("an action finishing doesn't hide an error from one that failed while it ran", async () => {
@@ -239,11 +245,11 @@ describe("admin error banner (#212)", () => {
     });
     const deletion = button(view(), t.adminDelete)();
     await click(t.adminRotatePartyToken);
-    expect(banner(view())?.message).toBe("Vaihto epäonnistui");
+    expect(shownErrors()).toEqual(["Vaihto epäonnistui"]);
 
     finishDelete();
     await deletion;
-    expect(banner(view())?.message).toBe("Vaihto epäonnistui");
+    expect(shownErrors()).toEqual(["Vaihto epäonnistui"]);
   });
 
   test("a candidate-link click refused while another is running leaves the error", async () => {
@@ -256,14 +262,98 @@ describe("admin error banner (#212)", () => {
     });
     await click(t.adminShowCandidates);
     await click(t.adminRotatePartyToken);
-    expect(banner(view())?.message).toBe("Vaihto epäonnistui");
+    expect(shownErrors()).toEqual(["Vaihto epäonnistui"]);
 
     // The UI disables the button meanwhile, but a second click can land before
     // that render: linkAction's busy guard refuses it.
     button(view(), t.adminShowCandidates, { evenIfDisabled: true })();
     await settle();
-    expect(banner(view())?.message).toBe("Vaihto epäonnistui");
+    expect(shownErrors()).toEqual(["Vaihto epäonnistui"]);
     finishLoad();
     await settle();
+  });
+});
+
+// #226: the banner held one message, so a later failure replaced an earlier
+// one and the admin never saw why the first action failed.
+describe("every failure stays visible (#226)", () => {
+  test("two overlapping actions that both fail show both errors", async () => {
+    let failRotation;
+    await login({
+      [`POST /api/admin/parties/${PARTY_ID}/token`]: [
+        () => new Promise((resolve) => { failRotation = () => resolve(json(500, { error: "Vaihto epäonnistui" })); }),
+      ],
+      [`DELETE /api/admin/parties/${PARTY_ID}`]: [() => json(500, { error: "Poisto epäonnistui" })],
+    });
+    const rotation = button(view(), t.adminRotatePartyToken)();
+    await click(t.adminDelete);
+    failRotation();
+    await rotation;
+    expect(shownErrors()).toEqual(["Poisto epäonnistui", "Vaihto epäonnistui"]);
+  });
+
+  test("a candidate link rotation's own error survives a failed list refresh", async () => {
+    await login({
+      [`GET /api/admin/parties/${PARTY_ID}/candidates`]: [
+        () => json(200, [candidate("b".repeat(48), "vanha@example.fi")]),
+        () => json(500, { error: "Lataus epäonnistui" }),
+      ],
+      [`POST /api/admin/parties/${PARTY_ID}/candidates/${CANDIDATE_ID}/token`]: [
+        () => json(409, { error: "Ehdokkaan sähköpostiosoite on muuttunut" }),
+      ],
+    });
+    await click(t.adminShowCandidates);
+    await click(t.adminRotateCandidateLink);
+    expect(shownErrors()).toEqual([
+      "Ehdokkaan sähköpostiosoite on muuttunut",
+      t.adminLinksRotatedRefreshFailed,
+    ]);
+  });
+
+  test("rotating every link: its own error survives a failed list refresh", async () => {
+    await login({
+      [`GET /api/admin/parties/${PARTY_ID}/candidates`]: [
+        () => json(200, [candidate("b".repeat(48), "eeva@example.fi")]),
+        () => json(500, { error: "Lataus epäonnistui" }),
+      ],
+      [`POST /api/admin/parties/${PARTY_ID}/candidate-tokens`]: [() => json(500, { error: "Vaihto epäonnistui" })],
+    });
+    await click(t.adminShowCandidates);
+    await click(t.adminRotateAllLinks);
+    expect(shownErrors()).toEqual(["Vaihto epäonnistui", t.adminLinksRotatedRefreshFailed]);
+  });
+
+  test("the same message twice is shown once", async () => {
+    let failRotation;
+    await login({
+      [`POST /api/admin/parties/${PARTY_ID}/token`]: [
+        () => new Promise((resolve) => { failRotation = () => resolve(json(503)); }),
+      ],
+      [`DELETE /api/admin/parties/${PARTY_ID}`]: [() => json(503)],
+    });
+    const rotation = button(view(), t.adminRotatePartyToken)();
+    await click(t.adminDelete);
+    failRotation();
+    await rotation;
+    expect(shownErrors()).toEqual([t.requestFailed(503)]);
+  });
+
+  test("the next action clears them all as it starts", async () => {
+    let failRotation;
+    await login({
+      [`POST /api/admin/parties/${PARTY_ID}/token`]: [
+        () => new Promise((resolve) => { failRotation = () => resolve(json(500, { error: "Vaihto epäonnistui" })); }),
+        () => json(200, party),
+      ],
+      [`DELETE /api/admin/parties/${PARTY_ID}`]: [() => json(500, { error: "Poisto epäonnistui" })],
+    });
+    const rotation = button(view(), t.adminRotatePartyToken)();
+    await click(t.adminDelete);
+    failRotation();
+    await rotation;
+    expect(shownErrors()).toHaveLength(2);
+
+    await click(t.adminRotatePartyToken);
+    expect(shownErrors()).toEqual([]);
   });
 });
