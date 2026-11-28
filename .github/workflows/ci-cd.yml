@@ -154,6 +154,9 @@ jobs:
 
       # The ssh options (also used by rsync) give up on a server that stops
       # answering, rather than leaving the job to its timeout (#178).
+      # BatchMode: a key that fails fails the step at once, rather than ssh
+      # asking for a password or passphrase, which would wait for input on a
+      # runner with a terminal (#221, tests/unit/deploySshBatchMode.test.js).
       # The key comes in through the environment, never as `${{ }}` in the
       # script: GitHub pastes that into the text bash parses, so a `$(…)` in
       # the secret, or whatever follows a quote in it, would run (#207). The
@@ -189,6 +192,7 @@ jobs:
           cat ~/.ssh/pinned
           cat > ~/.ssh/config <<SSH_CONFIG
           Host 80.69.172.220
+            BatchMode yes
             ConnectTimeout 10
             ServerAliveInterval 15
             ServerAliveCountMax 4
