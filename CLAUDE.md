@@ -116,7 +116,7 @@ Since 2026-11-26 avoinvaalikone.fi is in real use: the demo data has been remove
 ## Issue Workflow
 
 Bugs and tasks are tracked as GitHub issues (`pitkanentuukka/avoinvaalikone`). When working on an issue:
-
+0. fetch the latest head from remote
 1. Create a branch named after the issue: `<number>-short-summary`.
 2. Write tests that reproduce the issue. Prefer unit tests (`tests/unit/`); use integration tests (`tests/routes/`) only if unit tests can't cover it, and end-to-end tests (`e2e/`) only if nothing else works.
    Run them and confirm they fail for the reason described in the issue.
@@ -133,6 +133,6 @@ Bugs and tasks are tracked as GitHub issues (`pitkanentuukka/avoinvaalikone`). W
    - If a finding contradicts an earlier round's fix, stop and ask the user.
 6. Mark the PR ready for review and summarise what was fixed in each round.
    List the collected pre-existing bugs and ask the user which ones to file as issues.
-   When describing bugs, include 1. steps to reproduce 2. expected behaviour and 3. actual behaviour. Include these in the filed issue too.
+   When describing bugs, include 1. steps to reproduce 2. expected behaviour and 3. actual behaviour, and estimates on how likely the bug is to occur and how serious it is. Include these in the filed issue too.
    When filing issues, always check if they have been filed already. Do not create duplicates.
    The user reviews and merges.
