@@ -118,13 +118,15 @@ function LoadingState({ text }) {
   );
 }
 
-function ErrorBanner({ message, onRetry, scrollIntoView = false }) {
+// `messages` shows several errors at once, one per line, with one retry button.
+function ErrorBanner({ message, messages = [message], onRetry, scrollIntoView = false }) {
   const { t } = useTranslation();
   const ref = useRef(null);
+  const shown = messages.join("\n");
   // For long forms whose submit button sits at the bottom: bring the error into view.
   useEffect(() => {
     if (scrollIntoView) ref.current?.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
-  }, [message, scrollIntoView]);
+  }, [shown, scrollIntoView]);
   return (
     <div ref={ref} style={{
       padding: "14px 20px", borderRadius: "8px", background: palette.dangerLight,
@@ -132,7 +134,9 @@ function ErrorBanner({ message, onRetry, scrollIntoView = false }) {
       display: "flex", justifyContent: "space-between", alignItems: "center",
       marginBottom: "20px",
     }}>
-      <span>{message}</span>
+      {messages.length === 1 ? <span>{messages[0]}</span> : (
+        <div>{messages.map((m) => <div key={m}>{m}</div>)}</div>
+      )}
       {onRetry && (
         <button onClick={onRetry} style={{
           background: "none", border: `1px solid ${palette.danger}`, borderRadius: "4px",
@@ -530,7 +534,12 @@ function AdminView() {
   const [parties, setParties] = useState([]);
   const [questionSets, setQuestionSets] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+  // Every failure's message, oldest first: overlapping actions can fail
+  // together, and a rotation's list refresh can fail after the rotation did,
+  // so a single slot would hide why the first one failed (#226).
+  const [errors, setErrors] = useState([]);
+  const addError = (message) => setErrors((prev) => (prev.includes(message) ? prev : [...prev, message]));
+  const clearErrors = () => setErrors([]);
   const [newPartyName, setNewPartyName] = useState("");
   const [newPartyEmail, setNewPartyEmail] = useState("");
   const [partyCandidates, setPartyCandidates] = useState({}); // { [partyId]: candidates } for expanded parties
@@ -613,7 +622,7 @@ function AdminView() {
 
   async function login() {
     setLoading(true);
-    setError(null);
+    clearErrors();
     try {
       const p = await api.getParties(adminSecret);
       setParties(p);
@@ -621,7 +630,7 @@ function AdminView() {
       setQuestionSets(qs);
       setAuthed(true);
     } catch (e) {
-      setError(errorText(e, t));
+      addError(errorText(e, t));
     } finally {
       setLoading(false);
     }
@@ -632,27 +641,27 @@ function AdminView() {
       setParties(await api.getParties(adminSecret));
       setQuestionSets(await api.getAllQuestionSets(adminSecret));
     } catch (e) {
-      setError(errorText(e, t));
+      addError(errorText(e, t));
     }
   }
 
-  // The error banner's retry clears the error it retries. Not in refresh()
+  // The error banner's retry clears the errors it retries. Not in refresh()
   // itself: actions call it on success, and there it would hide an error from
   // another action that failed meanwhile.
   function retryRefresh() {
-    setError(null);
+    clearErrors();
     return refresh();
   }
 
-  // Every action clears the previous one's error when it starts, so an old
-  // error never sits next to a later success (#212).
+  // Every action clears the earlier errors when it starts, so an old error
+  // never sits next to a later success (#212).
   async function adminAction(key, fn) {
     setActionLoading(key);
-    setError(null);
+    clearErrors();
     try {
       await fn();
     } catch (e) {
-      setError(errorText(e, t));
+      addError(errorText(e, t));
     } finally {
       setActionLoading(null);
     }
@@ -770,7 +779,7 @@ function AdminView() {
   async function linkAction(partyId, key, fn) {
     if (linkBusyRef.current.has(partyId)) return;
     linkBusyRef.current.set(partyId, key);
-    setError(null);
+    clearErrors();
     setLinkBusy(Object.fromEntries(linkBusyRef.current));
     try {
       await fn();
@@ -785,7 +794,7 @@ function AdminView() {
       try {
         const candidates = await api.getPartyCandidatesAdmin(adminSecret, id);
         setPartyCandidates((prev) => ({ ...prev, [id]: candidates }));
-      } catch (e) { setError(errorText(e, t)); }
+      } catch (e) { addError(errorText(e, t)); }
     });
   }
 
@@ -822,7 +831,7 @@ function AdminView() {
           for (const c of partyCandidates[id] ?? []) delete next[c.id];
           return next;
         });
-      } catch (e) { setError(errorText(e, t)); }
+      } catch (e) { addError(errorText(e, t)); }
     });
   }
 
@@ -844,7 +853,7 @@ function AdminView() {
       setPartyCandidates((prev) => (prev[partyId] ? { ...prev, [partyId]: candidates } : prev));
     } catch {
       closePartyCandidates(partyId);
-      setError(t.adminLinksRotatedRefreshFailed);
+      addError(t.adminLinksRotatedRefreshFailed);
     }
   }
 
@@ -856,7 +865,7 @@ function AdminView() {
       try {
         result = await api.rotateCandidateTokenAdmin(adminSecret, partyId, c.id, c.email);
       } catch (e) {
-        setError(errorText(e, t));
+        addError(errorText(e, t));
         // The rotation may have taken effect even though its response was lost.
         await refreshAfterRotation(partyId);
         return;
@@ -901,7 +910,7 @@ function AdminView() {
         const { rotated } = await api.rotatePartyCandidateTokens(adminSecret, id);
         setAllLinksRotated((prev) => ({ ...prev, [id]: rotated }));
       } catch (e) {
-        setError(errorText(e, t));
+        addError(errorText(e, t));
       }
       await refreshAfterRotation(id);
     });
@@ -921,7 +930,7 @@ function AdminView() {
       <div style={{ maxWidth: 400, margin: "0 auto", padding: "80px 24px", textAlign: "center" }}>
         <h2 style={{ fontSize: "24px", fontWeight: 800, marginBottom: "8px" }}>{t.adminLoginTitle}</h2>
         <p style={{ color: palette.textMuted, marginBottom: "24px", fontSize: "14px" }}>{t.adminLoginDesc}</p>
-        {error && <ErrorBanner message={error} />}
+        {errors.length > 0 && <ErrorBanner messages={errors} />}
         <Input value={adminSecret} onChange={setAdminSecret} placeholder={t.adminPasswordPlaceholder} ariaLabel={t.adminPasswordPlaceholder} type="password" />
         <div style={{ marginTop: "12px" }}>
           <Button onClick={login} loading={loading} disabled={!adminSecret}>{t.adminLogin}</Button>
@@ -956,7 +965,7 @@ function AdminView() {
       <h2 style={{ fontSize: "28px", fontWeight: 800, letterSpacing: "-0.02em", marginBottom: "8px" }}>{t.adminPanelTitle}</h2>
       <p style={{ color: palette.textMuted, marginBottom: "16px" }}>{t.adminPanelDesc}</p>
       <MarkdownGuide content={adminGuideContent} label="Ohje kysymysten käsittelyyn" />
-      {error && <ErrorBanner message={error} onRetry={retryRefresh} />}
+      {errors.length > 0 && <ErrorBanner messages={errors} onRetry={retryRefresh} />}
 
       <section style={{ marginBottom: "40px" }}>
         <h3 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "16px", display: "flex", alignItems: "center", gap: "10px" }}>
