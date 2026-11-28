@@ -12,8 +12,11 @@ const prodReplicas = Number(read("docker-compose.prod.yml")
   .split(/^ {2}backend:$/m)[1]
   .match(/^\s+replicas:\s*(\d+)/m)[1]);
 
-// The paragraphs (blank-line separated) that document SMTP_MAX_CONNECTIONS.
-const passages = (file) => read(file).split(/\n\s*\n/).filter((p) => p.includes("SMTP_MAX_CONNECTIONS"));
+// The paragraphs (blank-line separated) that document SMTP_MAX_CONNECTIONS,
+// with line breaks and comment markers collapsed so wrapping doesn't matter.
+const passages = (file) => read(file).split(/\n\s*\n/)
+  .filter((p) => p.includes("SMTP_MAX_CONNECTIONS"))
+  .map((p) => p.replace(/\n\s*#?\s*/g, " "));
 
 const DOCS = [".env.example", "CLAUDE.md", "docs/production-readiness.md", "docker-compose.yml"];
 

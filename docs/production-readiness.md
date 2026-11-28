@@ -276,7 +276,9 @@ email, so production can't run without a working SMTP provider.
   isn't a number in 1–65535 (`abc`, `58 7`) is ignored with a warning, in any
   environment, and the default is dialled instead: 465 with `SMTP_SECURE=true`,
   otherwise 587. Likewise an `SMTP_MAX_CONNECTIONS` that isn't a positive
-  integer is ignored with a warning and the pool uses 3. In production it also warns, to the log and Sentry, about
+  integer is ignored with a warning and the pool uses 3. The pool is per
+  backend process, so the 3 backend replicas open up to 3 × `SMTP_MAX_CONNECTIONS`
+  connections: size it to the provider's limit divided by 3. In production it also warns, to the log and Sentry, about
   settings that pass the compose checks but can't work: dev values copied from
   `.env.example` (`SMTP_HOST` `localhost`/`mailpit`, `SMTP_PORT` 1025, also
   written ` 1025` or `01025`, an
