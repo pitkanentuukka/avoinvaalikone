@@ -29,23 +29,30 @@ the broken deploy's log in `/var/log/vaalikone-deploy/` (kept for 30 days). Its
 `Containers before this deploy` list gives each running container's image ID,
 and `Images before this deploy` maps image IDs to tags and digests. Use the
 containers' list: a deploy that failed after pulling had already moved the tag,
-so the tag's digest there can be the broken one. Base images (node, nginx) aren't
-in either list; take their digest from the `FROM …@sha256:` line in the build
-output of the last deploy that worked. A pinned tag gets no more patches (#216
+so the tag's digest there can be the broken one. For a base image (node, nginx),
+take the digest from the `FROM …@sha256:` line in the build output of the last
+deploy that worked: that is what the build used, whatever its tag pointed to. A pinned tag gets no more patches (#216
 again, for that image), so file an issue to remove the pin once upstream has
 fixed it.
 
 **Faster, for a service image that broke the site** (db, redis or caddy
 crash-looping after a deploy): fix it on the server first, then pin it in git
-while the site is up. A deploy whose `up` failed didn't prune, so the old image
-is usually still there: `docker image ls --digests` lists it with the tag `<none>`
-next to the image ID from the containers' list. Point the tag back at it, then
-deploy without pulling:
+while the site is up. Point the tag back at the image ID the container ran,
+from the broken deploy's `Containers before this deploy` list, then deploy
+without pulling:
 
 ```bash
-docker tag <old image ID> postgres:16-alpine   # or: docker pull postgres:16-alpine@sha256:<digest>, then tag that
+docker tag <image ID> postgres:16-alpine   # "No such image": docker pull postgres@<image ID>, then tag again
 DEPLOY_PULL=0 sh /opt/vaalikone/scripts/deploy-detached.sh
 ```
+
+The old image is still on the server when that deploy's `up` failed, which it
+does for db and redis (the backend waits for them to be healthy), as the prune
+comes after `up`. Not for caddy: nothing waits for it, so `up` succeeds and
+the prune deletes the old image. Then `docker tag` says "No such image", and
+the pull fetches it again: on this server's containerd image store the image ID
+is the digest Docker Hub serves it by (`sha256:…`). `docker image ls --all --digests`
+lists what is there; without `--all`, Docker 29 hides untagged images.
 
 Then set `DEPLOY_PULL=0` in `/opt/vaalikone/.env` as well (below) until the pin is
 merged, or CI's next deploy pulls the broken image again.
@@ -53,9 +60,12 @@ merged, or CI's next deploy pulls the broken image again.
 Because of the pulls, a deploy can also recreate `db`, `redis` and `caddy`
 (a few seconds each, with errors from the backend meanwhile) when upstream has
 rebuilt their tags, which for `postgres:16-alpine` happens several times a month.
-`DEPLOY_PULL=0` in `/opt/vaalikone/.env` skips the refresh, so a deploy changes only
-what the code changed; remove the line afterwards, or production stops getting
-security patches again. A manual deploy can also pass it on the command line:
+`DEPLOY_PULL=0` in `/opt/vaalikone/.env` skips the refresh, so a deploy leaves `db`,
+`redis` and `caddy` alone unless the code changed them. It doesn't freeze the
+base images the backend, frontend and backup are built on: on this server's
+containerd image store BuildKit resolves `FROM` tags at Docker Hub whenever it
+answers. Only pinning them (`FROM …@sha256:`, above) does that. Remove the line
+afterwards, or production stops getting security patches again. A manual deploy can also pass it on the command line:
 `DEPLOY_PULL=0 sh /opt/vaalikone/scripts/deploy-detached.sh`.
 
 Migrations are **forward-only** (`migration_history` table): never delete or edit
@@ -88,9 +98,9 @@ would wait for that lock in vain.
 | `SMTP-tarkistus epäonnistui` in backend logs or Sentry, or `failed` rows in `email_log` | Email isn't going out (candidate links, notifications) | Check `SMTP_*` in `/opt/vaalikone/.env` and the provider's status; after fixing, `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d backend`. Re-send missed candidate links from the admin's per-party "send candidate links" |
 | Deploy fails with `required variable SMTP_HOST` (or `SMTP_FROM`) `is missing a value` | `.env` has no SMTP settings | Add them (docs/production-readiness.md, Email) and deploy again. The old containers keep running meanwhile, but every `docker compose -f docker-compose.yml -f docker-compose.prod.yml …` command (`logs`, `ps`, `exec`) fails the same way until `.env` has them |
 | Deploy warns `Pulling the service images failed or timed out` or `Pulling the base image … failed or timed out` ("Deploy warns": a warning on the CI run, or a `::warning::` line in the deploy's log) | Docker Hub couldn't be reached, was too slow (`Gave up after 300s`), or rate-limited the server (anonymous pulls are limited per IP). The deploy carried on with the copies already on the server, which missed this deploy's upstream patches (#216). For a base image the build can still go to Docker Hub itself and fail (the server uses the containerd image store, where BuildKit falls back to the local copy only when the registry can't be reached at all) | Nothing is down. The output above the warning shows the registry's error (`toomanyrequests`, a timeout, a connection error). Deploy again (re-run the latest deploy job) once Docker Hub answers; for repeated rate limiting, `docker login` on the server with a Docker Hub account. `unknown flag: --ignore-buildable` means the server's Docker Compose is too old: update it |
-| Deploy warns `DEPLOY_PULL=0: building and running on the images already on the server` | The refresh is switched off in `/opt/vaalikone/.env` (or the deploy's environment), for a freeze such as election night (Rollback) | Once the freeze is over, remove the line, or production stops getting security patches |
+| Deploy warns `DEPLOY_PULL=0: db, redis and caddy stay on the images already on the server` | The refresh is switched off in `/opt/vaalikone/.env` (or the deploy's environment), for a freeze such as election night (Rollback) | Once the freeze is over, remove the line, or production stops getting security patches |
 | Deploy fails at `caddy validate`, before `up` | The deployed Caddyfile is invalid, or the newly pulled Caddy rejects it | The old containers are still serving. Fix the Caddyfile, or pin `caddy:2.11-alpine` to the digest that last worked (see Rollback), and deploy again |
-| Deploy fails with `Building the images failed or timed out` ("Deploy fails building an image"), before `up` (at `nginx -t` for the frontend, say) | The change broke the build, a newly pulled base image did, a base image pull failed partway (row above), or the server itself (disk full: `df -h /var/lib/docker`; `Gave up after 900s`: a stalled npm or registry download) | The old containers are still serving. CI's "Build Docker images" job built the same commit minutes earlier, normally on the same base images: compare the `FROM …@sha256:` lines in its log with the deploy's. Same digests and CI passed: look at the server. Different digests, and the server's build fails on the newer one: pin the base image to the digest CI built on (see Rollback). A deploy job re-run days later builds on whatever is current then |
+| Deploy fails with `Building the images failed or timed out` ("Deploy fails building an image"), before `up` (at `nginx -t` for the frontend, say) | The change broke the build, a newly pulled base image did, a base image pull failed partway (row above), or the server itself (disk full: `df -h /var/lib/docker`; `Gave up after 900s`: a stalled npm or registry download, or a build that needs longer: a manual deploy can raise the limit with `DEPLOY_BUILD_TIMEOUT=<seconds>`, and `DEPLOY_PULL_TIMEOUT` the 300 s for each pull) | The old containers are still serving. CI's "Build Docker images" job built the same commit minutes earlier, normally on the same base images: compare the `FROM …@sha256:` lines in its log with the deploy's. Same digests and CI passed: look at the server. Different digests, and the server's build fails on the newer one: pin the base image to the digest CI built on (see Rollback). A deploy job re-run days later builds on whatever is current then |
 | Deploy job timed out, or ssh says `Timeout, server 80.69.172.220 not responding.` | CI lost the server (#178), during the rsync or the deploy. A deploy that had started carries on there, detached (#205) | The job's log names the deploy's log (`Deploy log on the server: …`); if it doesn't, look in `/var/log/vaalikone-deploy/` for one from this run's time (the names are in UTC). None from then: the deploy never started, and the tree may be half-synced, so re-run as below. The log ends with the deploy's outcome (`Deploy ended … with exit status N`) once it has finished. Without that line it is still running if `pgrep -as <id>` lists any of its processes (`deploy.sh`, `docker`; after a reboot the id can belong to something else). The id is in the log's first line: `to stop it: pkill -s <id>`. No such processes means it was killed (or the server rebooted) partway. If it never started, failed or was killed, or the site looks wrong, re-run the **latest** deploy job or push again (re-running an older one deploys its older tree); it waits for a deploy that is still running |
 | Deploy fails with `Waiting for another deploy to finish` followed by rsync's `connection unexpectedly closed`, or with `Gave up: another deploy is still running` | A deploy, or several deploys or rsyncs in a row, has held the tree's lock for 10 minutes (#205) | `flock -n /opt/vaalikone true && echo free` tells whether the lock is still held. The holder's log, in `/var/log/vaalikone-deploy/` (or a non-root deployer's `~/.local/state/vaalikone-deploy/`), says `Got the deploy lock`; a deploy waiting behind it doesn't. `pgrep -as <id>`, with the id from the log's first line, lists the holder's processes (`deploy.sh`, `docker`); if it lists neither, that deploy has ended, and after a reboot the id can belong to something else, so don't kill it. Ctrl-C in the ssh session only stops following the log; if the deploy is stuck, stop all of it with the command in the log's first line (`to stop it: pkill -s <id>`), which can leave some services recreated and some not. If `pgrep -as <id>` still lists something, such as a hung `docker compose`, it keeps the lock: `pkill -KILL -s <id>`. No such log: someone ran `deploy.sh` or rsync directly (as root, `fuser -v /opt/vaalikone` lists the processes, holder and waiters alike). Then deploy again |
 | Deploy's "Set up SSH" fails with `The SSH_KNOWN_HOSTS repository variable has no valid host key for 80.69.172.220`, or its rsync or ssh says `Host key verification failed.` (after `REMOTE HOST IDENTIFICATION HAS CHANGED!` if the key differs) | CI accepts only the server host key pinned in the `SSH_KNOWN_HOSTS` repository variable (#206); "Set up SSH" logs its fingerprint. Either the variable is unset or wrong, the server's host keys changed (a reinstall, regenerated keys), or something else is answering at the address | Don't pin a key just because `ssh-keyscan` returns it: that would trust the very key in question. Scan once into a file of your own, `f=$(mktemp) && ssh-keyscan -t ed25519 80.69.172.220 > "$f"`, and print its fingerprint with `ssh-keygen -lf "$f"`. Compare that with the fingerprint read on the box itself, through UpCloud's web console rather than over the network: `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`. If they match, pin that same file: `gh variable set SSH_KNOWN_HOSTS < "$f"` (or paste its line in Settings → Secrets and variables → Actions → Variables), then re-run the latest deploy job. If they don't match, don't deploy: something is impersonating the server |

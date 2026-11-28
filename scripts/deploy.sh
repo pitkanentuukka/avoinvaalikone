@@ -26,6 +26,20 @@ echo "Got the deploy lock"
 
 dc="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
 
+# Time limits, in whole seconds (with_timeout below): a pull stalled on
+# Docker Hub, or a build, would otherwise hold the deploy lock indefinitely.
+# Checked here, as a value the watchdog can't read would leave no limit.
+pull_limit=${DEPLOY_PULL_TIMEOUT:-300}
+build_limit=${DEPLOY_BUILD_TIMEOUT:-900}
+for limit in "$pull_limit" "$build_limit"; do
+  case $limit in
+    "" | *[!0-9]* | 0*)
+      echo "DEPLOY_PULL_TIMEOUT and DEPLOY_BUILD_TIMEOUT are whole seconds, more than 0 (got \"$limit\")" >&2
+      exit 1
+      ;;
+  esac
+done
+
 # mailpit is dev-only (profile "dev"), but `up` without the profile leaves a
 # container started before the profile existed running: it swallowed every
 # email and published its web UI, magic links included (#190). Remove it with
@@ -59,7 +73,8 @@ $dc config -q
 # patches (#216). Neither stops a running container, but `up` then recreates
 # each service whose image moved: db, redis and caddy too, for a few seconds
 # each. DEPLOY_PULL=0, in the environment or in .env, skips the refresh, for
-# a freeze such as election night (docs/runbook.md).
+# a freeze such as election night (docs/runbook.md). Of the service images:
+# the build may still resolve its bases at Docker Hub (below).
 #
 # A failed or stalled pull (Docker Hub down, or rate-limiting the server)
 # only warns: the images already here keep serving, and a fix shouldn't wait
@@ -103,7 +118,11 @@ descendants() {
 # which nohup (deploy-detached.sh) set to be ignored, so a hangup would stop
 # the deploy. A background job here keeps the ignored SIGHUP. The watchdog
 # polls rather than sleeping out the limit, so that it ends with the command
-# and leaves no sleep behind.
+# and leaves no sleep behind. It signals only what is still below the
+# command: a child that outlived it isn't found (docker's don't: the CLI
+# waits for Compose, and Compose stops its own on TERM). Between the
+# command's end and the next poll, its PID could in theory be reused; 0.1 s
+# against pid_max makes that practically impossible.
 with_timeout() {
   limit=$1
   shift
@@ -134,7 +153,7 @@ with_timeout() {
 pull=${DEPLOY_PULL-$(sed -n "s/^[[:space:]]*\(export[[:space:]]\{1,\}\)\{0,1\}DEPLOY_PULL[[:space:]]*=[[:space:]]*[\"']\{0,1\}[[:space:]]*\([^\"'[:space:]#]*\).*/\2/p" .env 2>/dev/null | tail -n 1)}
 case $(printf '%s' "$pull" | tr '[:upper:]' '[:lower:]') in
   0 | false | no | off)
-    echo "::warning::DEPLOY_PULL=$pull: building and running on the images already on the server, without their upstream patches (remove it when the freeze is over, docs/runbook.md)"
+    echo "::warning::DEPLOY_PULL=$pull: db, redis and caddy stay on the images already on the server, without their upstream patches (remove it when the freeze is over, docs/runbook.md)"
     ;;
   *)
     case $(printf '%s' "$pull" | tr '[:upper:]' '[:lower:]') in
@@ -147,21 +166,21 @@ case $(printf '%s' "$pull" | tr '[:upper:]' '[:lower:]') in
     # run, which can differ: a deploy that failed after pulling moved a tag
     # without recreating its container.
     echo "Images before this deploy:"
-    docker image ls --digests --no-trunc --format '{{.ID}} {{.Repository}}:{{.Tag}} {{.Digest}}' || true
+    docker image ls --all --digests --no-trunc --format '{{.ID}} {{.Repository}}:{{.Tag}} {{.Digest}}' || true
     echo "Containers before this deploy (name, image, image ID):"
     containers=$(docker ps -q) || true
     [ -z "$containers" ] || docker inspect --format '{{.Name}} {{.Config.Image}} {{.Image}}' $containers || true
-    if ! with_timeout "${DEPLOY_PULL_TIMEOUT:-300}" $dc pull --ignore-buildable; then
+    if ! with_timeout "$pull_limit" $dc pull --ignore-buildable; then
       echo "::warning::Pulling the service images failed or timed out (see the output above): deploying with the copies already on the server (see \"Deploy warns\" in docs/runbook.md)"
     fi
     for image in $(base_images); do
-      if ! with_timeout "${DEPLOY_PULL_TIMEOUT:-300}" docker pull "$image"; then
+      if ! with_timeout "$pull_limit" docker pull "$image"; then
         echo "::warning::Pulling the base image $image failed or timed out (see the output above): the build uses the copy already on the server if Docker Hub can't be reached at all (see \"Deploy warns\" in docs/runbook.md)"
       fi
     done
     ;;
 esac
-if ! with_timeout "${DEPLOY_BUILD_TIMEOUT:-900}" $dc build; then
+if ! with_timeout "$build_limit" $dc build; then
   echo "::error::Building the images failed or timed out (see the output above): nothing was restarted (see \"Deploy fails building an image\" in docs/runbook.md)"
   exit 1
 fi

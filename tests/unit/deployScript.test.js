@@ -58,6 +58,9 @@ function runDeploy(env = {}, dotenv = "", dockerfiles = {}, wrapper) {
   const result = spawnSync("sh", wrapper ? ["-c", wrapper, "sh", script] : [script], {
     env: { ...baseEnv, PATH: `${dir}:${process.env.PATH}`, STUB_LOG: log, ...env },
     encoding: "utf8",
+    // Jest's own timeout can't interrupt spawnSync: a deploy that hangs
+    // fails its test instead of the whole run.
+    timeout: 20000,
   });
   const calls = fs.existsSync(log) ? fs.readFileSync(log, "utf8").trim().split("\n") : [];
   fs.rmSync(dir, { recursive: true, force: true });
@@ -226,10 +229,14 @@ describe("scripts/deploy.sh image refresh", () => {
   // catch the hangup and stop the build with it; the time limit here mustn't.
   test("a hangup during the build doesn't stop it", () => {
     const wrapper = `
-      trap : HUP
+      trap '' HUP
       nohup sh "$1" > "$STUB_LOG.out" 2>&1 &
       deploy=$!
-      until grep -q " build$" "$STUB_LOG" 2>/dev/null; do sleep 0.05; done
+      n=0
+      until grep -q " build$" "$STUB_LOG" 2>/dev/null; do
+        n=$((n + 1)); [ "$n" -lt 200 ] || { cat "$STUB_LOG.out"; exit 99; }
+        sleep 0.05
+      done
       pkill -HUP -s $$
       wait "$deploy"
       status=$?
@@ -240,11 +247,24 @@ describe("scripts/deploy.sh image refresh", () => {
     expect(calls.some(isUp)).toBe(true);
   });
 
+  // The watchdog can't read them; GNU timeout's `20m` must not mean "no limit".
+  test.each([["DEPLOY_BUILD_TIMEOUT", "20m"], ["DEPLOY_PULL_TIMEOUT", "0"], ["DEPLOY_PULL_TIMEOUT", "1.5"]])(
+    "%s=%s is refused before anything is pulled",
+    (name, value) => {
+      const { status, calls, output } = runDeploy({ [name]: value });
+      expect(status).not.toBe(0);
+      expect(calls.some((c) => c.startsWith("compose") || c.startsWith("pull"))).toBe(false);
+      expect(output).toMatch(/whole seconds/);
+    }
+  );
+
   // The prune deletes the replaced images, so the log is where the digests
   // that last worked can still be found (docs/runbook.md, Rollback).
   test("logs the image digests it starts from, before pulling", () => {
     const { calls } = runDeploy();
-    const list = calls.findIndex((c) => c.startsWith("image ls --digests"));
+    // --all: Docker 29 leaves out untagged images otherwise, which are what a
+    // container from a half-failed deploy runs.
+    const list = calls.findIndex((c) => c.startsWith("image ls --all --digests"));
     expect(list).toBeGreaterThan(-1);
     expect(list).toBeLessThan(calls.findIndex(isPull));
   });
