@@ -48,3 +48,23 @@ successful creation clears them.
 - **Possible fix:** clear the fields only if they still hold the submitted
   values, or disable them while the creation runs.
 - **Found:** review of PR #236 (#225).
+
+## Admin: error messages don't follow a language switch
+
+**Where:** `AdminView`'s error state (`vaalikone-frontend/src/App.jsx`)
+
+Errors are stored as translated strings when they happen, so the banner keeps
+the language they were made in.
+
+1. **Steps:** make an admin action fail, e.g. with the backend down, then
+   switch the language.
+2. **Expected:** the banner follows the new language.
+3. **Actual:** messages such as `t.requestFailed(…)` and
+   `t.adminLinksRotatedRefreshFailed` stay in the old language until the next
+   action clears them.
+
+- **Likelihood:** low. The admin rarely switches language with an error showing.
+- **Severity:** cosmetic.
+- **Possible fix:** store the error (or a translation key and its arguments)
+  and translate it when rendering.
+- **Found:** review of PR #238 (#226).
