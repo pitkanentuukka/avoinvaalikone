@@ -827,12 +827,16 @@ function AdminView() {
       try {
         const result = await api.sendPartyCandidateLinks(adminSecret, id);
         setLinksQueued((prev) => ({ ...prev, [id]: result }));
-        // A "new link not emailed" note is out of date now that everyone got theirs.
-        setLinkRotated((prev) => {
+        // A "new link not emailed" note is out of date now that everyone got
+        // theirs, and so is a stale-status note: the refresh shown with the
+        // queued count covers everyone.
+        const sentTo = (prev) => {
           const next = { ...prev };
           for (const c of partyCandidates[id] ?? []) delete next[c.id];
           return next;
-        });
+        };
+        setLinkRotated(sentTo);
+        setEmailStatusStale(sentTo);
       } catch (e) { setError(errorText(e, t)); }
     });
   }

@@ -307,6 +307,61 @@ describe("email status after a single-candidate rotation (#227)", () => {
     expect(text(view())).not.toContain(t.adminEmailStatusStale);
   });
 
+  test("a later rotation whose refresh succeeds clears the note", async () => {
+    const old = candidate("b".repeat(48), "eeva@example.fi");
+    await login({
+      [listRoute]: [
+        () => json(200, [old]), () => json(500),
+        () => json(200, [{ ...old, token: "d".repeat(48) }]),
+      ],
+      [rotateRoute]: [
+        () => json(200, { token: "c".repeat(48), emailed: true }),
+        () => json(200, { token: "d".repeat(48), emailed: true }),
+      ],
+    });
+    await click(t.adminShowCandidates);
+    await click(t.adminRotateCandidateLink);
+    expect(text(view())).toContain(t.adminEmailStatusStale);
+
+    await click(t.adminRotateCandidateLink);
+    expect(text(view())).not.toContain(t.adminEmailStatusStale);
+  });
+
+  test("rotating every link clears the note once the list is re-read", async () => {
+    const old = candidate("b".repeat(48), "eeva@example.fi");
+    await login({
+      [listRoute]: [
+        () => json(200, [old]), () => json(500),
+        () => json(200, [{ ...old, token: "d".repeat(48) }]),
+      ],
+      [rotateRoute]: [() => json(200, { token: "c".repeat(48), emailed: true })],
+      [`POST /api/admin/parties/${PARTY_ID}/candidate-tokens`]: [() => json(200, { rotated: 1 })],
+    });
+    await click(t.adminShowCandidates);
+    await click(t.adminRotateCandidateLink);
+    expect(text(view())).toContain(t.adminEmailStatusStale);
+
+    await click(t.adminRotateAllLinks);
+    expect(text(view())).not.toContain(t.adminEmailStatusStale);
+  });
+
+  test("sending everyone's links drops the note for the party-level refresh", async () => {
+    const old = candidate("b".repeat(48), "eeva@example.fi");
+    await login({
+      [listRoute]: [() => json(200, [old]), () => json(500)],
+      [rotateRoute]: [() => json(200, { token: "c".repeat(48), emailed: true })],
+      [`POST /api/admin/parties/${PARTY_ID}/send-candidate-links`]: [() => json(202, { queued: 1, withoutEmail: 0 })],
+    });
+    await click(t.adminShowCandidates);
+    await click(t.adminRotateCandidateLink);
+    expect(text(view())).toContain(t.adminEmailStatusStale);
+
+    await click(t.adminSendLinks);
+    expect(text(view())).toContain(t.adminLinksQueued(1, 0));
+    expect(text(view())).not.toContain(t.adminEmailStatusStale);
+    button(view(), t.adminRefreshEmailStatus); // exactly one
+  });
+
   test("a refresh that succeeds shows no note", async () => {
     const old = candidate("b".repeat(48), "eeva@example.fi");
     await login({
