@@ -7,7 +7,7 @@
 const fs = require("fs");
 const path = require("path");
 const { workflow, step } = require("../helpers/workflow");
-const { SERVER, runSetupSsh, sshOptions } = require("../helpers/deploySsh");
+const { SERVER, runSetupSsh, sshOptions, CONNECTING_STEPS } = require("../helpers/deploySsh");
 
 // Any well-formed ed25519 key will do: these tests never connect.
 const PINNED_KEY = "AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl";
@@ -41,7 +41,7 @@ describe("deploy job", () => {
   });
 
   test("the steps that use ssh connect to the server the config is for", () => {
-    for (const name of ["Rsync to server", "Build & restart services"]) {
+    for (const name of CONNECTING_STEPS) {
       expect(deployStep(name).run).toContain(`root@${SERVER}`);
     }
   });

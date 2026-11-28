@@ -154,6 +154,9 @@ jobs:
 
       # The ssh options (also used by rsync) give up on a server that stops
       # answering, rather than leaving the job to its timeout (#178).
+      # BatchMode: a key that fails fails the step at once, rather than ssh
+      # asking for a password or passphrase, which would wait for input on a
+      # runner with a terminal (#221, tests/unit/deploySshBatchMode.test.js).
       # The key comes in through the environment, never as `${{ }}` in the
       # script: GitHub pastes that into the text bash parses, so a `$(…)` in
       # the secret, or whatever follows a quote in it, would run (#207). The
@@ -189,6 +192,7 @@ jobs:
           cat ~/.ssh/pinned
           cat > ~/.ssh/config <<SSH_CONFIG
           Host 80.69.172.220
+            BatchMode yes
             ConnectTimeout 10
             ServerAliveInterval 15
             ServerAliveCountMax 4
@@ -228,7 +232,7 @@ jobs:
             --exclude='test-results' \
             --exclude='.claude' \
             ./ root@80.69.172.220:/opt/vaalikone/ ||
-            { echo "::error::rsync failed. If it was waiting for another deploy, that one still holds the lock; if ssh says \"Host key verification failed\", the server's key isn't the one in SSH_KNOWN_HOSTS: see docs/runbook.md"; exit 1; }
+            { echo "::error::rsync failed. If it was waiting for another deploy, that one still holds the lock; if ssh says \"Host key verification failed\", the server's key isn't the one in SSH_KNOWN_HOSTS; if \"Permission denied\", the server didn't accept the SSH_PRIVATE_KEY secret: see docs/runbook.md"; exit 1; }
 
       # Also restarts caddy when the Caddyfile changed (see deploy.sh). The
       # deploy runs detached on the server and this follows its log (#205):
