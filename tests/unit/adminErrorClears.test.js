@@ -267,3 +267,56 @@ describe("admin error banner (#212)", () => {
     await settle();
   });
 });
+
+// #227: after a successful rotation the list is re-read for the email status.
+// When that failed, nothing said the status shown was the old one.
+describe("email status after a single-candidate rotation (#227)", () => {
+  const sentAt = (at, status = "sent") => ({ lastEmailStatus: status, lastEmailAt: at, lastEmailError: status === "failed" ? "SMTP" : null });
+  const rotateRoute = `POST /api/admin/parties/${PARTY_ID}/candidates/${CANDIDATE_ID}/token`;
+  const listRoute = `GET /api/admin/parties/${PARTY_ID}/candidates`;
+
+  test("a failed refresh says the status may be out of date and offers a refresh", async () => {
+    const old = { ...candidate("b".repeat(48), "eeva@example.fi"), ...sentAt("2026-11-01T10:00:00Z", "failed") };
+    const fresh = { ...old, token: "c".repeat(48), ...sentAt("2026-11-28T10:00:00Z") };
+    await login({
+      [listRoute]: [() => json(200, [old]), () => json(500, { error: "Lataus epäonnistui" }), () => json(200, [fresh])],
+      [rotateRoute]: [() => json(200, { token: "c".repeat(48), emailed: true })],
+    });
+    await click(t.adminShowCandidates);
+    await click(t.adminRotateCandidateLink);
+    expect(text(view())).toContain(t.adminCandidateLinkRotated(true));
+    expect(text(view())).toContain(t.adminEmailStatusStale);
+
+    await click(t.adminRefreshEmailStatus);
+    expect(text(view())).not.toContain(t.adminEmailStatusStale);
+    expect(text(view())).toContain(t.adminEmailSent(new Date(fresh.lastEmailAt).toLocaleString("fi-FI", { dateStyle: "short", timeStyle: "short" })));
+  });
+
+  test("closing and reopening the list clears the note", async () => {
+    const old = candidate("b".repeat(48), "eeva@example.fi");
+    await login({
+      [listRoute]: [() => json(200, [old]), () => json(500), () => json(200, [{ ...old, token: "c".repeat(48) }])],
+      [rotateRoute]: [() => json(200, { token: "c".repeat(48), emailed: true })],
+    });
+    await click(t.adminShowCandidates);
+    await click(t.adminRotateCandidateLink);
+    expect(text(view())).toContain(t.adminEmailStatusStale);
+
+    await click(t.adminHideCandidates);
+    await click(t.adminShowCandidates);
+    expect(text(view())).not.toContain(t.adminEmailStatusStale);
+  });
+
+  test("a refresh that succeeds shows no note", async () => {
+    const old = candidate("b".repeat(48), "eeva@example.fi");
+    await login({
+      [listRoute]: [() => json(200, [old]), () => json(200, [{ ...old, token: "c".repeat(48) }])],
+      [rotateRoute]: [() => json(200, { token: "c".repeat(48), emailed: true })],
+    });
+    await click(t.adminShowCandidates);
+    await click(t.adminRotateCandidateLink);
+    expect(text(view())).toContain(t.adminCandidateLinkRotated(true));
+    expect(t.adminEmailStatusStale).toBeTruthy();
+    expect(text(view())).not.toContain(t.adminEmailStatusStale);
+  });
+});
