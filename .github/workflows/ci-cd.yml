@@ -80,8 +80,12 @@ jobs:
 
       - run: npm ci
 
-      - name: PostgreSQL concurrency regression tests
-        run: npm test -- --runInBand questionMergeConcurrency orphanQuestionConcurrency candidateRegistrationConcurrency candidateTokenRotation
+      # restoreRunbook runs the runbook's pg_restore and psql from the runner
+      # image, which must match the postgres service's major version (16).
+      - name: PostgreSQL regression tests
+        run: |
+          pg_restore --version && psql --version
+          npm test -- --runInBand questionMergeConcurrency orphanQuestionConcurrency candidateRegistrationConcurrency candidateTokenRotation restoreRunbook
         env:
           TEST_DATABASE_URL: ${{ env.DATABASE_URL }}
 
