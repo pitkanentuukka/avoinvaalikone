@@ -26,15 +26,18 @@ echo "Got the deploy lock"
 
 dc="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
 
-# Time limits, in whole seconds (with_timeout below): a pull stalled on
-# Docker Hub, or a build, would otherwise hold the deploy lock indefinitely.
-# Checked here, as a value the watchdog can't read would leave no limit.
+# Time limits, in whole seconds (with_timeout below), from the environment
+# only: a pull stalled on Docker Hub, a build, or an `up` waiting for a
+# crash-looping db to get healthy would otherwise hold the deploy lock
+# indefinitely. Checked here, as a value the watchdog can't read (or one too
+# big for sh's arithmetic) would leave no limit.
 pull_limit=${DEPLOY_PULL_TIMEOUT:-300}
 build_limit=${DEPLOY_BUILD_TIMEOUT:-900}
-for limit in "$pull_limit" "$build_limit"; do
+up_limit=${DEPLOY_UP_TIMEOUT:-300}
+for limit in "$pull_limit" "$build_limit" "$up_limit"; do
   case $limit in
-    "" | *[!0-9]* | 0*)
-      echo "DEPLOY_PULL_TIMEOUT and DEPLOY_BUILD_TIMEOUT are whole seconds, more than 0 (got \"$limit\")" >&2
+    *[!0-9]* | 0* | ??????????*)
+      echo "DEPLOY_PULL_TIMEOUT, DEPLOY_BUILD_TIMEOUT and DEPLOY_UP_TIMEOUT are whole seconds, more than 0 and fewer than 10 digits (got \"$limit\")" >&2
       exit 1
       ;;
   esac
@@ -73,8 +76,8 @@ $dc config -q
 # patches (#216). Neither stops a running container, but `up` then recreates
 # each service whose image moved: db, redis and caddy too, for a few seconds
 # each. DEPLOY_PULL=0, in the environment or in .env, skips the refresh, for
-# a freeze such as election night (docs/runbook.md). Of the service images:
-# the build may still resolve its bases at Docker Hub (below).
+# a freeze such as election night (docs/runbook.md). It freezes only the
+# service images: the build may still resolve its bases at Docker Hub (below).
 #
 # A failed or stalled pull (Docker Hub down, or rate-limiting the server)
 # only warns: the images already here keep serving, and a fix shouldn't wait
@@ -193,7 +196,13 @@ fi
 # the rest of the old deploy, serving.
 $dc run --rm --no-deps -T caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 
-$dc up -d
+# Compose waits for db and redis to be healthy before it starts the backend,
+# and a crash-looping one may never get there: health starts over with each
+# restart. Stopped, `up` may have recreated some services and not others.
+if ! with_timeout "$up_limit" $dc up -d; then
+  echo "::error::\`up\` failed or timed out (see the output above): some services may have been recreated, others not (see \"Faster, for a service image that broke the site\" in docs/runbook.md)"
+  exit 1
+fi
 remove_mailpit
 
 # `up -d` leaves caddy running when only the Caddyfile changed, and

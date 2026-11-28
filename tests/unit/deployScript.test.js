@@ -17,13 +17,15 @@ const SCRIPT = path.join(__dirname, "../../scripts/deploy.sh");
 // pull does when Docker Hub is down or rate-limits the server. With
 // STUB_PULL_HANG set, every pull hangs, as a stalled transfer does; with
 // STUB_BUILD_HANG, `compose … build` does, and with STUB_BUILD_SLEEP it takes
-// that many seconds.
+// that many seconds. STUB_UP_HANG makes `compose … up` hang, as it does
+// waiting for a crash-looping db to get healthy.
 const DOCKER_STUB = `#!/bin/sh
 echo "$*" >> "$STUB_LOG"
 if [ -n "\${STUB_FAIL:-}" ]; then
   case "$*" in *"$STUB_FAIL"*) echo "stub: $* failed" >&2; exit 1 ;; esac
 fi
 case " $* " in *" pull "*) [ -n "\${STUB_PULL_HANG:-}" ] && exec sleep 30 ;; esac
+case " $* " in *" up "*) [ -n "\${STUB_UP_HANG:-}" ] && exec sleep 30 ;; esac
 case " $* " in *" build "*)
   [ -n "\${STUB_BUILD_HANG:-}" ] && exec sleep 30
   [ -n "\${STUB_BUILD_SLEEP:-}" ] && sleep "$STUB_BUILD_SLEEP" ;;
@@ -225,6 +227,14 @@ describe("scripts/deploy.sh image refresh", () => {
     expect(output).toMatch(/::error::Building the images failed or timed out/);
   });
 
+  test("an `up` that hangs is given up on, and fails the deploy", () => {
+    const { status, calls, output } = runDeploy({ STUB_UP_HANG: "1", DEPLOY_UP_TIMEOUT: "1" });
+    expect(status).not.toBe(0);
+    expect(calls.some(isUp)).toBe(true);
+    expect(calls.slice(calls.findIndex(isUp) + 1).some((c) => / restart caddy$/.test(c))).toBe(false);
+    expect(output).toMatch(/::error::`up` failed or timed out/);
+  });
+
   // deploy-detached.sh runs the deploy under nohup (#205). GNU timeout would
   // catch the hangup and stop the build with it; the time limit here mustn't.
   test("a hangup during the build doesn't stop it", () => {
@@ -234,7 +244,7 @@ describe("scripts/deploy.sh image refresh", () => {
       deploy=$!
       n=0
       until grep -q " build$" "$STUB_LOG" 2>/dev/null; do
-        n=$((n + 1)); [ "$n" -lt 200 ] || { cat "$STUB_LOG.out"; exit 99; }
+        n=$((n + 1)); [ "$n" -lt 200 ] || { kill "$deploy"; cat "$STUB_LOG.out"; exit 99; }
         sleep 0.05
       done
       pkill -HUP -s $$
@@ -248,7 +258,12 @@ describe("scripts/deploy.sh image refresh", () => {
   });
 
   // The watchdog can't read them; GNU timeout's `20m` must not mean "no limit".
-  test.each([["DEPLOY_BUILD_TIMEOUT", "20m"], ["DEPLOY_PULL_TIMEOUT", "0"], ["DEPLOY_PULL_TIMEOUT", "1.5"]])(
+  test.each([
+    ["DEPLOY_BUILD_TIMEOUT", "20m"],
+    ["DEPLOY_PULL_TIMEOUT", "0"],
+    ["DEPLOY_PULL_TIMEOUT", "1.5"],
+    ["DEPLOY_UP_TIMEOUT", "99999999999999999999"],
+  ])(
     "%s=%s is refused before anything is pulled",
     (name, value) => {
       const { status, calls, output } = runDeploy({ [name]: value });
