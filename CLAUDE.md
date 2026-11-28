@@ -103,6 +103,7 @@ Copy [`.env.example`](.env.example) to `.env` for the configuration reference: s
 - Tokens are 24 random bytes from pgcrypto (`encode(gen_random_bytes(24), 'hex')` column defaults; rotate with `SET col = DEFAULT`)
 - Tokens travel in URL paths and magic-link query params, so anything that records a URL must mask them: Sentry (`beforeSend`/`beforeBreadcrumb`) and the morgan `:url` token use `redactTokens` (`src/redactTokens.js`, mirrored in `vaalikone-frontend/src/redactTokens.js`; `tests/unit/redactTokens.test.js` runs both). The frontend nginx logs only the masked `$log_uri` (maps in `vaalikone-frontend/nginx.conf`) and its error log is at `crit`, since nginx error lines carry the raw request line (upstream failures on every restart; only rare resource-exhaustion alerts still get through). A new token route or link param must be added to all three. Don't enable express-rate-limit's `debug` logging (`DEBUG=express-rate-limit*` or `DEBUG=*`) on a backend outside local dev: it logs every request's raw `originalUrl`
 - API behaviour that only direct API clients can hit (the frontend never triggers it) is documented in `docs/direct-api-caveats.md` rather than fixed for now; add new cases there
+- Minor bugs not worth an issue (unlikely and not serious) are listed in `docs/bugs.md`; when fixing one, remove its entry
 - The migration runner wraps each SQL file and its `migration_history` insert in one transaction. SQL files must not contain transaction control or commands such as `CREATE INDEX CONCURRENTLY` that cannot run in a transaction. New migrations should follow the versioned pattern and update `schema_migrations`
 
 ## Production Data
@@ -132,7 +133,7 @@ Bugs and tasks are tracked as GitHub issues (`pitkanentuukka/avoinvaalikone`). W
    - If only nits/cosmetic/non-functional findings remain, fix them, run the full test suite, and exit the loop without another review.
    - If a finding contradicts an earlier round's fix, stop and ask the user.
 6. Mark the PR ready for review and summarise what was fixed in each round.
-   List the collected pre-existing bugs and ask the user which ones to file as issues.
-   When describing bugs, include 1. steps to reproduce 2. expected behaviour and 3. actual behaviour, and estimates on how likely the bug is to occur and how serious it is. Include these in the filed issue too.
-   When filing issues, always check if they have been filed already. Do not create duplicates.
+   List the collected pre-existing bugs. Add the ones that are unlikely to happen and not serious if they do straight to `docs/bugs.md`, without asking. Ask the user which of the rest to file as issues.
+   When describing bugs, include 1. steps to reproduce 2. expected behaviour and 3. actual behaviour, and estimates on how likely the bug is to occur and how serious it is. Include these in the filed issue or `docs/bugs.md` entry too.
+   Before filing an issue or adding an entry, check the open issues and `docs/bugs.md`. Do not create duplicates.
    The user reviews and merges.
