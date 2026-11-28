@@ -80,8 +80,16 @@ jobs:
 
       - run: npm ci
 
-      - name: PostgreSQL concurrency regression tests
-        run: npm test -- --runInBand questionMergeConcurrency orphanQuestionConcurrency candidateRegistrationConcurrency candidateTokenRotation
+      # restoreRunbook runs the runbook's pg_restore and psql from the runner
+      # image, which must match the postgres service's major version (16):
+      # newer ones write settings a 16 server rejects. Fail with that reason,
+      # not a confusing test failure, if the runner image changes.
+      - name: PostgreSQL regression tests
+        run: |
+          for tool in pg_dump pg_restore psql; do
+            "$tool" --version | grep -q ' 16\.' || { echo "::error::$tool is not PostgreSQL 16: $("$tool" --version)"; exit 1; }
+          done
+          npm test -- --runInBand questionMergeConcurrency orphanQuestionConcurrency candidateRegistrationConcurrency candidateTokenRotation restoreRunbook
         env:
           TEST_DATABASE_URL: ${{ env.DATABASE_URL }}
 
