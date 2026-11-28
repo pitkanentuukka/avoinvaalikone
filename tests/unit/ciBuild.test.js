@@ -1,5 +1,5 @@
 // CI must build what the deploy builds (issue #202). `scripts/deploy.sh` runs
-// `docker compose up --build` on the server after the merge, so a change that
+// `docker compose build` on the server after the merge, so a change that
 // broke `vite build` or a Dockerfile stage passed CI and failed only there.
 // The workflow and compose files are read as text: the workflow is 2-space
 // YAML, split here into jobs and steps by indentation. Build args are not

@@ -75,7 +75,12 @@ services:
         max-file: "3"
 
   caddy:
-    image: caddy:alpine
+    # Minor version pinned: scripts/deploy.sh pulls on every deploy (#216),
+    # so patch releases arrive by themselves, but a new minor only by editing
+    # this. The token redaction in the Caddyfile (#36) depends on how Caddy
+    # lays out its logs, which `caddy validate` can't check: after a bump,
+    # look for tokens in `docker logs vaalikone-caddy`.
+    image: caddy:2.11-alpine
     container_name: vaalikone-caddy
     restart: unless-stopped
     ports:

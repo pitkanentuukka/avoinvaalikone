@@ -12,6 +12,10 @@ services:
     image: postgres:16-alpine
     container_name: vaalikone-db
     restart: unless-stopped
+    # Compose's default 10 s can SIGKILL Postgres mid-checkpoint (a crash
+    # recovery on the next start), and a deploy recreates db whenever
+    # upstream has rebuilt postgres:16-alpine (#216).
+    stop_grace_period: 60s
     # Modest tuning for the read-mostly hot dataset; log_min_duration_statement
     # surfaces slow queries in the container logs. Party, registration and
     # candidate tokens are bearer secrets and must stay out of them (issue

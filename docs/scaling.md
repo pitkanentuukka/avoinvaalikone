@@ -201,11 +201,11 @@ rsync -avz --delete \
   --exclude='.env' --exclude='test-results' --exclude='.claude' \
   --rsync-path="mkdir -p /opt/vaalikone && { flock -n /opt/vaalikone true || echo 'Waiting for another deploy to finish' >&2; } && flock -w 600 /opt/vaalikone timeout -k 10 300 rsync" \
   ./ user@80.69.172.220:/opt/vaalikone/ &&
-# Only after a complete rsync: builds and restarts; also restarts caddy if the
-# Caddyfile changed, which `up -d` alone doesn't pick up. Runs detached on the
-# server, so a dropped connection doesn't cut it short; the log is in
-# /var/log/vaalikone-deploy/ (as root; another user's is in
-# ~/.local/state/vaalikone-deploy/).
+# Only after a complete rsync: pulls updated images, builds and restarts;
+# also restarts caddy if the Caddyfile changed, which `up -d` alone doesn't
+# pick up. Runs detached on the server, so a dropped connection doesn't cut
+# it short; the log is in /var/log/vaalikone-deploy/ (as root; another
+# user's is in ~/.local/state/vaalikone-deploy/).
 ssh user@80.69.172.220 "sh /opt/vaalikone/scripts/deploy-detached.sh"
 ```
 
