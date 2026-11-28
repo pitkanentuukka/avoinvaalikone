@@ -53,69 +53,118 @@ remove_mailpit
 $dc config -q
 
 # Compose's default pull policy is `missing`: without these the server kept
-# the digest it first pulled of every tag (the service images and the build
-# stages' bases), and never got their Alpine, OpenSSL, Node, nginx,
-# PostgreSQL or Caddy patches (#216). Neither stops a running container, but
-# `up` then recreates each service whose image moved: db, redis and caddy
-# too, for a few seconds each. DEPLOY_PULL=0, in the environment or in .env,
-# skips the refresh, for a freeze such as election night (docs/runbook.md).
+# the digest it first pulled of each service image (db, redis, caddy), and
+# of a base image already tagged here (postgres:16-alpine, which the backup
+# image builds on), and never got their Alpine, OpenSSL, PostgreSQL or Caddy
+# patches (#216). Neither stops a running container, but `up` then recreates
+# each service whose image moved: db, redis and caddy too, for a few seconds
+# each. DEPLOY_PULL=0, in the environment or in .env, skips the refresh, for
+# a freeze such as election night (docs/runbook.md).
 #
 # A failed or stalled pull (Docker Hub down, or rate-limiting the server)
 # only warns: the images already here keep serving, and a fix shouldn't wait
 # on Docker Hub. The warnings start with `::warning::` so that CI, which
 # follows this log, shows them on the run's summary.
 #
-# The build stages' bases are pulled with `docker pull`, not `build --pull`:
-# BuildKit doesn't tag the images it pulls itself, so after a failed
-# `build --pull` there would be no local copy to build on, and the build
-# would go to Docker Hub again. Tagged here, a plain build uses them as they
-# are. These are the Dockerfiles of the images Compose builds (the build
-# contexts in docker-compose*.yml).
+# The build stages' bases are pulled with `docker pull` too, so that each is
+# tagged here: BuildKit doesn't tag the images it fetches itself. When Docker
+# Hub can't be reached at all, the build then falls back to that copy. When it
+# answers but a transfer fails (rate limited, too slow), BuildKit can still
+# go for the newer image itself and fail the build, before `up`. These are
+# the Dockerfiles of the images Compose builds (the build contexts in
+# docker-compose*.yml).
 dockerfiles="Dockerfile vaalikone-frontend/Dockerfile scripts/backup/Dockerfile"
-# Each FROM's image, skipping its options (--platform=…) and earlier stages
-# of the same file (FROM … AS build, then FROM build).
+# Each FROM's image, skipping its options (--platform=…), earlier stages of
+# the same file (FROM … AS build, then FROM build; names ignore case), and
+# what isn't a registry image: scratch, an ARG, a continued line.
 base_images() {
   awk '
     FNR == 1 { split("", stage) }
     toupper($1) == "FROM" {
       i = 2
       while (i <= NF && $i ~ /^--/) i++
-      if (i <= NF && !($i in stage)) print $i
-      if (toupper($(i + 1)) == "AS") stage[$(i + 2)] = 1
+      if (i <= NF && !(tolower($i) in stage) && tolower($i) != "scratch" && $i !~ /[$\\]/) print $i
+      if (toupper($(i + 1)) == "AS") stage[tolower($(i + 2))] = 1
     }
   ' $dockerfiles | sort -u
 }
-pull_timeout() {
-  timeout -k 10 "${DEPLOY_PULL_TIMEOUT:-300}" "$@"
+
+# Every process below $1, children before theirs.
+descendants() {
+  for child in $(pgrep -P "$1"); do
+    echo "$child"
+    descendants "$child"
+  done
+}
+# Runs "$@" with a time limit of $1 (whole) seconds: then TERM to it and
+# everything it started (the docker CLI runs Compose as a child, Compose may
+# run buildx), and KILL 10 seconds later. Its status is the command's, or
+# that of the signal that stopped it. Not timeout(1): that catches SIGHUP,
+# which nohup (deploy-detached.sh) set to be ignored, so a hangup would stop
+# the deploy. A background job here keeps the ignored SIGHUP. The watchdog
+# polls rather than sleeping out the limit, so that it ends with the command
+# and leaves no sleep behind.
+with_timeout() {
+  limit=$1
+  shift
+  "$@" &
+  cmd=$!
+  (
+    term=$(($(date +%s) + limit))
+    while kill -0 "$cmd" 2>/dev/null; do
+      now=$(date +%s)
+      if [ "$now" -ge "$((term + 10))" ]; then
+        kill -KILL "$cmd" $(descendants "$cmd") 2>/dev/null || true
+      elif [ "$now" -ge "$term" ] && [ -z "${stopping:-}" ]; then
+        echo "Gave up after ${limit}s: $*" >&2
+        kill -TERM "$cmd" $(descendants "$cmd") 2>/dev/null || true
+        stopping=1
+      fi
+      sleep 0.1
+    done
+  ) &
+  watchdog=$!
+  status=0
+  wait "$cmd" || status=$?
+  wait "$watchdog" || true
+  return "$status"
 }
 
-# Unquoted, and without what may follow it: spaces, a comment, a CR.
-pull=${DEPLOY_PULL-$(sed -n "s/^[[:space:]]*\(export[[:space:]]\{1,\}\)\{0,1\}DEPLOY_PULL[[:space:]]*=[[:space:]]*[\"']\{0,1\}\([^\"'[:space:]#]*\).*/\2/p" .env 2>/dev/null | tail -n 1)}
-case "$pull" in
+# Unquoted, any case, and without what may surround it: spaces, a comment, a CR.
+pull=${DEPLOY_PULL-$(sed -n "s/^[[:space:]]*\(export[[:space:]]\{1,\}\)\{0,1\}DEPLOY_PULL[[:space:]]*=[[:space:]]*[\"']\{0,1\}[[:space:]]*\([^\"'[:space:]#]*\).*/\2/p" .env 2>/dev/null | tail -n 1)}
+case $(printf '%s' "$pull" | tr '[:upper:]' '[:lower:]') in
   0 | false | no | off)
     echo "::warning::DEPLOY_PULL=$pull: building and running on the images already on the server, without their upstream patches (remove it when the freeze is over, docs/runbook.md)"
     ;;
   *)
-    case "$pull" in
+    case $(printf '%s' "$pull" | tr '[:upper:]' '[:lower:]') in
       "" | 1 | true | yes | on) ;;
       *) echo "::warning::DEPLOY_PULL=$pull is neither 0 nor 1: pulling as usual" ;;
     esac
     # What this deploy starts from: the prune below deletes the images it
     # replaces, so this is where the digests that last worked are recorded
-    # (docs/runbook.md, Rollback).
+    # (docs/runbook.md, Rollback). The tags' images, and what the containers
+    # run, which can differ: a deploy that failed after pulling moved a tag
+    # without recreating its container.
     echo "Images before this deploy:"
-    docker image ls --digests --format '{{.Repository}}:{{.Tag}} {{.Digest}}' || true
-    if ! pull_timeout $dc pull --ignore-buildable; then
+    docker image ls --digests --no-trunc --format '{{.ID}} {{.Repository}}:{{.Tag}} {{.Digest}}' || true
+    echo "Containers before this deploy (name, image, image ID):"
+    containers=$(docker ps -q) || true
+    [ -z "$containers" ] || docker inspect --format '{{.Name}} {{.Config.Image}} {{.Image}}' $containers || true
+    if ! with_timeout "${DEPLOY_PULL_TIMEOUT:-300}" $dc pull --ignore-buildable; then
       echo "::warning::Pulling the service images failed or timed out (see the output above): deploying with the copies already on the server (see \"Deploy warns\" in docs/runbook.md)"
     fi
     for image in $(base_images); do
-      if ! pull_timeout docker pull "$image"; then
-        echo "::warning::Pulling the base image $image failed or timed out (see the output above): building on the copy already on the server (see \"Deploy warns\" in docs/runbook.md)"
+      if ! with_timeout "${DEPLOY_PULL_TIMEOUT:-300}" docker pull "$image"; then
+        echo "::warning::Pulling the base image $image failed or timed out (see the output above): the build uses the copy already on the server if Docker Hub can't be reached at all (see \"Deploy warns\" in docs/runbook.md)"
       fi
     done
     ;;
 esac
-timeout -k 10 "${DEPLOY_BUILD_TIMEOUT:-900}" $dc build
+if ! with_timeout "${DEPLOY_BUILD_TIMEOUT:-900}" $dc build; then
+  echo "::error::Building the images failed or timed out (see the output above): nothing was restarted (see \"Deploy fails building an image\" in docs/runbook.md)"
+  exit 1
+fi
 
 # Validate the deployed Caddyfile on the Caddy image `up` is about to run,
 # in a fresh container that mounts the new file (and publishes no ports).

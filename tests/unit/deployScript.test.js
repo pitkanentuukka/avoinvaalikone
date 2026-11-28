@@ -16,14 +16,18 @@ const SCRIPT = path.join(__dirname, "../../scripts/deploy.sh");
 // Any call containing STUB_FAIL (e.g. " pull ", "pull node:") fails, as a
 // pull does when Docker Hub is down or rate-limits the server. With
 // STUB_PULL_HANG set, every pull hangs, as a stalled transfer does; with
-// STUB_BUILD_HANG, `compose … build` does.
+// STUB_BUILD_HANG, `compose … build` does, and with STUB_BUILD_SLEEP it takes
+// that many seconds.
 const DOCKER_STUB = `#!/bin/sh
 echo "$*" >> "$STUB_LOG"
 if [ -n "\${STUB_FAIL:-}" ]; then
   case "$*" in *"$STUB_FAIL"*) echo "stub: $* failed" >&2; exit 1 ;; esac
 fi
 case " $* " in *" pull "*) [ -n "\${STUB_PULL_HANG:-}" ] && exec sleep 30 ;; esac
-case " $* " in *" build "*) [ -n "\${STUB_BUILD_HANG:-}" ] && exec sleep 30 ;; esac
+case " $* " in *" build "*)
+  [ -n "\${STUB_BUILD_HANG:-}" ] && exec sleep 30
+  [ -n "\${STUB_BUILD_SLEEP:-}" ] && sleep "$STUB_BUILD_SLEEP" ;;
+esac
 case "$1" in
   ps) [ "\${STUB_PS:-}" = fail ] && { echo "permission denied" >&2; exit 1; }; echo mailpit123 ;;
   compose) exit "\${STUB_COMPOSE_EXIT:-0}" ;;
@@ -33,11 +37,12 @@ esac
 // The script runs from a copy of the tree (it reads .env and the
 // Dockerfiles from the tree it is in), named TREE, with `dotenv` as its .env
 // and `dockerfiles` replacing the real Dockerfiles. Nothing from the
-// developer's checkout or shell (.env, DEPLOY_*) reaches it.
+// developer's checkout or shell (.env, DEPLOY_*) reaches it. A `wrapper`
+// shell command runs it instead, as "$1".
 const ROOT = path.join(__dirname, "../..");
 const TREE = "deploy-tree";
 const DOCKERFILES = ["Dockerfile", "vaalikone-frontend/Dockerfile", "scripts/backup/Dockerfile"];
-function runDeploy(env = {}, dotenv = "", dockerfiles = {}) {
+function runDeploy(env = {}, dotenv = "", dockerfiles = {}, wrapper) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "deploy-test-"));
   fs.writeFileSync(path.join(dir, "docker"), DOCKER_STUB, { mode: 0o755 });
   const log = path.join(dir, "calls.log");
@@ -49,7 +54,8 @@ function runDeploy(env = {}, dotenv = "", dockerfiles = {}) {
   }
   fs.writeFileSync(path.join(tree, ".env"), dotenv);
   const baseEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(DEPLOY_|STUB_|COMPOSE_)/.test(k)));
-  const result = spawnSync("sh", [path.join(tree, "scripts/deploy.sh")], {
+  const script = path.join(tree, "scripts/deploy.sh");
+  const result = spawnSync("sh", wrapper ? ["-c", wrapper, "sh", script] : [script], {
     env: { ...baseEnv, PATH: `${dir}:${process.env.PATH}`, STUB_LOG: log, ...env },
     encoding: "utf8",
   });
@@ -123,9 +129,10 @@ describe("scripts/deploy.sh image refresh", () => {
     expect(pull).toBeLessThan(calls.findIndex(isUp));
   });
 
-  // Tagged by `docker pull`, they are what a build without --pull uses, so
-  // a failed pull leaves a copy to build on (BuildKit doesn't tag the images
-  // `build --pull` fetches).
+  // Tagged by `docker pull`, they are a copy the build can fall back to when
+  // Docker Hub can't be reached (BuildKit doesn't tag the images it fetches
+  // itself). Only the calls are checked: what BuildKit then builds on is the
+  // daemon's business, beyond a stub.
   test("pulls each Dockerfile's base image, then builds on them", () => {
     const { status, calls } = runDeploy();
     expect(status).toBe(0);
@@ -143,19 +150,23 @@ describe("scripts/deploy.sh image refresh", () => {
   // deploy.sh lists the Dockerfiles itself: it must list every image Compose builds.
   test("knows every Dockerfile Compose builds from", () => {
     const compose = ["docker-compose.yml", "docker-compose.prod.yml"].map((f) => fs.readFileSync(path.join(ROOT, f), "utf8")).join("\n");
-    const built = [...compose.matchAll(/^\s*context: (\S+)\n(?:\s*dockerfile: (\S+))?/gm)].map((m) => path.normalize(path.join(m[1], m[2] || "Dockerfile")));
+    const built = [
+      ...[...compose.matchAll(/^\s*context: (\S+)\n(?:\s*dockerfile: (\S+))?/gm)].map((m) => path.join(m[1], m[2] || "Dockerfile")),
+      ...[...compose.matchAll(/^\s*build: ([^\s{]\S*)$/gm)].map((m) => path.join(m[1], "Dockerfile")),
+    ].map((f) => path.normalize(f));
     expect(built.sort()).toEqual([...DOCKERFILES].sort());
     const listed = fs.readFileSync(SCRIPT, "utf8").match(/^dockerfiles="([^"]*)"$/m);
     expect(listed[1].split(" ").sort()).toEqual([...DOCKERFILES].sort());
   });
 
-  test("skips FROM options and earlier stages", () => {
+  test("skips FROM options, earlier stages and what isn't an image", () => {
     const { status, calls } = runDeploy({}, "", {
-      Dockerfile: "FROM --platform=linux/amd64 node:24-alpine AS build\nRUN true\nfrom build as again\nFROM again\n",
+      Dockerfile:
+        "ARG BASE=x\nFROM --platform=linux/amd64 node:24-alpine AS Build\nRUN true\nfrom build as again\nFROM again\nFROM scratch\nFROM ${BASE}\nFROM \\\n  y\n",
     });
     expect(status).toBe(0);
     expect(calls).toContain("pull node:24-alpine");
-    expect(calls.filter((c) => /^pull (build|again|--platform)/.test(c))).toEqual([]);
+    expect(calls.filter((c) => /^pull /.test(c) && !/^pull (node|nginxinc|postgres)/.test(c))).toEqual([]);
   });
 
   // The old images keep serving; Docker Hub being down mustn't block a fix.
@@ -205,9 +216,28 @@ describe("scripts/deploy.sh image refresh", () => {
 
   // It holds the deploy lock: later deploys' rsyncs give up after 10 minutes.
   test("a build that hangs is given up on, and fails the deploy before `up`", () => {
-    const { status, calls } = runDeploy({ STUB_BUILD_HANG: "1", DEPLOY_BUILD_TIMEOUT: "1" });
+    const { status, calls, output } = runDeploy({ STUB_BUILD_HANG: "1", DEPLOY_BUILD_TIMEOUT: "1" });
     expect(status).not.toBe(0);
     expect(calls.some(isUp)).toBe(false);
+    expect(output).toMatch(/::error::Building the images failed or timed out/);
+  });
+
+  // deploy-detached.sh runs the deploy under nohup (#205). GNU timeout would
+  // catch the hangup and stop the build with it; the time limit here mustn't.
+  test("a hangup during the build doesn't stop it", () => {
+    const wrapper = `
+      trap : HUP
+      nohup sh "$1" > "$STUB_LOG.out" 2>&1 &
+      deploy=$!
+      until grep -q " build$" "$STUB_LOG" 2>/dev/null; do sleep 0.05; done
+      pkill -HUP -s $$
+      wait "$deploy"
+      status=$?
+      cat "$STUB_LOG.out"
+      exit "$status"`;
+    const { status, calls } = runDeploy({ STUB_BUILD_SLEEP: "1" }, "", {}, `exec setsid -w sh -c '${wrapper.replace(/'/g, "'\\''")}' sh "$1"`);
+    expect(status).toBe(0);
+    expect(calls.some(isUp)).toBe(true);
   });
 
   // The prune deletes the replaced images, so the log is where the digests
@@ -217,6 +247,14 @@ describe("scripts/deploy.sh image refresh", () => {
     const list = calls.findIndex((c) => c.startsWith("image ls --digests"));
     expect(list).toBeGreaterThan(-1);
     expect(list).toBeLessThan(calls.findIndex(isPull));
+  });
+
+  // A deploy that failed after pulling moved the tag, but not the container.
+  test("logs the images the containers run, before pulling", () => {
+    const { calls } = runDeploy();
+    const running = calls.findIndex((c) => c.startsWith("inspect ") && c.endsWith(" mailpit123"));
+    expect(running).toBeGreaterThan(-1);
+    expect(running).toBeLessThan(calls.findIndex(isPull));
   });
 
   // A freeze (election night): a hotfix shouldn't also restart the database
@@ -229,6 +267,8 @@ describe("scripts/deploy.sh image refresh", () => {
     [".env, with CRLF", {}, "SMTP_HOST=x\r\nDEPLOY_PULL=0\r\n"],
     [".env, quoted and exported", {}, 'export DEPLOY_PULL = "0"\n'],
     [".env, as off", {}, "DEPLOY_PULL=off\n"],
+    [".env, in capitals", {}, "DEPLOY_PULL=FALSE\n"],
+    [".env, quoted with a space", {}, 'DEPLOY_PULL=" 0"\n'],
   ])("DEPLOY_PULL=0 in %s skips the refresh, with a warning", (_where, env, dotenv) => {
     const { status, calls, output } = runDeploy(env, dotenv);
     expect(status).toBe(0);

@@ -144,8 +144,9 @@ jobs:
     # 6-hour limit (#178). A deploy takes about a minute, more when upstream
     # images have moved (deploy.sh pulls them, #216); 30 leaves room for a
     # build with a cold cache. Not always for one that first waits (up to 10
-    # minutes) for a lost deploy to finish (#205); hitting the limit then
-    # only fails the job, as the deploy carries on detached on the server.
+    # minutes) for a lost deploy to finish (#205), or whose pulls stall
+    # (deploy.sh gives each 5 minutes, and the build 15); hitting the limit
+    # then only fails the job, as the deploy carries on detached on the server.
     timeout-minutes: 30
     concurrency:
       group: deploy-production

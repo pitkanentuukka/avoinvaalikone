@@ -50,13 +50,19 @@ beforeEach(() => {
     if (f.endsWith(".sh")) fs.copyFileSync(path.join(REPO, "scripts", f), path.join(tree, "scripts", f));
   }
   fs.copyFileSync(path.join(REPO, "Caddyfile"), path.join(tree, "Caddyfile"));
+  // deploy.sh reads them for the base images it pulls.
+  for (const f of ["Dockerfile", "vaalikone-frontend/Dockerfile", "scripts/backup/Dockerfile"]) {
+    fs.mkdirSync(path.dirname(path.join(tree, f)), { recursive: true });
+    fs.copyFileSync(path.join(REPO, f), path.join(tree, f));
+  }
   const bin = path.join(dir, "bin");
   fs.mkdirSync(bin);
   fs.writeFileSync(path.join(bin, "docker"), DOCKER_STUB, { mode: 0o755 });
   fs.writeFileSync(path.join(bin, "ssh"), SSH_STUB, { mode: 0o755 });
   log = path.join(dir, "docker.log");
   env = {
-    ...process.env,
+    // Nothing of the developer's deploy settings (DEPLOY_PULL=0, a timeout).
+    ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("DEPLOY_"))),
     // A locale that isn't installed makes bash warn on stderr.
     LC_ALL: "C",
     HOME: dir,
@@ -73,9 +79,8 @@ afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
 
 const calls = () => (fs.existsSync(log) ? fs.readFileSync(log, "utf8").trim().split("\n") : []);
 const upStarted = () => calls().some((c) => / up -d$/.test(c));
-// Near the end of deploy.sh here (only the prune follows): the stub's
-// Caddyfile never matches.
-const deployDone = () => calls().some((c) => / restart caddy$/.test(c));
+// The last thing deploy.sh does.
+const deployDone = () => calls().some((c) => c === "image prune -f");
 
 async function waitFor(cond, ms = 10000) {
   const end = Date.now() + ms;

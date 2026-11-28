@@ -214,7 +214,7 @@ Cloudflare (cache + LB, health-checked origin pool)
 
 ### 5.4 Deploy pipeline
 
-Building images on every server (`docker compose up --build`) doesn't scale to
+Building images on every server (`scripts/deploy.sh`'s `docker compose build`) doesn't scale to
 N servers and risks version skew mid-event:
 
 - CI builds backend + frontend images once, pushes to **GHCR** tagged with the
