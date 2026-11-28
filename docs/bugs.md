@@ -68,3 +68,23 @@ the language they were made in.
 - **Possible fix:** store the error (or a translation key and its arguments)
   and translate it when rendering.
 - **Found:** review of PR #238 (#226).
+
+## Admin: hiding a candidate list during its reload reopens it
+
+**Where:** `loadPartyCandidates()` in `AdminView` (`vaalikone-frontend/src/App.jsx`)
+
+The reload stores the list without checking that it is still open, and *Piilota
+ehdokkaat* stays enabled while the list is open, even during a reload.
+
+1. **Steps:** open a party's candidates and click *Lähetä kaikille
+   henkilökohtainen linkki*, then *Päivitä lähetystila*. Click *Piilota
+   ehdokkaat* while the reload is still running.
+2. **Expected:** the list stays hidden.
+3. **Actual:** the list opens again when the reload finishes.
+
+- **Likelihood:** low. It needs a slow request and a click within that window.
+- **Severity:** cosmetic. No data or link is affected.
+- **Possible fix:** for a reload (not the first open), store the list only if
+  it is still open, as `refreshAfterRotation()` does; or disable *Piilota
+  ehdokkaat* while the list is loading.
+- **Found:** review of PR #239 (#227).
