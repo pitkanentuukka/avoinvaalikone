@@ -52,7 +52,9 @@ function button(tree, label, { evenIfDisabled = false } = {}) {
   return onClick;
 }
 function input(tree, placeholder) {
-  return [...elements(tree)].find((el) => el.props.placeholder === placeholder).props;
+  const found = [...elements(tree)].find((el) => el.props.placeholder === placeholder);
+  if (!found) throw new Error(`expected an input with placeholder "${placeholder}"`);
+  return found.props;
 }
 function banner(tree) {
   return [...elements(tree)].find((el) => el.type?.name === "ErrorBanner")?.props ?? null;
@@ -79,12 +81,19 @@ function mockBackend(handlers) {
 }
 
 // A response held back until the test calls `finish()`, which answers every
-// request made with it so far: `const create = pending(json(201, party)); … create.finish();`
+// request made with it so far, and any made later at once:
+// `const create = pending(json(201, party)); … create.finish();`
 // Each request gets its own copy, since a Response body can be read only once.
 function pending(response) {
   const waiting = [];
-  const handler = () => new Promise((resolve) => { waiting.push(resolve); });
-  handler.finish = () => { for (const resolve of waiting.splice(0)) resolve(response.clone()); };
+  let done = false;
+  const handler = () => (done
+    ? Promise.resolve(response.clone())
+    : new Promise((resolve) => { waiting.push(resolve); }));
+  handler.finish = () => {
+    done = true;
+    for (const resolve of waiting.splice(0)) resolve(response.clone());
+  };
   return handler;
 }
 

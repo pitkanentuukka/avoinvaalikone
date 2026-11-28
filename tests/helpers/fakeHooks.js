@@ -1,5 +1,5 @@
 // A stand-in for React's hooks, bundled in place of "react" for App.jsx only
-// (see tests/unit/adminErrorClears.test.js). It lets a component be called as
+// (see tests/helpers/adminView.js). It lets a component be called as
 // a plain function and its event handlers run without a DOM: each call to
 // `render()` returns the element tree the component would hand to React, and
 // state set by a handler is there on the next `render()`. Child components are

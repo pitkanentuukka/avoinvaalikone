@@ -18,9 +18,13 @@ beforeAll(async () => {
 afterAll(() => { delete global.window; });
 afterEach(() => { delete global.fetch; });
 
-const createRequests = () => global.fetch.mock.calls.filter(([url, opts]) => (
-  url === "/api/admin/parties" && opts?.method === "POST"
+const requests = (method, url) => global.fetch.mock.calls.filter(([u, opts]) => (
+  u === url && (opts?.method || "GET") === method
 ));
+const createRequests = () => requests("POST", "/api/admin/parties");
+// The other action must really run: a guard refusing every action while one
+// is busy would also keep the first spinner on.
+const deleteRequests = () => requests("DELETE", `/api/admin/parties/${PARTY_ID}`);
 
 describe("overlapping admin actions (#225)", () => {
   test("adding a party stays loading while another action finishes first", async () => {
@@ -34,6 +38,7 @@ describe("overlapping admin actions (#225)", () => {
     expect(findButton(view(), t.adminAdd).loading).toBe(true);
 
     await click(t.adminDelete);
+    expect(deleteRequests()).toHaveLength(1);
     expect(findButton(view(), t.adminAdd).loading).toBe(true);
 
     create.finish();
@@ -65,6 +70,7 @@ describe("overlapping admin actions (#225)", () => {
     });
     const rotating = button(view(), t.adminRotatePartyToken)();
     await click(t.adminDelete);
+    expect(deleteRequests()).toHaveLength(1);
     expect(findButton(view(), t.adminRotatePartyToken).loading).toBe(true);
 
     rotation.finish();
