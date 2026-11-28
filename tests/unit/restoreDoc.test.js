@@ -239,6 +239,7 @@ test("the live restore replaces the public schema all or nothing", () => {
   expect(c.args).toContain("-1");
   expect(values(c, "-v")).toContain("ON_ERROR_STOP=1");
   expect(values(c, "-c")).toEqual([
+    "SET client_min_messages = warning",
     "DROP SCHEMA public CASCADE",
     "CREATE SCHEMA public AUTHORIZATION pg_database_owner",
     "GRANT USAGE ON SCHEMA public TO PUBLIC",

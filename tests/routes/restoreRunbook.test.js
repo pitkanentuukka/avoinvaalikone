@@ -127,7 +127,9 @@ describeWithDb("restore.md step 3 on a real database (#233)", () => {
     await addNewerMigration(db.url);
 
     const res = restore(db.dir, db.url);
-    expect(res.stderr).not.toMatch(/ERROR|error:/);
+    // The runbook says a successful restore prints nothing.
+    expect(res.stderr).toBe("");
+    expect(res.stdout).toBe("");
     expect(res.status).toBe(0);
 
     expect(await candidateNames(db.url)).toEqual(["Ehdokas Ennen"]);

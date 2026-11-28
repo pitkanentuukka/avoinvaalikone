@@ -4,9 +4,10 @@ Dumps are `pg_dump -Fc` custom-format archives named `vaalikone-<UTC stamp>.dump
 The newest one is always in the `backup_data` volume (`/backups` inside the
 backup container); older ones live in the object-storage bucket under `postgres/`.
 
-Keep the restore clear of 03:00 UTC: a nightly backup that starts during it may
-wait for it and then save a dump with empty tables, which replaces the local dump
-and is uploaded. After the restore, check the 03:00 backup log
+Keep the restore clear of 03:00 UTC. A nightly backup that is already running
+makes step 3 wait until it finishes. One that starts during step 3 waits for it
+and then fails ("cache lookup failed for relation"), since the tables it set out
+to dump are gone, so that night has no new dump. After the restore, check the 03:00 backup log
 (`docker compose -f docker-compose.yml -f docker-compose.prod.yml logs backup`), or
 run backup.sh by hand (`docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backup backup.sh`).
 
@@ -35,15 +36,16 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml stop backend
 #      the early end of its input as the end of the restore and commit
 #      what had arrived.
 #    - psql then drops the public schema with everything in it, recreates
-#      it as initdb made it, and runs restore.sql, all in one transaction
-#      (-1 with ON_ERROR_STOP): on the first error it stops and rolls back.
+#      it with initdb's owner and grants, and runs restore.sql, all in one
+#      transaction (-1 with ON_ERROR_STOP): on the first error it stops and
+#      rolls back.
 #      Dropping the whole schema also removes tables that a migration newer
 #      than the dump added, which pg_restore --clean would leave in place
 #      and fail on (#233). Step 4 recreates them, empty.
-#    restore.sql is about the size of the data. Until psql commits, the old
-#    tables' files stay on disk next to the new ones and the new data also
-#    goes to the WAL, so it needs free space for three copies of the data
-#    plus up to 1 GB (max_wal_size).
+#    restore.sql is about the size of the data, and until psql commits the
+#    old tables' files stay on disk next to the new ones, so it needs free
+#    space for two copies of the data, plus up to 1 GB (max_wal_size) of WAL.
+#    On success it prints nothing.
 #    If it fails, read the first error: a "pg_restore: error:" line, or a
 #    psql line with "ERROR:" or "FATAL:".
 #    - "PANIC", "crash of another server process", "server closed the
@@ -68,7 +70,7 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml stop backend
 #    To give up, go on to step 4: the backends restart on the unchanged data.
 docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backup \
   sh -c 'pg_restore -f /backups/restore/restore.sql /backups/restore/vaalikone-<stamp>.dump &&
-    psql -q -1 -v ON_ERROR_STOP=1 -c "DROP SCHEMA public CASCADE" \
+    psql -q -o /dev/null -1 -v ON_ERROR_STOP=1 -c "SET client_min_messages = warning" -c "DROP SCHEMA public CASCADE" \
       -c "CREATE SCHEMA public AUTHORIZATION pg_database_owner" -c "GRANT USAGE ON SCHEMA public TO PUBLIC" \
       -f /backups/restore/restore.sql "$DATABASE_URL"'
 
@@ -112,14 +114,14 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backup \
   sh -c 'psql "$DATABASE_URL" -c "CREATE DATABASE restore_drill"'
 docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backup \
   sh -c 'pg_restore -f /backups/restore/restore.sql /backups/restore/vaalikone-<stamp>.dump &&
-    psql -q -1 -v ON_ERROR_STOP=1 -c "DROP SCHEMA public CASCADE" \
+    psql -q -o /dev/null -1 -v ON_ERROR_STOP=1 -c "SET client_min_messages = warning" -c "DROP SCHEMA public CASCADE" \
       -c "CREATE SCHEMA public AUTHORIZATION pg_database_owner" -c "GRANT USAGE ON SCHEMA public TO PUBLIC" \
       -f /backups/restore/restore.sql "${DATABASE_URL%/*}/restore_drill"'
 docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backup \
   sh -c 'psql "${DATABASE_URL%/*}/restore_drill" -c "CREATE TABLE drill_newer (candidate_id uuid REFERENCES candidates)"'
 docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backup \
   sh -c 'pg_restore -f /backups/restore/restore.sql /backups/restore/vaalikone-<stamp>.dump &&
-    psql -q -1 -v ON_ERROR_STOP=1 -c "DROP SCHEMA public CASCADE" \
+    psql -q -o /dev/null -1 -v ON_ERROR_STOP=1 -c "SET client_min_messages = warning" -c "DROP SCHEMA public CASCADE" \
       -c "CREATE SCHEMA public AUTHORIZATION pg_database_owner" -c "GRANT USAGE ON SCHEMA public TO PUBLIC" \
       -f /backups/restore/restore.sql "${DATABASE_URL%/*}/restore_drill"'
 
