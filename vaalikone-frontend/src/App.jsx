@@ -135,7 +135,7 @@ function ErrorBanner({ message, messages = [message], onRetry, scrollIntoView = 
       marginBottom: "20px",
     }}>
       {messages.length === 1 ? <span>{messages[0]}</span> : (
-        <div>{messages.map((m) => <div key={m}>{m}</div>)}</div>
+        <div>{messages.map((m, i) => <div key={i}>{m}</div>)}</div>
       )}
       {onRetry && (
         <button onClick={onRetry} style={{
@@ -859,9 +859,9 @@ function AdminView() {
     }
   }
 
-  // A rotation's errors are shown only once its refresh is done: an action
-  // started meanwhile clears the errors so far, and would take the rotation's
-  // own one with it (#226).
+  // A rotation's own error is shown at once and again once its refresh is
+  // done: an action started meanwhile clears the errors so far, and would take
+  // the rotation's with it (#226). The dedupe makes the second add a no-op.
   function addRotationErrors(...messages) {
     for (const message of messages) if (message) addError(message);
   }
@@ -875,6 +875,7 @@ function AdminView() {
         result = await api.rotateCandidateTokenAdmin(adminSecret, partyId, c.id, c.email);
       } catch (e) {
         const failure = errorText(e, t);
+        addError(failure);
         // The rotation may have taken effect even though its response was lost.
         addRotationErrors(failure, await refreshAfterRotation(partyId));
         return;
@@ -921,6 +922,7 @@ function AdminView() {
         setAllLinksRotated((prev) => ({ ...prev, [id]: rotated }));
       } catch (e) {
         failure = errorText(e, t);
+        addError(failure);
       }
       addRotationErrors(failure, await refreshAfterRotation(id));
     });

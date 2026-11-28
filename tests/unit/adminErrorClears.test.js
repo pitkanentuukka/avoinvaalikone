@@ -365,6 +365,8 @@ describe("every failure stays visible (#226)", () => {
     await click(t.adminShowCandidates);
     const rotation = button(view(), label())();
     await settle();
+    // Shown while the refresh still runs, not only after it.
+    expect(shownErrors()).toEqual([message]);
     await click(t.adminRotatePartyToken);
     failRefresh();
     await rotation;
