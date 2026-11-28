@@ -332,6 +332,8 @@ Integration tests use `supertest` and a mock database helper. Unit tests cover a
 
 The concurrency tests (`questionMergeConcurrency`, `orphanQuestionConcurrency`, `candidateRegistrationConcurrency`) require real PostgreSQL (16 or newer) and run in the E2E API CI job. To run them locally, set `TEST_DATABASE_URL` to a test database connection string and run `npm test -- --runInBand questionMergeConcurrency orphanQuestionConcurrency candidateRegistrationConcurrency`. They create and drop randomly named schemas, require schema creation permission, and skip when `TEST_DATABASE_URL` is unset. `candidateRegistrationConcurrency` applies the real migrations into its schemas and installs the `pgcrypto` extension in `public` if it is missing.
 
+`restoreRunbook` runs the restore command from `scripts/backup/restore.md` against real PostgreSQL in the same CI job (`TEST_DATABASE_URL=… npm test -- --runInBand restoreRunbook`). It runs the host's `pg_dump`, `pg_restore` and `psql`, which must be on `PATH` and match the server's major version, and it creates and drops randomly named databases and a role, so it needs CREATEDB and CREATEROLE.
+
 ---
 
 ## Rate Limiting
