@@ -184,7 +184,9 @@ function publicErrorMessage(status) {
 }
 
 app.use((err, req, res, next) => {
-  const status = err.status || 500;
+  // Only an error status is passed on; anything else is a server error, as in
+  // Express's own final handler.
+  const status = err.status >= 400 && err.status < 600 ? err.status : 500;
   // Express decode errors include the raw param (a bearer token) without
   // its route prefix, so URL-based redactTokens cannot mask that message.
   if (status >= 400 && status < 500) {

@@ -14,6 +14,7 @@ const db = require("../../src/db/pool");
 const ADMIN_SECRET = "test-admin-secret";
 const ORIGINAL_NODE_ENV = process.env.NODE_ENV;
 const ORIGINAL_ADMIN_SECRET = process.env.ADMIN_SECRET;
+const ORIGINAL_PUBLIC_HOST = process.env.PUBLIC_HOST;
 
 function restore(name, value) {
   if (value === undefined) delete process.env[name];
@@ -23,6 +24,8 @@ function restore(name, value) {
 function loadApp(nodeEnv) {
   restore("NODE_ENV", nodeEnv);
   process.env.ADMIN_SECRET = ADMIN_SECRET;
+  // Set in a developer's shell, it would redirect every production request.
+  delete process.env.PUBLIC_HOST;
   let app;
   jest.isolateModules(() => { app = require("../../src/index"); });
   return app;
@@ -34,6 +37,7 @@ afterEach(() => {
   consoleError.mockRestore();
   restore("NODE_ENV", ORIGINAL_NODE_ENV);
   restore("ADMIN_SECRET", ORIGINAL_ADMIN_SECRET);
+  restore("PUBLIC_HOST", ORIGINAL_PUBLIC_HOST);
   jest.clearAllMocks();
 });
 
@@ -71,6 +75,14 @@ describe.each([
     expect(res.status).toBe(500);
     expect(res.body).toEqual({ error: "Palvelinvirhe", detail: 'relation "parties" does not exist' });
   });
+});
+
+test.each([[302], [200], [700]])("an error carrying status %i is answered as a 500", async (status) => {
+  db.query.mockRejectedValueOnce(Object.assign(new Error("odd"), { status }));
+  const res = await request(loadApp("production"))
+    .get("/api/admin/parties").set("Authorization", `Bearer ${ADMIN_SECRET}`);
+  expect(res.status).toBe(500);
+  expect(res.body).toEqual({ error: "Palvelinvirhe" });
 });
 
 describe("in production", () => {
