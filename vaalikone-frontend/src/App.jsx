@@ -537,7 +537,12 @@ function AdminView() {
   const [linksQueued, setLinksQueued] = useState({});         // { [partyId]: { queued, withoutEmail } }
   const [linkRotated, setLinkRotated] = useState({});         // { [candidateId]: emailed } — this session's rotations
   const [allLinksRotated, setAllLinksRotated] = useState({}); // { [partyId]: count }
-  const [actionLoading, setActionLoading] = useState(null);
+  // Keys of the admin actions in flight, so one finishing doesn't clear
+  // another's spinner (#225). The ref is the guard, current even between
+  // renders, so a second click landing before the re-render is refused.
+  const actionBusyRef = useRef(null);
+  actionBusyRef.current ??= new Set();
+  const [actionBusy, setActionBusy] = useState(() => new Set());
   const [reviewState, setReviewState] = useState({}); // { [setId]: { [questionId]: { rejected, reason, duplicateOf } } }
   const [newQuestionText, setNewQuestionText] = useState({}); // { [setId]: string }
   const [mergeSelection, setMergeSelection] = useState([]); // questionIds selected in the merge tool
@@ -647,14 +652,17 @@ function AdminView() {
   // Every action clears the previous one's error when it starts, so an old
   // error never sits next to a later success (#212).
   async function adminAction(key, fn) {
-    setActionLoading(key);
+    if (actionBusyRef.current.has(key)) return;
+    actionBusyRef.current.add(key);
+    setActionBusy(new Set(actionBusyRef.current));
     setError(null);
     try {
       await fn();
     } catch (e) {
       setError(errorText(e, t));
     } finally {
-      setActionLoading(null);
+      actionBusyRef.current.delete(key);
+      setActionBusy(new Set(actionBusyRef.current));
     }
   }
 
@@ -1080,8 +1088,8 @@ function AdminView() {
                 </div>
               </div>
               <div style={{ display: "flex", gap: "8px", flexShrink: 0 }}>
-                <Button variant="primary" size="sm" onClick={() => finalizeReview(qs.id, qs.questions || [])} loading={actionLoading === qs.id}>{t.adminFinalizeReview}</Button>
-                <Button variant="danger" size="sm" onClick={() => deleteSet(qs.id)} loading={actionLoading === qs.id}>{t.adminDelete}</Button>
+                <Button variant="primary" size="sm" onClick={() => finalizeReview(qs.id, qs.questions || [])} loading={actionBusy.has(qs.id)}>{t.adminFinalizeReview}</Button>
+                <Button variant="danger" size="sm" onClick={() => deleteSet(qs.id)} loading={actionBusy.has(qs.id)}>{t.adminDelete}</Button>
               </div>
             </div>
           </Card>
@@ -1105,7 +1113,7 @@ function AdminView() {
                       <div key={q.id} style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px", padding: "8px 10px", background: palette.surfaceAlt, borderRadius: "6px" }}>
                         <span style={{ color: palette.textLight, fontSize: "13px", flexShrink: 0 }}>{i + 1}.</span>
                         <span style={{ fontSize: "13px", flex: 1 }}>{q.statement}</span>
-                        <Button variant="danger" size="sm" onClick={() => removeQuestion(qs.id, q.id)} loading={actionLoading === `q-${q.id}`}>{t.adminDeleteQuestion}</Button>
+                        <Button variant="danger" size="sm" onClick={() => removeQuestion(qs.id, q.id)} loading={actionBusy.has(`q-${q.id}`)}>{t.adminDeleteQuestion}</Button>
                       </div>
                     ))}
                   </div>
@@ -1118,12 +1126,12 @@ function AdminView() {
                       rows={2}
                       style={{ flex: 1, fontSize: "13px", padding: "6px 8px", borderRadius: "4px", border: `1px solid ${palette.border}`, resize: "vertical", fontFamily: "inherit" }}
                     />
-                    <Button variant="secondary" size="sm" onClick={() => addQuestion(qs.id)} disabled={!newQuestionText[qs.id]?.trim()} loading={actionLoading === `add-${qs.id}`}>{t.adminAddQuestion}</Button>
+                    <Button variant="secondary" size="sm" onClick={() => addQuestion(qs.id)} disabled={!newQuestionText[qs.id]?.trim()} loading={actionBusy.has(`add-${qs.id}`)}>{t.adminAddQuestion}</Button>
                   </div>
                 </div>
                 <div style={{ display: "flex", gap: "8px", flexShrink: 0 }}>
-                  <Button variant="primary" size="sm" onClick={() => publishSet(qs.id)} loading={actionLoading === qs.id}>{t.adminPublish}</Button>
-                  <Button variant="danger" size="sm" onClick={() => deleteSet(qs.id)} loading={actionLoading === qs.id}>{t.adminDelete}</Button>
+                  <Button variant="primary" size="sm" onClick={() => publishSet(qs.id)} loading={actionBusy.has(qs.id)}>{t.adminPublish}</Button>
+                  <Button variant="danger" size="sm" onClick={() => deleteSet(qs.id)} loading={actionBusy.has(qs.id)}>{t.adminDelete}</Button>
                 </div>
               </div>
             </Card>
@@ -1143,7 +1151,7 @@ function AdminView() {
               </div>
               <div style={{ display: "flex", gap: "8px", flexShrink: 0, alignItems: "center" }}>
                 <Badge color="green">{t.adminPublished}</Badge>
-                <Button variant="danger" size="sm" onClick={() => deleteSet(qs.id)} loading={actionLoading === qs.id}>{t.adminDelete}</Button>
+                <Button variant="danger" size="sm" onClick={() => deleteSet(qs.id)} loading={actionBusy.has(qs.id)}>{t.adminDelete}</Button>
               </div>
             </div>
           </Card>
@@ -1174,7 +1182,7 @@ function AdminView() {
               );
             })}
             <div style={{ marginTop: "12px", display: "flex", alignItems: "center", gap: "12px" }}>
-              <Button variant="primary" size="sm" onClick={doMerge} disabled={mergeSelection.length < 2 || !mergeKeepId} loading={actionLoading === "merge"}>{t.adminMergeButton}</Button>
+              <Button variant="primary" size="sm" onClick={doMerge} disabled={mergeSelection.length < 2 || !mergeKeepId} loading={actionBusy.has("merge")}>{t.adminMergeButton}</Button>
               {mergeSelection.length < 2 && <span style={{ fontSize: "12px", color: palette.textLight }}>{t.adminMergeHint}</span>}
             </div>
           </Card>
@@ -1191,7 +1199,7 @@ function AdminView() {
                   <span style={{ fontWeight: 600 }}>{qs.title}</span>
                   <span style={{ color: palette.textMuted, fontSize: "13px", marginLeft: "8px" }}>— {qs.ngoName}</span>
                 </div>
-                <Button variant="danger" size="sm" onClick={() => deleteSet(qs.id)} loading={actionLoading === qs.id}>{t.adminDelete}</Button>
+                <Button variant="danger" size="sm" onClick={() => deleteSet(qs.id)} loading={actionBusy.has(qs.id)}>{t.adminDelete}</Button>
               </div>
             </Card>
           ))}
@@ -1209,14 +1217,14 @@ function AdminView() {
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                 <code style={{ background: palette.surfaceAlt, padding: "4px 10px", borderRadius: "4px", fontSize: "13px", fontFamily: "monospace", color: palette.accent, fontWeight: 600, border: `1px solid ${palette.border}` }}>{p.token}</code>
-                <Button variant="danger" size="sm" onClick={() => removeParty(p.id)} loading={actionLoading === p.id}>{t.adminDelete}</Button>
+                <Button variant="danger" size="sm" onClick={() => removeParty(p.id)} loading={actionBusy.has(p.id)}>{t.adminDelete}</Button>
               </div>
             </div>
             <div style={{ display: "flex", gap: "8px", marginTop: "10px", flexWrap: "wrap" }}>
               <Button variant="ghost" size="sm" onClick={() => togglePartyCandidates(p.id)} disabled={!partyCandidates[p.id] && p.id in linkBusy} loading={linkBusy[p.id] === "candidates"}>
                 {partyCandidates[p.id] ? t.adminHideCandidates : t.adminShowCandidates}
               </Button>
-              <Button variant="ghost" size="sm" onClick={() => rotatePartyToken(p.id)} loading={actionLoading === `rotate-${p.id}`}>{t.adminRotatePartyToken}</Button>
+              <Button variant="ghost" size="sm" onClick={() => rotatePartyToken(p.id)} loading={actionBusy.has(`rotate-${p.id}`)}>{t.adminRotatePartyToken}</Button>
             </div>
             {partyCandidates[p.id] && (
               <div style={{ marginTop: "12px", borderTop: `1px solid ${palette.border}`, paddingTop: "12px" }}>
@@ -1263,7 +1271,7 @@ function AdminView() {
           <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
             <div style={{ flex: 1, minWidth: "180px" }}><Input value={newPartyName} onChange={setNewPartyName} placeholder={t.adminPartyNamePlaceholder} ariaLabel={t.adminPartyNamePlaceholder} /></div>
             <div style={{ flex: 1, minWidth: "180px" }}><Input value={newPartyEmail} onChange={setNewPartyEmail} placeholder={t.adminPartyEmailPlaceholder} ariaLabel={t.adminPartyEmailPlaceholder} type="email" /></div>
-            <Button onClick={addParty} disabled={!newPartyName.trim()} loading={actionLoading === "new-party"}>{t.adminAdd}</Button>
+            <Button onClick={addParty} disabled={!newPartyName.trim()} loading={actionBusy.has("new-party")}>{t.adminAdd}</Button>
           </div>
         </Card>
       </section>
