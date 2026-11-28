@@ -536,6 +536,7 @@ function AdminView() {
   const [partyCandidates, setPartyCandidates] = useState({}); // { [partyId]: candidates } for expanded parties
   const [linksQueued, setLinksQueued] = useState({});         // { [partyId]: { queued, withoutEmail } }
   const [linkRotated, setLinkRotated] = useState({});         // { [candidateId]: emailed } — this session's rotations
+  const [emailStatusStale, setEmailStatusStale] = useState({}); // { [candidateId]: true } — the list wasn't re-read after a rotation (#227)
   const [allLinksRotated, setAllLinksRotated] = useState({}); // { [partyId]: count }
   const [actionLoading, setActionLoading] = useState(null);
   const [reviewState, setReviewState] = useState({}); // { [setId]: { [questionId]: { rejected, reason, duplicateOf } } }
@@ -785,7 +786,17 @@ function AdminView() {
       try {
         const candidates = await api.getPartyCandidatesAdmin(adminSecret, id);
         setPartyCandidates((prev) => ({ ...prev, [id]: candidates }));
+        emailStatusRead(candidates);
       } catch (e) { setError(errorText(e, t)); }
+    });
+  }
+
+  // These candidates' email status was just read, so none of it is stale.
+  function emailStatusRead(candidates) {
+    setEmailStatusStale((prev) => {
+      const next = { ...prev };
+      for (const c of candidates) delete next[c.id];
+      return next;
     });
   }
 
@@ -842,6 +853,7 @@ function AdminView() {
     try {
       const candidates = await api.getPartyCandidatesAdmin(adminSecret, partyId);
       setPartyCandidates((prev) => (prev[partyId] ? { ...prev, [partyId]: candidates } : prev));
+      emailStatusRead(candidates);
     } catch {
       closePartyCandidates(partyId);
       setError(t.adminLinksRotatedRefreshFailed);
@@ -867,11 +879,15 @@ function AdminView() {
       const withToken = (list) => list.map((x) => (x.id === c.id ? { ...x, token } : x));
       setPartyCandidates((prev) => (prev[partyId] ? { ...prev, [partyId]: withToken(prev[partyId]) } : prev));
       setLinkRotated((prev) => ({ ...prev, [c.id]: emailed }));
-      // Refresh for the email status; on failure keep the list as updated above.
+      // Refresh for the email status. On failure keep the list as updated
+      // above, but say its email status is the one from before the rotation.
       try {
         const candidates = await api.getPartyCandidatesAdmin(adminSecret, partyId);
         setPartyCandidates((prev) => (prev[partyId] ? { ...prev, [partyId]: candidates } : prev));
-      } catch { /* keep the list as updated above */ }
+        emailStatusRead(candidates);
+      } catch {
+        setEmailStatusStale((prev) => ({ ...prev, [c.id]: true }));
+      }
     });
   }
 
@@ -1232,6 +1248,12 @@ function AdminView() {
                     <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap", marginTop: "6px" }}>
                       <Button variant="ghost" size="sm" onClick={() => rotateCandidateLink(p.id, c)} disabled={p.id in linkBusy} loading={linkBusy[p.id] === `rotate-candidate-${c.id}`}>{t.adminRotateCandidateLink}</Button>
                       {c.id in linkRotated && <span style={{ fontSize: "12px", color: palette.textMuted }}>{t.adminCandidateLinkRotated(linkRotated[c.id])}</span>}
+                      {c.email && emailStatusStale[c.id] && (
+                        <>
+                          <span style={{ fontSize: "12px", color: palette.textMuted }}>{t.adminEmailStatusStale}</span>
+                          <Button variant="ghost" size="sm" onClick={() => loadPartyCandidates(p.id)} disabled={p.id in linkBusy} loading={linkBusy[p.id] === "candidates"}>{t.adminRefreshEmailStatus}</Button>
+                        </>
+                      )}
                     </div>
                   </div>
                 ))}
