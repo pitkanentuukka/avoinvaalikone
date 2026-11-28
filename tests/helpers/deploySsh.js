@@ -100,4 +100,24 @@ function acceptedHostKeys(handle) {
   return keys;
 }
 
-module.exports = { SERVER, hostKeyLine, runSetupSsh, sshOptions, acceptedHostKeys };
+// The ssh arguments each step that connects passes on its command line
+// (options there beat the config), by step name.
+const CONNECTING_STEPS = {
+  "Rsync to server": (run) => run.match(/-e "ssh\b([^"]*)"[\s\S]*\broot@80\.69\.172\.220:/)?.[1],
+  "Build & restart services": (run) => run.match(/\bssh\b(.*?)\broot@80\.69\.172\.220\b/)?.[1],
+};
+
+function connectingStepArgs(name) {
+  const args = CONNECTING_STEPS[name](step("deploy", name).run);
+  return args === undefined ? undefined : args.trim().split(/\s+/).filter(Boolean);
+}
+
+module.exports = {
+  SERVER,
+  hostKeyLine,
+  runSetupSsh,
+  sshOptions,
+  acceptedHostKeys,
+  CONNECTING_STEPS: Object.keys(CONNECTING_STEPS),
+  connectingStepArgs,
+};

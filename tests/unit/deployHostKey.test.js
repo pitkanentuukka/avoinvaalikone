@@ -6,7 +6,15 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { step } = require("../helpers/workflow");
-const { SERVER, hostKeyLine, runSetupSsh, sshOptions, acceptedHostKeys } = require("../helpers/deploySsh");
+const {
+  SERVER,
+  hostKeyLine,
+  runSetupSsh,
+  sshOptions,
+  acceptedHostKeys,
+  CONNECTING_STEPS,
+  connectingStepArgs,
+} = require("../helpers/deploySsh");
 
 let keys;
 let real;
@@ -145,18 +153,13 @@ describe("Set up SSH", () => {
 // Options on the command line beat the config, so the commands that connect
 // must not loosen the check either.
 describe("the steps that connect", () => {
-  const sshArgs = {
-    "Rsync to server": (run) => run.match(/-e "ssh\b([^"]*)"[\s\S]*\broot@80\.69\.172\.220:/)?.[1],
-    "Build & restart services": (run) => run.match(/\bssh\b(.*?)\broot@80\.69\.172\.220\b/)?.[1],
-  };
-
-  test.each(Object.keys(sshArgs))("%s checks the pinned key", (name) => {
-    const args = sshArgs[name](step("deploy", name).run);
+  test.each(CONNECTING_STEPS)("%s checks the pinned key", (name) => {
+    const args = connectingStepArgs(name);
     expect(args).toBeDefined();
     const h = runSetupSsh({ vars: { SSH_KNOWN_HOSTS: real } });
     try {
       expect(h.result.status).toBe(0);
-      const options = sshOptions(h, { args: args.trim().split(/\s+/).filter(Boolean) });
+      const options = sshOptions(h, { args });
       expect(options.stricthostkeychecking).toBe("true");
       expect(options.userknownhostsfile).toEqual([path.join(h.dir, ".ssh/known_hosts_deploy")]);
       expect(options.globalknownhostsfile).toEqual(["none"]);
