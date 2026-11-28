@@ -323,19 +323,52 @@ describe("every failure stays visible (#226)", () => {
     expect(shownErrors()).toEqual(["Vaihto epäonnistui", t.adminLinksRotatedRefreshFailed]);
   });
 
-  test("the same message twice is shown once", async () => {
-    let failRotation;
+  test("the same message twice is shown once, next to a different one", async () => {
+    let failRotation, failCreate;
     await login({
       [`POST /api/admin/parties/${PARTY_ID}/token`]: [
         () => new Promise((resolve) => { failRotation = () => resolve(json(503)); }),
       ],
+      "POST /api/admin/parties": [
+        () => new Promise((resolve) => { failCreate = () => resolve(json(500, { error: "Lisäys epäonnistui" })); }),
+      ],
       [`DELETE /api/admin/parties/${PARTY_ID}`]: [() => json(503)],
     });
     const rotation = button(view(), t.adminRotatePartyToken)();
+    [...elements(view())].find((el) => el.props.placeholder === t.adminPartyNamePlaceholder).props.onChange("Uusi");
+    const creation = button(view(), t.adminAdd)();
     await click(t.adminDelete);
     failRotation();
     await rotation;
-    expect(shownErrors()).toEqual([t.requestFailed(503)]);
+    failCreate();
+    await creation;
+    expect(shownErrors()).toEqual([t.requestFailed(503), "Lisäys epäonnistui"]);
+  });
+
+  // An action started while the rotation's list refresh runs clears the
+  // errors so far: the rotation's own error must not be among them.
+  test.each([
+    ["one candidate's link", `candidates/${CANDIDATE_ID}/token`, () => t.adminRotateCandidateLink,
+      () => json(409, { error: "Ehdokkaan sähköpostiosoite on muuttunut" }), "Ehdokkaan sähköpostiosoite on muuttunut"],
+    ["every link", "candidate-tokens", () => t.adminRotateAllLinks,
+      () => json(500, { error: "Vaihto epäonnistui" }), "Vaihto epäonnistui"],
+  ])("rotating %s: its error survives an action started during the refresh", async (_, route, label, failure, message) => {
+    let failRefresh;
+    await login({
+      [`GET /api/admin/parties/${PARTY_ID}/candidates`]: [
+        () => json(200, [candidate("b".repeat(48), "eeva@example.fi")]),
+        () => new Promise((resolve) => { failRefresh = () => resolve(json(500, { error: "Lataus epäonnistui" })); }),
+      ],
+      [`POST /api/admin/parties/${PARTY_ID}/${route}`]: [failure],
+      [`POST /api/admin/parties/${PARTY_ID}/token`]: [() => json(200, party)],
+    });
+    await click(t.adminShowCandidates);
+    const rotation = button(view(), label())();
+    await settle();
+    await click(t.adminRotatePartyToken);
+    failRefresh();
+    await rotation;
+    expect(shownErrors()).toEqual([message, t.adminLinksRotatedRefreshFailed]);
   });
 
   test("the next action clears them all as it starts", async () => {

@@ -846,15 +846,24 @@ function AdminView() {
   // Re-read the party's candidates after a rotation, without taking over the
   // spinner or reopening a list the admin closed meanwhile. If that fails,
   // close the list: the links on screen may have been revoked, and handing
-  // one over would give the candidate a dead link.
+  // one over would give the candidate a dead link. Returns the failure's
+  // message, for the caller to show after its own error (#226).
   async function refreshAfterRotation(partyId) {
     try {
       const candidates = await api.getPartyCandidatesAdmin(adminSecret, partyId);
       setPartyCandidates((prev) => (prev[partyId] ? { ...prev, [partyId]: candidates } : prev));
+      return null;
     } catch {
       closePartyCandidates(partyId);
-      addError(t.adminLinksRotatedRefreshFailed);
+      return t.adminLinksRotatedRefreshFailed;
     }
+  }
+
+  // A rotation's errors are shown only once its refresh is done: an action
+  // started meanwhile clears the errors so far, and would take the rotation's
+  // own one with it (#226).
+  function addRotationErrors(...messages) {
+    for (const message of messages) if (message) addError(message);
   }
 
   async function rotateCandidateLink(partyId, c) {
@@ -865,9 +874,9 @@ function AdminView() {
       try {
         result = await api.rotateCandidateTokenAdmin(adminSecret, partyId, c.id, c.email);
       } catch (e) {
-        addError(errorText(e, t));
+        const failure = errorText(e, t);
         // The rotation may have taken effect even though its response was lost.
-        await refreshAfterRotation(partyId);
+        addRotationErrors(failure, await refreshAfterRotation(partyId));
         return;
       }
       const { token, emailed } = result;
@@ -906,13 +915,14 @@ function AdminView() {
         delete next[id];
         return next;
       });
+      let failure = null;
       try {
         const { rotated } = await api.rotatePartyCandidateTokens(adminSecret, id);
         setAllLinksRotated((prev) => ({ ...prev, [id]: rotated }));
       } catch (e) {
-        addError(errorText(e, t));
+        failure = errorText(e, t);
       }
-      await refreshAfterRotation(id);
+      addRotationErrors(failure, await refreshAfterRotation(id));
     });
   }
 
