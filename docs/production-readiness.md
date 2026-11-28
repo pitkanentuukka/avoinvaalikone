@@ -278,7 +278,9 @@ email, so production can't run without a working SMTP provider.
   otherwise 587. Likewise an `SMTP_MAX_CONNECTIONS` that isn't a positive
   integer is ignored with a warning and the pool uses 3. The pool is per
   backend process, so the 3 backend replicas open up to 3 × `SMTP_MAX_CONNECTIONS`
-  connections: size it to the provider's limit divided by 3. In production it also warns, to the log and Sentry, about
+  connections: size it to the provider's limit divided by 3, rounded down
+  (limit 5 → 1). A limit below 3 can't be met with 3 replicas. The startup
+  check above opens one more short connection per replica, outside the pool. In production it also warns, to the log and Sentry, about
   settings that pass the compose checks but can't work: dev values copied from
   `.env.example` (`SMTP_HOST` `localhost`/`mailpit`, `SMTP_PORT` 1025, also
   written ` 1025` or `01025`, an
